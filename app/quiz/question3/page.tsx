@@ -1,0 +1,47 @@
+export default function QuizQuestion3Page() {
+  return (
+    <main className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <header className="bg-white py-4 flex justify-center border-b">
+        <div className="text-3xl font-bold tracking-widest">SHEIN</div>
+      </header>
+
+      {/* Quiz Content */}
+      <div className="flex-1 flex items-center justify-center p-4 py-16">
+        <div className="bg-white rounded-lg shadow-md p-8 max-w-md w-full">
+          <h1 className="text-2xl font-bold mb-8">Qual é a sua Renda Mensal?</h1>
+
+          <div className="flex flex-col gap-3">
+            <a
+              href="/quiz/question4"
+              className="bg-black text-white rounded-lg p-4 text-center font-medium hover:bg-black/90 transition-colors"
+            >
+              Até R$ 1.000
+            </a>
+
+            <a
+              href="/quiz/question4"
+              className="bg-black text-white rounded-lg p-4 text-center font-medium hover:bg-black/90 transition-colors"
+            >
+              Entre R$ 1.000 e R$ 2.000
+            </a>
+
+            <a
+              href="/quiz/question4"
+              className="bg-black text-white rounded-lg p-4 text-center font-medium hover:bg-black/90 transition-colors"
+            >
+              Entre R$ 2.000 e R$ 4.000
+            </a>
+
+            <a
+              href="/quiz/question4"
+              className="bg-black text-white rounded-lg p-4 text-center font-medium hover:bg-black/90 transition-colors"
+            >
+              Acima de R$ 4.000
+            </a>
+          </div>
+        </div>
+      </div>
+    </main>
+  )
+}
