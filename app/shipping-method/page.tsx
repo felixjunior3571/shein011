@@ -43,27 +43,34 @@ export default function ShippingMethodPage() {
     }
   }, [])
 
+  // Métodos de envio com preços corretos
   const shippingMethods = [
     {
       id: "sedex",
       name: "SEDEX",
       duration: "1 dia útil",
       price: "R$ 34,90",
+      numericPrice: 34.9,
       icon: Package,
+      paymentUrl: "/payment/sedex",
     },
     {
       id: "express",
       name: "EXPRESS",
       duration: "5 dias úteis",
       price: "R$ 29,58",
+      numericPrice: 29.58,
       icon: Truck,
+      paymentUrl: "/payment/express",
     },
     {
       id: "pac",
       name: "PAC",
       duration: "10 dias úteis",
       price: "R$ 27,97",
+      numericPrice: 27.97,
       icon: Gift,
+      paymentUrl: "/payment/pac",
     },
   ]
 
@@ -73,6 +80,15 @@ export default function ShippingMethodPage() {
     setSelectedMethod(methodId)
     setIsGeneratingRate(true)
     setIsRateGenerated(false)
+
+    // Encontra o método selecionado
+    const method = shippingMethods.find((m) => m.id === methodId)
+
+    if (method) {
+      // Salva o método completo no localStorage
+      localStorage.setItem("selectedShippingMethod", JSON.stringify(method))
+      console.log("Método salvo:", method) // Debug log
+    }
 
     // Simula o tempo de geração da taxa
     setTimeout(() => {
@@ -135,7 +151,7 @@ export default function ShippingMethodPage() {
               <div className="border-b pb-3 mb-3">
                 <p className="font-medium">Método de envio:</p>
                 <p className="text-sm font-semibold">{selectedMethodDetails?.name}</p>
-                <p className="text-sm">{selectedMethodDetails?.price}</p>
+                <p className="text-sm font-bold text-green-600">{selectedMethodDetails?.price}</p>
                 <p className="text-sm">{selectedMethodDetails?.duration}</p>
                 <p className="text-sm text-gray-600">Taxa única de envio • Rastreamento online</p>
               </div>
@@ -217,7 +233,7 @@ export default function ShippingMethodPage() {
                         </div>
                       </div>
                       <div className="text-right">
-                        <p className="font-semibold text-lg">{method.price}</p>
+                        <p className="font-semibold text-lg text-green-600">{method.price}</p>
                       </div>
                     </div>
                   </div>
