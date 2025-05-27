@@ -3,7 +3,6 @@
 import type React from "react"
 
 import { useState } from "react"
-import Image from "next/image"
 import { useRouter } from "next/navigation"
 
 interface AddressData {
@@ -148,12 +147,7 @@ export default function DeliveryAddressPage() {
   ]
 
   return (
-    <main className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white py-4 flex justify-center border-b">
-        <Image src="/shein-logo.png" alt="SHEIN" width={120} height={40} priority />
-      </header>
-
+    <main className="min-h-full bg-gray-50">
       <div className="max-w-md mx-auto p-4 py-8 sm:p-6 sm:py-12">
         <div className="bg-white rounded-lg shadow-md p-6">
           {/* Title */}

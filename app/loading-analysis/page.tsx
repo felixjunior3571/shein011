@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import Image from "next/image"
 
 export default function LoadingAnalysisPage() {
   const router = useRouter()
@@ -52,12 +51,7 @@ export default function LoadingAnalysisPage() {
   }, [router, steps.length])
 
   return (
-    <main className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white py-4 flex justify-center border-b">
-        <Image src="/shein-logo.png" alt="SHEIN" width={120} height={40} priority />
-      </header>
-
+    <main className="min-h-full bg-gray-50">
       {/* Loading Content */}
       <div className="flex-1 flex items-center justify-center p-4 py-16">
         <div className="bg-white rounded-lg shadow-md p-8 max-w-md w-full">
@@ -133,21 +127,20 @@ export default function LoadingAnalysisPage() {
               <div className="flex justify-between items-end">
                 {/* Card Logo - Using the provided image */}
                 <div className="h-6 w-12 sm:h-8 sm:w-16 relative">
-                  <Image
+                  <img
                     src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/image-EHbxxtPKQaYDDthNTeh5SHv8qQmpVM.png"
                     alt="Bandeira do cartão"
-                    fill
-                    style={{ objectFit: "contain" }}
+                    className="w-full h-full object-contain"
                   />
                 </div>
 
-                {/* SHEIN logo */}
+                {/* SHEIN Logo - White version */}
                 <div className="h-4 w-12 sm:h-6 sm:w-16 relative">
-                  <Image
-                    src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/image-Jvn6YKdyIgVtezbSZjrTlgihNrlP0U.png"
+                  <img
+                    src="/shein-card-logo.png"
                     alt="SHEIN"
-                    fill
-                    style={{ objectFit: "contain" }}
+                    className="w-full h-full object-contain"
+                    style={{ filter: "brightness(0) invert(1)" }}
                   />
                 </div>
               </div>

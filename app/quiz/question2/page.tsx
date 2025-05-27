@@ -1,11 +1,6 @@
 export default function QuizQuestion2Page() {
   return (
-    <main className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white py-4 flex justify-center border-b">
-        <div className="text-3xl font-bold tracking-widest">SHEIN</div>
-      </header>
-
+    <main className="min-h-full bg-gray-50">
       {/* Quiz Content */}
       <div className="flex-1 flex items-center justify-center p-4 py-16">
         <div className="bg-white rounded-lg shadow-md p-8 max-w-md w-full">

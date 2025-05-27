@@ -1,11 +1,6 @@
 export default function QuizPage() {
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
-      {/* Header */}
-      <header className="bg-white py-4 flex justify-center border-b flex-shrink-0">
-        <div className="text-2xl sm:text-3xl font-bold tracking-widest">SHEIN</div>
-      </header>
-
+    <div className="min-h-full bg-gray-50 flex flex-col">
       {/* Quiz Content */}
       <div className="flex-1 p-4 pt-8">
         <div className="bg-white rounded-lg shadow-md p-6 w-full max-w-md mx-auto">

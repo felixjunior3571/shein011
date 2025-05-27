@@ -1,7 +1,6 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import Image from "next/image"
 import { Clock, Lock, ChevronDown, ChevronUp } from "lucide-react"
 
 interface ShippingMethod {
@@ -139,7 +138,7 @@ export default function FinalConfirmationPage() {
 
   if (!selectedMethod) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-full bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-black mx-auto mb-4"></div>
           <p>Carregando...</p>
@@ -149,14 +148,7 @@ export default function FinalConfirmationPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white py-4 flex justify-center border-b">
-        <div className="relative w-[120px] h-[40px]">
-          <Image src="/shein-logo.png" alt="SHEIN" fill style={{ objectFit: "contain" }} priority />
-        </div>
-      </header>
-
+    <div className="min-h-full bg-gray-50">
       {/* Content */}
       <div className="p-4 pb-8">
         <div className="max-w-md mx-auto space-y-4">
@@ -173,11 +165,10 @@ export default function FinalConfirmationPage() {
               <div className="flex justify-between items-start mb-4">
                 <p className="text-xs">Cartão Virtual</p>
                 <div className="h-4 w-8 relative flex-shrink-0">
-                  <Image
+                  <img
                     src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/image-PxJG3d4b4NVb0wSl1Px3lndoiV1rxJ.png"
                     alt="Logo do cartão"
-                    fill
-                    style={{ objectFit: "contain" }}
+                    className="w-full h-full object-contain"
                   />
                 </div>
               </div>

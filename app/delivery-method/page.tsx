@@ -1,15 +1,9 @@
-import Image from "next/image"
 import Link from "next/link"
 import { Truck, Building, MapPin } from "lucide-react"
 
 export default function DeliveryMethodPage() {
   return (
-    <main className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white py-4 flex justify-center border-b">
-        <Image src="/shein-logo.png" alt="SHEIN" width={120} height={40} priority />
-      </header>
-
+    <main className="min-h-full bg-gray-50">
       <div className="max-w-md mx-auto p-6 py-16">
         <div className="bg-white rounded-lg shadow-md p-6">
           {/* Title */}
@@ -46,14 +40,14 @@ export default function DeliveryMethodPage() {
                   <Building className="w-12 h-12 text-gray-700" />
                 </div>
                 <h3 className="text-lg font-semibold mb-2">Retirada em Agência</h3>
-                <p className="text-gray-600 text-sm">Retire seu cartão em uma de nossas agências Shein</p>
+                <p className="text-gray-600 text-sm">Retire seu cartão em uma de nossas agências</p>
               </div>
             </div>
           </div>
 
           {/* Agency Information */}
           <div className="text-center">
-            <h3 className="text-lg font-semibold mb-3">Nossas Agências Shein</h3>
+            <h3 className="text-lg font-semibold mb-3">Nossas Agências</h3>
 
             <div className="mb-4">
               <p className="font-medium text-gray-800 mb-3">Agência Central</p>

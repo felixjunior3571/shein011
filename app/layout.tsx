@@ -1,7 +1,7 @@
 import type React from "react"
 import type { Metadata } from "next"
 import { Inter } from "next/font/google"
-import { Footer } from "@/components/footer"
+import Image from "next/image"
 import "./globals.css"
 
 const inter = Inter({ subsets: ["latin"] })
@@ -20,9 +20,23 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="pt-BR">
-      <body className={inter.className}>
-        {children}
-        <Footer />
+      <body className={`${inter.className} flex flex-col min-h-screen`}>
+        {/* Header fixo no topo com logo */}
+        <header className="fixed top-0 left-0 right-0 z-50 bg-white py-4 border-b shadow-sm">
+          <div className="flex justify-center">
+            <div className="relative w-[120px] h-[40px] sm:w-[140px] sm:h-[45px] md:w-[160px] md:h-[50px]">
+              <Image src="/shein-header-logo.png" alt="SHEIN" fill style={{ objectFit: "contain" }} priority />
+            </div>
+          </div>
+        </header>
+
+        {/* Conteúdo principal com espaçamento para header e footer */}
+        <main className="flex-1 pt-20 pb-16">{children}</main>
+
+        {/* Footer fixo na parte inferior */}
+        <footer className="fixed bottom-0 left-0 right-0 z-50 bg-gray-100 py-3 text-center text-gray-600 text-sm border-t">
+          <div className="container mx-auto px-4">Copyright © 2025 Shein. Todos os direitos reservados.</div>
+        </footer>
       </body>
     </html>
   )

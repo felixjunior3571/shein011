@@ -1,7 +1,6 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import Image from "next/image"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Package, Truck, Gift, CheckCircle } from "lucide-react"
 
@@ -105,12 +104,7 @@ export default function ShippingMethodPage() {
   const selectedMethodDetails = shippingMethods.find((method) => method.id === selectedMethod)
 
   return (
-    <main className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white py-4 flex justify-center border-b">
-        <Image src="/shein-logo.png" alt="SHEIN" width={120} height={40} priority />
-      </header>
-
+    <main className="min-h-full bg-gray-50">
       <div className="max-w-md mx-auto p-4 py-8 sm:p-6 sm:py-12">
         {isGeneratingRate ? (
           // Tela de carregamento

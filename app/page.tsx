@@ -21,15 +21,6 @@ export default function Home() {
       {/* Overlay transparente para capturar cliques */}
       <div className="fixed inset-0 z-40 cursor-pointer" onClick={handleBackgroundClick}></div>
 
-      {/* Header */}
-      <header className="relative z-50 bg-white py-4 flex justify-center border-b">
-        <Link href="/" className="flex items-center">
-          <div className="relative w-[120px] h-[40px]">
-            <Image src="/shein-logo.png" alt="SHEIN" fill style={{ objectFit: "contain" }} priority />
-          </div>
-        </Link>
-      </header>
-
       {/* Hero Section */}
       <section className="relative h-[450px] sm:h-[500px] lg:h-[600px] flex items-center justify-center text-white overflow-hidden">
         <div className="absolute inset-0 z-0">

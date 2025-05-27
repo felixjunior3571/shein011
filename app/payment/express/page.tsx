@@ -1,7 +1,6 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import Image from "next/image"
 import { Clock, Lock, Truck } from "lucide-react"
 
 export default function ExpressPaymentPage() {
@@ -34,14 +33,7 @@ export default function ExpressPaymentPage() {
   const EXPRESS_PRICE = "R$ 29,58"
 
   return (
-    <main className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white py-4 flex justify-center border-b">
-        <div className="relative w-[120px] h-[40px]">
-          <Image src="/shein-logo.png" alt="SHEIN" fill style={{ objectFit: "contain" }} priority />
-        </div>
-      </header>
-
+    <main className="min-h-full bg-gray-50">
       <div className="max-w-md mx-auto p-4 py-8">
         <div className="bg-white rounded-lg shadow-md p-6">
           {/* Method Selected */}

@@ -30,12 +30,7 @@ export default function ChooseCardDesignPage() {
   ]
 
   return (
-    <main className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white py-4 flex justify-center border-b">
-        <Image src="/shein-logo.png" alt="SHEIN" width={120} height={40} priority />
-      </header>
-
+    <main className="min-h-full bg-gray-50">
       <div className="max-w-md mx-auto p-6 py-16">
         <div className="bg-white rounded-lg shadow-md p-6">
           {/* Title */}
@@ -79,7 +74,7 @@ export default function ChooseCardDesignPage() {
                 <div className="h-6 w-16 relative">
                   <Image
                     src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/image-Jvn6YKdyIgVtezbSZjrTlgihNrlP0U.png"
-                    alt="SHEIN"
+                    alt="Logo"
                     fill
                     style={{ objectFit: "contain" }}
                   />
