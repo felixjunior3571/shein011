@@ -4,9 +4,7 @@ export default function LimitExplanationPage() {
   return (
     <main className="min-h-screen bg-gray-50">
       {/* Header */}
-      <header className="bg-white py-4 flex justify-center border-b">
-        <div className="text-3xl font-bold tracking-widest">SHEIN</div>
-      </header>
+      {/* Header removed as it's now in the global layout */}
 
       <div className="max-w-md mx-auto p-6 py-16">
         <div className="bg-white rounded-lg shadow-md p-6">
