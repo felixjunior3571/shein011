@@ -6,14 +6,32 @@ import Image from "next/image"
 import { Shield, Clock, CreditCard, HelpCircle, Lock, FileCheck } from "lucide-react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
+import { usePageTracking, useTracking } from "@/hooks/use-tracking"
 
 export default function Home() {
   const router = useRouter()
+  const { trackEvent } = useTracking()
+
+  // Rastreia a página inicial
+  usePageTracking("home")
 
   const handleBackgroundClick = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) {
+      trackEvent({
+        event: "cta_click",
+        location: "background_click",
+        page: "home",
+      })
       router.push("/quiz")
     }
+  }
+
+  const handleCtaClick = () => {
+    trackEvent({
+      event: "cta_click",
+      location: "main_button",
+      page: "home",
+    })
   }
 
   return (
@@ -66,6 +84,7 @@ export default function Home() {
 
           <Link
             href="/quiz"
+            onClick={handleCtaClick}
             className="relative z-50 bg-black hover:bg-black/80 text-white font-bold py-3 px-6 rounded-md transition inline-block text-sm"
           >
             SOLICITAR MEU CARTÃO

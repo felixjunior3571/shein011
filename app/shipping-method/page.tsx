@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Package, Truck, Gift, CheckCircle } from "lucide-react"
+import { usePageTracking, useTracking } from "@/hooks/use-tracking"
 
 interface AddressData {
   street: string
@@ -17,10 +18,14 @@ interface AddressData {
 export default function ShippingMethodPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
+  const { trackShippingSelection } = useTracking()
   const [selectedMethod, setSelectedMethod] = useState("")
   const [isGeneratingRate, setIsGeneratingRate] = useState(false)
   const [isRateGenerated, setIsRateGenerated] = useState(false)
   const [userAddress, setUserAddress] = useState<AddressData | null>(null)
+
+  // Rastreia a página de método de envio
+  usePageTracking("shipping_method")
 
   // Recupera o endereço do localStorage quando a página carrega
   useEffect(() => {
@@ -84,6 +89,9 @@ export default function ShippingMethodPage() {
     const method = shippingMethods.find((m) => m.id === methodId)
 
     if (method) {
+      // Rastreia a seleção do método de envio
+      trackShippingSelection(method.name, method.price)
+
       // Salva o método completo no localStorage
       localStorage.setItem("selectedShippingMethod", JSON.stringify(method))
       console.log("Método salvo:", method) // Debug log

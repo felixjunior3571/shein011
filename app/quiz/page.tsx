@@ -1,4 +1,17 @@
+"use client"
+
+import { usePageTracking, useTracking } from "@/hooks/use-tracking"
+
 export default function QuizPage() {
+  const { trackQuizAnswer } = useTracking()
+
+  // Rastreia a página do quiz
+  usePageTracking("quiz_question_1")
+
+  const handleAnswerClick = (answer: string) => {
+    trackQuizAnswer("credit_card_priority", answer)
+  }
+
   return (
     <div className="min-h-full bg-gray-50 flex flex-col">
       {/* Quiz Content */}
@@ -12,6 +25,7 @@ export default function QuizPage() {
             {/* Option 1 */}
             <a
               href="/quiz/question2"
+              onClick={() => handleAnswerClick("limite_alto")}
               className="border rounded-lg p-4 flex flex-col items-center justify-center hover:border-black transition-colors min-h-[120px]"
             >
               <div className="mb-3 flex-shrink-0">
@@ -36,6 +50,7 @@ export default function QuizPage() {
             {/* Option 2 */}
             <a
               href="/quiz/question2"
+              onClick={() => handleAnswerClick("credito_imediato")}
               className="border rounded-lg p-4 flex flex-col items-center justify-center hover:border-black transition-colors min-h-[120px]"
             >
               <div className="mb-3 flex-shrink-0">
@@ -50,6 +65,7 @@ export default function QuizPage() {
             {/* Option 3 */}
             <a
               href="/quiz/question2"
+              onClick={() => handleAnswerClick("nao_consultar_spc_serasa")}
               className="border rounded-lg p-4 flex flex-col items-center justify-center hover:border-black transition-colors min-h-[120px]"
             >
               <div className="mb-3 flex-shrink-0">
@@ -68,6 +84,7 @@ export default function QuizPage() {
             {/* Option 4 */}
             <a
               href="/quiz/question2"
+              onClick={() => handleAnswerClick("sem_anuidade")}
               className="border rounded-lg p-4 flex flex-col items-center justify-center hover:border-black transition-colors min-h-[120px]"
             >
               <div className="mb-3 flex-shrink-0">

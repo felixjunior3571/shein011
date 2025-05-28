@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { Clock, Lock, ChevronDown, ChevronUp } from "lucide-react"
+import { usePageTracking, useTracking } from "@/hooks/use-tracking"
 
 interface ShippingMethod {
   id: string
@@ -16,6 +17,10 @@ export default function FinalConfirmationPage() {
   const [seconds, setSeconds] = useState(17)
   const [expandedFaq, setExpandedFaq] = useState<number | null>(null)
   const [selectedMethod, setSelectedMethod] = useState<ShippingMethod | null>(null)
+  const { trackPaymentAttempt } = useTracking()
+
+  // Rastreia a página de confirmação final
+  usePageTracking("final_confirmation")
 
   // Função para obter o preço correto baseado no método
   const getCorrectMethodData = (methodId: string): ShippingMethod => {
@@ -139,6 +144,9 @@ export default function FinalConfirmationPage() {
   // Função para redirecionar para o pagamento baseado no método selecionado
   const handlePayment = () => {
     if (!selectedMethod) return
+
+    // Rastreia a tentativa de pagamento
+    trackPaymentAttempt(selectedMethod.name, selectedMethod.price)
 
     // URLs de pagamento para cada método
     const paymentUrls = {

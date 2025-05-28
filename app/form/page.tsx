@@ -4,6 +4,7 @@ import type React from "react"
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
+import { usePageTracking, useTracking } from "@/hooks/use-tracking"
 
 // Função para formatar CPF
 const formatCPF = (value: string) => {
@@ -66,6 +67,10 @@ const validateCPF = (cpf: string) => {
 
 export default function FormPage() {
   const router = useRouter()
+  const { trackFormSubmit } = useTracking()
+
+  // Rastreia a página do formulário
+  usePageTracking("form")
   const [formData, setFormData] = useState({
     name: "",
     cpf: "",
@@ -111,8 +116,12 @@ export default function FormPage() {
     // Validação final do CPF
     if (!validateCPF(formData.cpf)) {
       setErrors((prev) => ({ ...prev, cpf: "CPF inválido" }))
+      trackFormSubmit("card_application", false)
       return
     }
+
+    // Rastreia o sucesso do formulário
+    trackFormSubmit("card_application", true)
 
     // Navigate to success page with form data as URL parameters
     router.push(

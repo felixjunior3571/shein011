@@ -2,6 +2,7 @@ import type React from "react"
 import type { Metadata } from "next"
 import { Inter } from "next/font/google"
 import Image from "next/image"
+import Script from "next/script"
 import "./globals.css"
 
 const inter = Inter({ subsets: ["latin"] })
@@ -20,6 +21,25 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="pt-BR">
+      <head>
+        {/* Scripts da Utmify */}
+        <Script
+          src="https://cdn.utmify.com.br/scripts/utms/latest.js"
+          data-utmify-prevent-xcod-sck=""
+          data-utmify-prevent-subids=""
+          strategy="afterInteractive"
+        />
+        <Script id="utmify-pixel" strategy="afterInteractive">
+          {`
+            window.pixelId = "6836abf356b3052677c77248";
+            var a = document.createElement("script");
+            a.setAttribute("async", "");
+            a.setAttribute("defer", "");
+            a.setAttribute("src", "https://cdn.utmify.com.br/scripts/pixel/pixel.js");
+            document.head.appendChild(a);
+          `}
+        </Script>
+      </head>
       <body className={`${inter.className} flex flex-col min-h-screen`}>
         {/* Header fixo no topo com logo */}
         <header className="fixed top-0 left-0 right-0 z-50 bg-white py-4 border-b shadow-sm">

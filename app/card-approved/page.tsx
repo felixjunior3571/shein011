@@ -1,7 +1,20 @@
+"use client"
+
 import { CheckCircle, CreditCard, Percent, Plane, ShoppingBag, Wallet } from "lucide-react"
 import Link from "next/link"
+import { usePageTracking, useTracking } from "@/hooks/use-tracking"
+import { useEffect } from "react"
 
 export default function CardApprovedPage() {
+  const { trackCardApproval } = useTracking()
+
+  // Rastreia a página de aprovação e o evento de aprovação
+  usePageTracking("card_approved")
+
+  useEffect(() => {
+    trackCardApproval("R$ 11.700,00")
+  }, [trackCardApproval])
+
   return (
     <main className="min-h-full bg-gray-50">
       <div className="max-w-md mx-auto p-6 py-16">
