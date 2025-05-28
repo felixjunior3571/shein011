@@ -136,6 +136,27 @@ export default function FinalConfirmationPage() {
     },
   ]
 
+  // Função para redirecionar para o pagamento baseado no método selecionado
+  const handlePayment = () => {
+    if (!selectedMethod) return
+
+    // URLs de pagamento para cada método
+    const paymentUrls = {
+      pac: "https://pay.secure--pay.shop/7vJOGY42p1pZKXd",
+      express: "https://pay.secure--pay.shop/PyE2Zy80R1x3qRb",
+      sedex: "https://pay.secure--pay.shop/nWrxGWAVpVw3654",
+    }
+
+    const url = paymentUrls[selectedMethod.id.toLowerCase()]
+
+    if (url) {
+      window.location.href = url
+    } else {
+      // Fallback para SEDEX se não encontrar o método
+      window.location.href = paymentUrls.sedex
+    }
+  }
+
   if (!selectedMethod) {
     return (
       <div className="min-h-full bg-gray-50 flex items-center justify-center">
@@ -233,7 +254,10 @@ export default function FinalConfirmationPage() {
             </div>
 
             {/* Botão de Pagamento */}
-            <button className="w-full bg-black text-white font-bold py-3 px-4 rounded-md hover:bg-black/90 transition-colors mb-2 text-sm">
+            <button
+              onClick={handlePayment}
+              className="w-full bg-black text-white font-bold py-3 px-4 rounded-md hover:bg-black/90 transition-colors mb-2 text-sm"
+            >
               Pagar Frete - {selectedMethod.price}
             </button>
 
