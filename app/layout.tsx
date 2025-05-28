@@ -24,8 +24,17 @@ export default function RootLayout({
         {/* Header fixo no topo com logo */}
         <header className="fixed top-0 left-0 right-0 z-50 bg-white py-4 border-b shadow-sm">
           <div className="flex justify-center">
-            <div className="relative w-[120px] h-[40px] sm:w-[140px] sm:h-[45px] md:w-[160px] md:h-[50px]">
-              <Image src="/shein-header-logo.png" alt="SHEIN" fill style={{ objectFit: "contain" }} priority />
+            <div className="relative w-[140px] h-[45px] sm:w-[160px] sm:h-[50px] md:w-[180px] md:h-[55px]">
+              <Image
+                src="/shein-header-logo.png"
+                alt="SHEIN"
+                fill
+                style={{ objectFit: "contain" }}
+                priority
+                quality={100}
+                sizes="(max-width: 640px) 140px, (max-width: 768px) 160px, 180px"
+                className="select-none"
+              />
             </div>
           </div>
         </header>
