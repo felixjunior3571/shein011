@@ -1,5 +1,6 @@
 "use client"
 
+import Image from "next/image"
 import { usePageTracking, useTracking } from "@/hooks/use-tracking"
 
 export default function QuizPage() {
@@ -17,6 +18,21 @@ export default function QuizPage() {
       {/* Quiz Content */}
       <div className="flex-1 p-4 pt-8">
         <div className="bg-white rounded-lg shadow-md p-6 w-full max-w-md mx-auto">
+          {/* Imagem ilustrativa - 100% responsiva */}
+          <div className="flex justify-center mb-6 w-full">
+            <div className="relative w-full max-w-xs aspect-square">
+              <Image
+                src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/cardshein-7QAWAaS8xHObgWTD6p9NpXuh7OeO3D.png"
+                alt="Mulher feliz segurando cartão SHEIN"
+                fill
+                style={{ objectFit: "contain" }}
+                priority
+                className="rounded-lg"
+                sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+              />
+            </div>
+          </div>
+
           <h1 className="text-xl font-bold mb-6 leading-tight text-center">
             O que é mais importante para você em um cartão de crédito?
           </h1>
