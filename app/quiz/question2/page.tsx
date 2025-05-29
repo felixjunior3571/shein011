@@ -10,7 +10,7 @@ export default function QuizQuestion2Page() {
           <div className="flex justify-center mb-6">
             <div className="relative w-64 h-48 sm:w-80 sm:h-60">
               <Image
-                src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/shein_card_resized-Hib5lQgpq3CI6fhaUDcK6uOjEAAL71.png"
+                src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/ChatGPT%20Image%2029%20de%20mai.%20de%202025%2C%2003_04_16-F4XuzEN0kW7KN0t44BKuv4cisPahiL.png"
                 alt="Cartões de crédito SHEIN"
                 fill
                 style={{ objectFit: "contain" }}
