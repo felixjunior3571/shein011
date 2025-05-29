@@ -17,8 +17,13 @@ export default function ChooseCardDesignPage() {
 
     if (nameFromParams) {
       setCardholderName(nameFromParams)
+      // Salva também no localStorage para uso posterior
+      localStorage.setItem("cardholderName", nameFromParams)
     } else if (nameFromStorage) {
       setCardholderName(nameFromStorage)
+    } else {
+      // Fallback para nome padrão apenas se não houver nenhum nome salvo
+      setCardholderName("Santos Silva")
     }
   }, [searchParams])
 

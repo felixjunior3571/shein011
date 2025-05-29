@@ -10,7 +10,7 @@ export default function QuizTermsPage() {
           <h1 className="text-2xl font-bold text-center mb-2">Conta digital e cartão de crédito</h1>
 
           {/* Subtitle */}
-          <p className="text-center text-gray-600 mb-8">Tudo o que você precisa em um só lugar</p>
+          <p className="text-center text-gray-600 mb-6">Tudo o que você precisa em um só lugar</p>
 
           {/* Terms List */}
           <div className="space-y-4 mb-8">
