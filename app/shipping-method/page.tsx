@@ -105,7 +105,8 @@ export default function ShippingMethodPage() {
   }
 
   const handleConfirm = () => {
-    router.push("/final-confirmation")
+    // Redireciona para a página de provas sociais em vez da confirmação final
+    router.push("/social-proof")
   }
 
   // Encontra o método selecionado
