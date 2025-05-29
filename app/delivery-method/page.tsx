@@ -25,7 +25,7 @@ export default function DeliveryMethodPage() {
                   Receba seu cartão no conforto da sua casa em até 1 dia útil
                 </p>
                 <Link
-                  href="/delivery-address"
+                  href="/manager-contact"
                   className="w-full bg-black text-white rounded-lg py-3 px-4 text-center font-medium hover:bg-black/90 transition-colors"
                 >
                   Prefiro receber pelos Correios
