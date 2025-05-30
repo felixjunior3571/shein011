@@ -1,9 +1,25 @@
+import Image from "next/image"
+
 export default function QuizFinalPage() {
   return (
     <main className="min-h-full bg-gray-50">
       {/* Quiz Content */}
       <div className="flex-1 flex items-center justify-center p-4 py-16">
         <div className="bg-white rounded-lg shadow-md p-8 max-w-md w-full">
+          {/* Imagem da loja SHEIN */}
+          <div className="flex justify-center mb-6">
+            <div className="relative w-full h-48 sm:h-60">
+              <Image
+                src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/shein-loja-bh-ggPLyREunSnL8boGV768lPFxfnHHOU.png"
+                alt="Loja física SHEIN com clientes"
+                fill
+                style={{ objectFit: "contain" }}
+                priority
+                className="rounded-lg"
+              />
+            </div>
+          </div>
+
           <h1 className="text-2xl font-bold mb-8">Qual é o seu interesse com um cartão de crédito hoje?</h1>
 
           <div className="flex flex-col gap-3">
