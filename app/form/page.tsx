@@ -120,9 +120,6 @@ export default function FormPage() {
       return
     }
 
-    // Salva o nome completo no localStorage para uso posterior
-    localStorage.setItem("cardholderName", formData.name)
-
     // Rastreia o sucesso do formulário
     trackFormSubmit("card_application", true)
 

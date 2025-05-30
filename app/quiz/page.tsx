@@ -18,19 +18,17 @@ export default function QuizPage() {
       {/* Quiz Content */}
       <div className="flex-1 p-4 pt-8">
         <div className="bg-white rounded-lg shadow-md p-6 w-full max-w-md mx-auto">
-          {/* Imagem ilustrativa - Dimensões alinhadas com os blocos de resposta */}
-          <div className="w-full mb-6">
-            <div className="relative w-full h-60">
-              {" "}
-              {/* 240px de altura */}
+          {/* Imagem ilustrativa - 100% responsiva */}
+          <div className="flex justify-center mb-6 w-full">
+            <div className="relative w-full max-w-xs aspect-square">
               <Image
-                src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/c30dd98c-508c-4ef3-bf59-1fcdfbb6689b-AnaXKOEKmiJ47OcjYhuBJ2m6K9ImB8.png"
-                alt="Mulher feliz com cartão SHEIN"
+                src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/cardshein-7QAWAaS8xHObgWTD6p9NpXuh7OeO3D.png"
+                alt="Mulher feliz segurando cartão SHEIN"
                 fill
                 style={{ objectFit: "contain" }}
                 priority
                 className="rounded-lg"
-                sizes="(max-width: 768px) 100vw, 368px"
+                sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
               />
             </div>
           </div>
