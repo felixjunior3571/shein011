@@ -17,6 +17,7 @@ export default function FinalConfirmationPage() {
   const [seconds, setSeconds] = useState(17)
   const [expandedFaq, setExpandedFaq] = useState<number | null>(null)
   const [selectedMethod, setSelectedMethod] = useState<ShippingMethod | null>(null)
+  const [cardholderName, setCardholderName] = useState("Santos Silva")
   const { trackPaymentAttempt } = useTracking()
 
   // Rastreia a página de confirmação final
@@ -60,8 +61,14 @@ export default function FinalConfirmationPage() {
     }
   }
 
-  // Recupera o método de envio selecionado
+  // Recupera o método de envio selecionado e o nome do titular
   useEffect(() => {
+    // Recupera o nome do titular do localStorage
+    const savedName = localStorage.getItem("cardholderName")
+    if (savedName) {
+      setCardholderName(savedName)
+    }
+
     const savedMethod = localStorage.getItem("selectedShippingMethod")
 
     if (savedMethod) {
@@ -207,7 +214,7 @@ export default function FinalConfirmationPage() {
               <div className="flex justify-between items-end text-xs">
                 <div className="flex-1">
                   <p className="text-gray-400 mb-1">TITULAR</p>
-                  <p className="text-xs truncate">Santos Silva</p>
+                  <p className="text-xs truncate">{cardholderName}</p>
                 </div>
                 <div className="text-center flex-shrink-0 mx-2">
                   <p className="text-gray-400 mb-1">VALIDADE</p>
