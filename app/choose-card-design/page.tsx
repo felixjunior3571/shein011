@@ -11,15 +11,20 @@ export default function ChooseCardDesignPage() {
   const [cardholderName, setCardholderName] = useState("Santos Silva")
 
   useEffect(() => {
-    // Try to get the name from URL params or localStorage
-    const nameFromParams = searchParams.get("name")
+    // Try to get the name from localStorage first, then URL params
     const nameFromStorage = typeof window !== "undefined" ? localStorage.getItem("cardholderName") : null
+    const nameFromParams = searchParams.get("name")
 
-    if (nameFromParams) {
-      setCardholderName(nameFromParams)
-    } else if (nameFromStorage) {
+    if (nameFromStorage) {
       setCardholderName(nameFromStorage)
+    } else if (nameFromParams) {
+      setCardholderName(nameFromParams)
+      // Save to localStorage for future use
+      if (typeof window !== "undefined") {
+        localStorage.setItem("cardholderName", nameFromParams)
+      }
     }
+    // Se não encontrar nenhum nome, mantém o padrão "Santos Silva"
   }, [searchParams])
 
   const colors = [

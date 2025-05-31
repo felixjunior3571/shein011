@@ -28,6 +28,11 @@ export default function FormSuccessPage() {
         email,
       })
 
+      // Salva o nome no localStorage para uso posterior
+      if (name && name !== "Santos Silva") {
+        localStorage.setItem("cardholderName", name)
+      }
+
       initialized.current = true
     }
   }, [searchParams])
