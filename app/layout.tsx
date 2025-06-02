@@ -4,6 +4,7 @@ import { Inter } from "next/font/google"
 import Image from "next/image"
 import Script from "next/script"
 import "./globals.css"
+import { SocialNotifications } from "@/components/social-notifications"
 
 const inter = Inter({ subsets: ["latin"] })
 
@@ -66,6 +67,9 @@ export default function RootLayout({
         <footer className="fixed bottom-0 left-0 right-0 z-50 bg-gray-100 py-3 text-center text-gray-600 text-sm border-t">
           <div className="container mx-auto px-4">Copyright © 2025 Shein. Todos os direitos reservados.</div>
         </footer>
+
+        {/* Notificações sociais */}
+        <SocialNotifications />
       </body>
     </html>
   )

@@ -218,26 +218,24 @@ export default function SocialProofPage() {
           )}
 
           {/* Botão de continuar - aparece apenas quando ambos os vídeos terminaram */}
-          {bothVideosEnded && (
-            <div className="text-center">
-              <button
-                onClick={handleContinue}
-                className="bg-black text-white font-bold py-3 px-8 rounded-md hover:bg-black/90 transition-colors animate-fade-in"
-              >
-                SIM, VOU QUERER!
-              </button>
+          <div className="text-center">
+            <button
+              onClick={handleContinue}
+              className="bg-black text-white font-bold py-3 px-8 rounded-md hover:bg-black/90 transition-colors"
+            >
+              SIM, VOU QUERER!
+            </button>
 
-              <style jsx>{`
-                @keyframes fadeIn {
-                  from { opacity: 0; transform: translateY(10px); }
-                  to { opacity: 1; transform: translateY(0); }
-                }
-                .animate-fade-in {
-                  animation: fadeIn 0.5s ease-out forwards;
-                }
-              `}</style>
-            </div>
-          )}
+            <style jsx>{`
+              @keyframes fadeIn {
+                from { opacity: 0; transform: translateY(10px); }
+                to { opacity: 1; transform: translateY(0); }
+              }
+              .animate-fade-in {
+                animation: fadeIn 0.5s ease-out forwards;
+              }
+            `}</style>
+          </div>
         </div>
       </div>
     </main>
