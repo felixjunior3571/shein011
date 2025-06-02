@@ -43,6 +43,12 @@ export default function DeliveryMethodPage() {
                 <p className="text-gray-600 text-sm">Retire seu cartão em uma de nossas agências</p>
               </div>
             </div>
+
+            {/* Mensagem de indisponibilidade */}
+            <div className="text-center text-red-500 text-sm font-medium px-4">
+              A opção de retirada na agência está temporariamente indisponível devido à alta demanda. Agradecemos sua
+              compreensão.
+            </div>
           </div>
 
           {/* Agency Information */}
