@@ -4,7 +4,8 @@ import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Users, UserPlus, Activity, Download, RefreshCw, Eye, Phone, Mail, MapPin } from "lucide-react"
+import { Users, UserPlus, Activity, Download, RefreshCw, Eye, Phone, Mail, MapPin, LogOut } from "lucide-react"
+import { useRouter } from "next/navigation"
 
 interface Lead {
   id: string
@@ -58,6 +59,7 @@ export default function AdminDashboard() {
   })
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<"overview" | "leads" | "sessions" | "events">("overview")
+  const router = useRouter()
 
   const fetchData = async () => {
     setLoading(true)
@@ -158,12 +160,12 @@ export default function AdminDashboard() {
     return "💻 Desktop"
   }
 
-  console.log("📊 Admin Stats:", {
-    totalLeads: stats.totalLeads,
-    todayLeads: stats.todayLeads,
-    onlineUsers: stats.onlineUsers,
-    sessionsCount: sessions.length,
-  })
+  const handleLogout = () => {
+    // Remover cookie de autenticação
+    document.cookie = "admin_auth=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT"
+    // Redirecionar para login
+    router.push("/admin/login")
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 p-4">
@@ -183,6 +185,10 @@ export default function AdminDashboard() {
               <Button onClick={exportLeads} variant="outline" size="sm">
                 <Download className="w-4 h-4 mr-2" />
                 Exportar CSV
+              </Button>
+              <Button onClick={handleLogout} variant="outline" size="sm">
+                <LogOut className="w-4 h-4 mr-2" />
+                Sair
               </Button>
             </div>
           </div>
@@ -300,7 +306,13 @@ export default function AdminDashboard() {
                         <div key={session.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                           <div>
                             <p className="font-medium">{session.current_page || "Página inicial"}</p>
-                            <p className="text-sm text-gray-600">{formatUserAgent(session.user_agent)}</p>
+                            <div className="flex items-center text-sm text-gray-600">
+                              <span className="mr-2">{formatUserAgent(session.user_agent)}</span>
+                              <Badge variant="outline" className="text-xs">
+                                <MapPin className="w-3 h-3 mr-1" />
+                                {session.ip_address}
+                              </Badge>
+                            </div>
                           </div>
                           <div className="text-xs text-gray-500">
                             {new Date(session.last_activity).toLocaleTimeString("pt-BR")}
@@ -400,7 +412,7 @@ export default function AdminDashboard() {
                             <td className="p-2">
                               <div className="flex items-center">
                                 <MapPin className="w-4 h-4 mr-2 text-gray-400" />
-                                {session.ip_address}
+                                <span className="font-mono">{session.ip_address}</span>
                               </div>
                             </td>
                             <td className="p-2 text-gray-600">

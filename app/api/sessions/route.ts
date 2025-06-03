@@ -10,7 +10,8 @@ export async function POST(request: NextRequest) {
   try {
     const { sessionId, currentPage, userAgent } = await request.json()
 
-    const ip = request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "unknown"
+    // Capturar IP do usuário
+    const ip = request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || request.ip || "unknown"
 
     // Upsert session (insert or update)
     const { error } = await supabase.from("active_sessions").upsert(
