@@ -151,7 +151,7 @@ export function SocialNotifications() {
       }, 6000)
     }, 3000)
 
-    // Notificações subsequentes a cada 15 segundos
+    // Notificações subsequentes a cada 8-15 segundos
     const interval = setInterval(
       () => {
         const notification = generateNotification()
@@ -165,8 +165,8 @@ export function SocialNotifications() {
           setNotifications((prev) => prev.filter((n) => n.id !== notification.id))
         }, 6000)
       },
-      15000, // 15 segundos fixos
-    )
+      Math.random() * 7000 + 8000,
+    ) // Entre 8-15 segundos
 
     return () => {
       clearTimeout(firstTimeout)

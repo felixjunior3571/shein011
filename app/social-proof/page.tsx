@@ -100,9 +100,9 @@ export default function SocialProofPage() {
     trackEvent({
       event: "social_proof_continue",
       page: "social_proof",
-      action: "continue_to_vsl",
+      action: "continue_to_final",
     })
-    router.push("/vsl")
+    router.push("/final-confirmation")
   }
 
   return (
@@ -217,7 +217,7 @@ export default function SocialProofPage() {
             </div>
           )}
 
-          {/* Botão de continuar - aparece sempre */}
+          {/* Botão de continuar - aparece apenas quando ambos os vídeos terminaram */}
           <div className="text-center">
             <button
               onClick={handleContinue}
