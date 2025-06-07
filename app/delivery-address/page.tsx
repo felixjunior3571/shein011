@@ -112,8 +112,8 @@ export default function DeliveryAddressPage() {
 
     localStorage.setItem("deliveryAddress", JSON.stringify(deliveryAddress))
 
-    // Redireciona para a página de método de envio
-    router.push("/shipping-method")
+    // Redireciona para a página de vídeo de vendas em vez da página de método de envio
+    router.push("/video-presentation")
   }
 
   const estados = [
