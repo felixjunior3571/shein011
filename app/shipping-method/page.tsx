@@ -23,8 +23,6 @@ export default function ShippingMethodPage() {
   const [isGeneratingRate, setIsGeneratingRate] = useState(false)
   const [isRateGenerated, setIsRateGenerated] = useState(false)
   const [userAddress, setUserAddress] = useState<AddressData | null>(null)
-  const [videoEnded, setVideoEnded] = useState(false)
-  const [videoLoaded, setVideoLoaded] = useState(false)
 
   // Rastreia a página de método de envio
   usePageTracking("shipping_method")
@@ -46,48 +44,6 @@ export default function ShippingMethodPage() {
         state: "RJ",
         zipCode: "22451041",
       })
-    }
-  }, [])
-
-  // Listener para eventos do Vimeo com debug melhorado
-  useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
-      // Aceita mensagens do Vimeo
-      if (event.origin !== "https://player.vimeo.com") return
-
-      try {
-        const data = JSON.parse(event.data)
-        console.log("Evento Vimeo recebido:", data)
-
-        if (data.event === "ready") {
-          setVideoLoaded(true)
-          console.log("✅ Vídeo carregado e pronto!")
-        }
-
-        if (data.event === "ended") {
-          setVideoEnded(true)
-          console.log("🎬 Vídeo terminou!")
-        }
-
-        if (data.event === "loaded") {
-          console.log("📹 Vídeo foi carregado completamente")
-        }
-      } catch (error) {
-        console.log("Erro ao processar evento Vimeo:", error)
-      }
-    }
-
-    // Timer automático para mostrar mensagem após 1:11 (71 segundos)
-    const autoTimer = setTimeout(() => {
-      setVideoEnded(true)
-      console.log("⏰ Timer automático: Vídeo considerado concluído após 1:11")
-    }, 71000) // 71 segundos = 1 minuto e 11 segundos
-
-    window.addEventListener("message", handleMessage)
-
-    return () => {
-      window.removeEventListener("message", handleMessage)
-      clearTimeout(autoTimer)
     }
   }, [])
 
@@ -157,8 +113,8 @@ export default function ShippingMethodPage() {
   const selectedMethodDetails = shippingMethods.find((method) => method.id === selectedMethod)
 
   return (
-    <main className="min-h-screen bg-white flex items-center justify-center">
-      <div className="w-full max-w-4xl mx-auto p-4">
+    <main className="min-h-full bg-gray-50">
+      <div className="max-w-md mx-auto p-4 py-8 sm:p-6 sm:py-12">
         {isGeneratingRate ? (
           // Tela de carregamento
           <div className="bg-white rounded-lg shadow-md p-8 text-center">
@@ -171,7 +127,7 @@ export default function ShippingMethodPage() {
           </div>
         ) : isRateGenerated && userAddress ? (
           // Tela de taxa gerada com sucesso
-          <div className="bg-white rounded-lg shadow-md p-6 max-w-md mx-auto">
+          <div className="bg-white rounded-lg shadow-md p-6">
             {/* Mensagem de sucesso */}
             <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-6 flex items-center">
               <CheckCircle className="text-green-600 w-5 h-5 mr-2 flex-shrink-0" />
@@ -225,6 +181,7 @@ export default function ShippingMethodPage() {
                   className="mr-2 flex-shrink-0"
                 >
                   <rect width="18" height="14" x="3" y="5" rx="2" />
+                  <path d="M21 8H3" />
                   <path d="M7 15h.01" />
                   <path d="M11 15h2" />
                 </svg>
@@ -245,108 +202,60 @@ export default function ShippingMethodPage() {
             </button>
           </div>
         ) : (
-          // Tela principal com vídeo e seleção de método de envio
-          <div className="flex flex-col items-center justify-center text-center space-y-8">
-            {/* Container do Vídeo com Loading */}
-            <div className="w-full max-w-3xl">
-              <div className="relative w-full" style={{ paddingBottom: "56.25%" }}>
-                {/* Loading do vídeo */}
-                {!videoLoaded && (
-                  <div className="absolute inset-0 bg-gray-100 flex items-center justify-center rounded-lg">
-                    <div className="text-center">
-                      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-                      <p className="text-gray-600 font-medium">Carregando vídeo...</p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Iframe do Vimeo otimizado */}
-                <iframe
-                  src="https://player.vimeo.com/video/1091329936?h=77a25f5325&autoplay=1&muted=0&controls=0&title=0&byline=0&portrait=0&background=1&loop=0&api=1&autopause=0&quality=720p&preload=metadata"
-                  className={`absolute top-0 left-0 w-full h-full transition-opacity duration-500 ${
-                    videoLoaded ? "opacity-100" : "opacity-0"
-                  }`}
-                  frameBorder="0"
-                  allow="autoplay; fullscreen; picture-in-picture"
-                  allowFullScreen
-                  title="Vídeo Explicativo"
-                  loading="eager"
-                />
-              </div>
-            </div>
-
-            {/* Observação após o vídeo terminar - MAIS VISÍVEL */}
-            {videoEnded && (
-              <div className="bg-green-100 border-2 border-green-400 rounded-lg p-6 max-w-2xl mx-auto shadow-lg animate-pulse">
-                <div className="flex items-center justify-center space-x-3">
-                  <div className="bg-green-500 rounded-full p-2">
-                    <CheckCircle className="w-6 h-6 text-white" />
-                  </div>
-                  <div>
-                    <p className="text-green-800 font-bold text-lg">VÍDEO CONCLUÍDO!</p>
-                    <p className="text-green-700 text-sm">Agora escolha o método de entrega do seu cartão abaixo ⬇️</p>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Título */}
-            <h1 className="text-3xl md:text-4xl font-bold text-gray-900 px-4">ESCOLHA O MÉTODO DE ENVIO</h1>
+          // Tela de seleção de método de envio
+          <div className="bg-white rounded-lg shadow-md p-6">
+            {/* Title */}
+            <h1 className="text-xl font-bold mb-3">Escolha o método de envio</h1>
 
             {/* Subtitle */}
-            <p className="text-lg text-gray-600 mb-8 px-4">
+            <p className="text-sm text-gray-600 mb-6">
               Agora basta escolher uma forma de envio do seu Cartão de Crédito{" "}
               <span className="font-semibold text-black">APROVADO</span>
             </p>
 
-            {/* Container dos métodos de envio */}
-            <div className="w-full max-w-md mx-auto bg-white rounded-lg shadow-md p-6">
-              {/* Shipping Methods */}
-              <div className="space-y-3 mb-6">
-                {shippingMethods.map((method) => {
-                  const IconComponent = method.icon
-                  return (
-                    <div
-                      key={method.id}
-                      onClick={() => handleMethodSelect(method.id)}
-                      className={`border rounded-lg p-4 cursor-pointer transition-all ${
-                        selectedMethod === method.id
-                          ? "border-black bg-gray-50"
-                          : "border-gray-200 hover:border-gray-300"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <div className="flex-shrink-0">
-                            <IconComponent className="w-8 h-8 text-gray-600" />
-                          </div>
-                          <div>
-                            <h3 className="font-semibold text-lg">{method.name}</h3>
-                            <p className="text-sm text-gray-600">{method.duration}</p>
-                          </div>
+            {/* Shipping Methods */}
+            <div className="space-y-3 mb-6">
+              {shippingMethods.map((method) => {
+                const IconComponent = method.icon
+                return (
+                  <div
+                    key={method.id}
+                    onClick={() => handleMethodSelect(method.id)}
+                    className={`border rounded-lg p-4 cursor-pointer transition-all ${
+                      selectedMethod === method.id ? "border-black bg-gray-50" : "border-gray-200 hover:border-gray-300"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="flex-shrink-0">
+                          <IconComponent className="w-8 h-8 text-gray-600" />
                         </div>
-                        <div className="text-right">
-                          <p className="font-semibold text-lg text-green-600">{method.price}</p>
+                        <div>
+                          <h3 className="font-semibold text-lg">{method.name}</h3>
+                          <p className="text-sm text-gray-600">{method.duration}</p>
                         </div>
                       </div>
+                      <div className="text-right">
+                        <p className="font-semibold text-lg text-green-600">{method.price}</p>
+                      </div>
                     </div>
-                  )
-                })}
-              </div>
-
-              {/* Continue Button */}
-              <button
-                onClick={() => selectedMethod && handleMethodSelect(selectedMethod)}
-                disabled={!selectedMethod}
-                className={`w-full py-3 px-4 rounded-lg font-medium transition-colors ${
-                  selectedMethod
-                    ? "bg-black text-white hover:bg-black/90"
-                    : "bg-gray-300 text-gray-500 cursor-not-allowed"
-                }`}
-              >
-                Continuar
-              </button>
+                  </div>
+                )
+              })}
             </div>
+
+            {/* Continue Button */}
+            <button
+              onClick={() => selectedMethod && handleMethodSelect(selectedMethod)}
+              disabled={!selectedMethod}
+              className={`w-full py-3 px-4 rounded-lg font-medium transition-colors ${
+                selectedMethod
+                  ? "bg-black text-white hover:bg-black/90"
+                  : "bg-gray-300 text-gray-500 cursor-not-allowed"
+              }`}
+            >
+              Continuar
+            </button>
           </div>
         )}
       </div>
