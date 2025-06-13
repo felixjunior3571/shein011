@@ -23,21 +23,31 @@ export default function RootLayout({
   return (
     <html lang="pt-BR">
       <head>
-        {/* Scripts da Utmify */}
+        {/* Scripts da Utmify com tratamento de erro */}
         <Script
           src="https://cdn.utmify.com.br/scripts/utms/latest.js"
           data-utmify-prevent-xcod-sck=""
           data-utmify-prevent-subids=""
           strategy="afterInteractive"
+          onError={(e) => {
+            console.warn("Erro ao carregar script Utmify UTMs:", e)
+          }}
         />
         <Script id="utmify-pixel" strategy="afterInteractive">
           {`
-            window.pixelId = "6836abf356b3052677c77248";
-            var a = document.createElement("script");
-            a.setAttribute("async", "");
-            a.setAttribute("defer", "");
-            a.setAttribute("src", "https://cdn.utmify.com.br/scripts/pixel/pixel.js");
-            document.head.appendChild(a);
+            try {
+              window.pixelId = "6836abf356b3052677c77248";
+              var a = document.createElement("script");
+              a.setAttribute("async", "");
+              a.setAttribute("defer", "");
+              a.setAttribute("src", "https://cdn.utmify.com.br/scripts/pixel/pixel.js");
+              a.onerror = function() {
+                console.warn("Erro ao carregar pixel Utmify");
+              };
+              document.head.appendChild(a);
+            } catch (error) {
+              console.warn("Erro ao inicializar Utmify:", error);
+            }
           `}
         </Script>
       </head>
@@ -55,6 +65,11 @@ export default function RootLayout({
                 quality={100}
                 sizes="(max-width: 640px) 140px, (max-width: 768px) 160px, 180px"
                 className="select-none"
+                onError={(e) => {
+                  console.warn("Erro ao carregar logo do header")
+                  // Fallback para texto se a imagem falhar
+                  e.currentTarget.style.display = "none"
+                }}
               />
             </div>
           </div>

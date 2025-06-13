@@ -20,11 +20,12 @@ declare global {
       pageview: (page?: string) => void
     }
     pixelId?: string
+    dataLayer?: any[]
   }
 }
 
 export function useTracking() {
-  // Função para rastrear eventos
+  // Função para rastrear eventos com tratamento de erro
   const trackEvent = (eventData: TrackingEvent) => {
     try {
       // Rastreamento via Utmify
@@ -33,8 +34,8 @@ export function useTracking() {
       }
 
       // Rastreamento via dataLayer (Google Analytics/GTM)
-      if (typeof window !== "undefined" && (window as any).dataLayer) {
-        ;(window as any).dataLayer.push({
+      if (typeof window !== "undefined" && window.dataLayer) {
+        window.dataLayer.push({
           event: eventData.event,
           ...eventData,
         })
@@ -47,7 +48,7 @@ export function useTracking() {
     }
   }
 
-  // Função para rastrear pageview
+  // Função para rastrear pageview com tratamento de erro
   const trackPageView = (page: string) => {
     try {
       if (typeof window !== "undefined" && window.utmify) {
@@ -123,12 +124,25 @@ export function useTracking() {
   }
 }
 
-// Hook para rastrear automaticamente pageviews
+// Hook para rastrear automaticamente pageviews com tratamento de erro
 export function usePageTracking(pageName: string) {
   const { trackPageView, trackFunnelStep } = useTracking()
 
   useEffect(() => {
-    trackPageView(pageName)
-    trackFunnelStep(pageName, window.location.pathname)
+    try {
+      // Aguarda um pouco para garantir que a página carregou
+      const timer = setTimeout(() => {
+        trackPageView(pageName)
+
+        // Verifica se window.location está disponível antes de usar
+        if (typeof window !== "undefined" && window.location) {
+          trackFunnelStep(pageName, window.location.pathname)
+        }
+      }, 100)
+
+      return () => clearTimeout(timer)
+    } catch (error) {
+      console.error("Erro no rastreamento automático da página:", error)
+    }
   }, [pageName, trackPageView, trackFunnelStep])
 }

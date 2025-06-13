@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Package, Truck, Gift, CheckCircle } from "lucide-react"
+import { Package, Truck, Gift, CheckCircle, Play } from "lucide-react"
 import { usePageTracking, useTracking } from "@/hooks/use-tracking"
 
 interface AddressData {
@@ -25,6 +25,7 @@ export default function ShippingMethodPage() {
   const [userAddress, setUserAddress] = useState<AddressData | null>(null)
   const [videoEnded, setVideoEnded] = useState(false)
   const [videoLoaded, setVideoLoaded] = useState(false)
+  const [videoStarted, setVideoStarted] = useState(false)
   const [videoVolume, setVideoVolume] = useState(0.5) // Volume inicial em 50%
 
   // Detectar se é mobile
@@ -93,6 +94,11 @@ export default function ShippingMethodPage() {
               )
             }, 1000)
           }
+        }
+
+        if (data.event === "play") {
+          setVideoStarted(true)
+          console.log("▶️ Vídeo iniciou!")
         }
 
         if (data.event === "ended") {
@@ -293,6 +299,23 @@ export default function ShippingMethodPage() {
         ) : (
           // Tela principal com vídeo e seleção de método de envio
           <div className="flex flex-col items-center justify-center text-center space-y-8">
+            {/* Instrução para reproduzir o vídeo */}
+            {videoLoaded && !videoStarted && (
+              <div className="bg-blue-50 border-2 border-blue-300 rounded-lg p-4 max-w-2xl mx-auto shadow-md animate-bounce">
+                <div className="flex items-center justify-center space-x-3">
+                  <div className="bg-blue-500 rounded-full p-2">
+                    <Play className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <p className="text-blue-800 font-bold text-lg">👆 Toque no vídeo para reproduzir</p>
+                    <p className="text-blue-700 text-sm">
+                      Assista ao vídeo explicativo antes de escolher o método de envio
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Container do Vídeo com Loading */}
             <div className="w-full max-w-3xl px-4">
               <div className="relative w-full bg-black rounded-lg overflow-hidden" style={{ paddingBottom: "56.25%" }}>
@@ -320,7 +343,7 @@ export default function ShippingMethodPage() {
                 />
 
                 {/* Controles de volume */}
-                {videoLoaded && (
+                {videoLoaded && videoStarted && (
                   <div className="absolute top-4 right-4 z-10 flex flex-col gap-2">
                     {/* Botão de volume alto */}
                     <button
@@ -379,6 +402,16 @@ export default function ShippingMethodPage() {
                 )}
               </div>
             </div>
+
+            {/* Status do vídeo */}
+            {videoStarted && !videoEnded && (
+              <div className="bg-yellow-50 border border-yellow-300 rounded-lg p-3 max-w-md mx-auto">
+                <div className="flex items-center justify-center space-x-2">
+                  <div className="w-3 h-3 bg-yellow-500 rounded-full animate-pulse"></div>
+                  <p className="text-yellow-800 font-medium text-sm">Assistindo vídeo explicativo...</p>
+                </div>
+              </div>
+            )}
 
             {/* Observação após o vídeo terminar - RESPONSIVO */}
             {videoEnded && (
