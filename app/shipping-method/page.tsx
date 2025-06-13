@@ -248,8 +248,8 @@ export default function ShippingMethodPage() {
           // Tela principal com vídeo e seleção de método de envio
           <div className="flex flex-col items-center justify-center text-center space-y-8">
             {/* Container do Vídeo com Loading */}
-            <div className="w-full max-w-3xl">
-              <div className="relative w-full" style={{ paddingBottom: "56.25%" }}>
+            <div className="w-full max-w-3xl px-4">
+              <div className="relative w-full bg-black rounded-lg overflow-hidden" style={{ paddingBottom: "56.25%" }}>
                 {/* Loading do vídeo */}
                 {!videoLoaded && (
                   <div className="absolute inset-0 bg-gray-100 flex items-center justify-center rounded-lg">
@@ -260,9 +260,9 @@ export default function ShippingMethodPage() {
                   </div>
                 )}
 
-                {/* Iframe do Vimeo otimizado */}
+                {/* Iframe do Vimeo otimizado para mobile */}
                 <iframe
-                  src="https://player.vimeo.com/video/1091329936?h=77a25f5325&autoplay=1&muted=0&controls=0&title=0&byline=0&portrait=0&background=1&loop=0&api=1&autopause=0&quality=720p&preload=metadata"
+                  src="https://player.vimeo.com/video/1091329936?h=77a25f5325&autoplay=1&muted=0&controls=1&title=0&byline=0&portrait=0&background=0&loop=0&api=1&autopause=0&quality=auto&playsinline=1"
                   className={`absolute top-0 left-0 w-full h-full transition-opacity duration-500 ${
                     videoLoaded ? "opacity-100" : "opacity-0"
                   }`}
@@ -275,32 +275,32 @@ export default function ShippingMethodPage() {
               </div>
             </div>
 
-            {/* Observação após o vídeo terminar - MAIS VISÍVEL */}
+            {/* Observação após o vídeo terminar - RESPONSIVO */}
             {videoEnded && (
-              <div className="bg-green-100 border-2 border-green-400 rounded-lg p-6 max-w-2xl mx-auto shadow-lg animate-pulse">
-                <div className="flex items-center justify-center space-x-3">
-                  <div className="bg-green-500 rounded-full p-2">
-                    <CheckCircle className="w-6 h-6 text-white" />
+              <div className="bg-green-100 border-2 border-green-400 rounded-lg p-3 sm:p-6 max-w-xs sm:max-w-2xl mx-auto shadow-lg animate-pulse">
+                <div className="flex items-center justify-center space-x-2 sm:space-x-3">
+                  <div className="bg-green-500 rounded-full p-1 sm:p-2">
+                    <CheckCircle className="w-4 h-4 sm:w-6 sm:h-6 text-white" />
                   </div>
                   <div>
-                    <p className="text-green-800 font-bold text-lg">VÍDEO CONCLUÍDO!</p>
-                    <p className="text-green-700 text-sm">Agora escolha o método de entrega do seu cartão abaixo ⬇️</p>
+                    <p className="text-green-800 font-bold text-sm sm:text-lg">VÍDEO CONCLUÍDO!</p>
+                    <p className="text-green-700 text-xs sm:text-sm">Agora escolha o método de entrega ⬇️</p>
                   </div>
                 </div>
               </div>
             )}
 
             {/* Título */}
-            <h1 className="text-3xl md:text-4xl font-bold text-gray-900 px-4">ESCOLHA O MÉTODO DE ENVIO</h1>
+            <h1 className="text-xl sm:text-3xl md:text-4xl font-bold text-gray-900 px-4">ESCOLHA O MÉTODO DE ENVIO</h1>
 
             {/* Subtitle */}
-            <p className="text-lg text-gray-600 mb-8 px-4">
+            <p className="text-sm sm:text-lg text-gray-600 mb-8 px-4">
               Agora basta escolher uma forma de envio do seu Cartão de Crédito{" "}
               <span className="font-semibold text-black">APROVADO</span>
             </p>
 
             {/* Container dos métodos de envio */}
-            <div className="w-full max-w-md mx-auto bg-white rounded-lg shadow-md p-6">
+            <div className="w-full max-w-md mx-auto bg-white rounded-lg shadow-md p-4 sm:p-6 mx-4">
               {/* Shipping Methods */}
               <div className="space-y-3 mb-6">
                 {shippingMethods.map((method) => {
