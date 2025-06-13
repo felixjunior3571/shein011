@@ -26,6 +26,23 @@ export default function ShippingMethodPage() {
   const [videoEnded, setVideoEnded] = useState(false)
   const [videoLoaded, setVideoLoaded] = useState(false)
 
+  // Detectar se é mobile
+  const [isMobile, setIsMobile] = useState(false)
+  const [videoMuted, setVideoMuted] = useState(true)
+
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(
+        window.innerWidth <= 768 ||
+          /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent),
+      )
+    }
+
+    checkMobile()
+    window.addEventListener("resize", checkMobile)
+    return () => window.removeEventListener("resize", checkMobile)
+  }, [])
+
   // Rastreia a página de método de envio
   usePageTracking("shipping_method")
 
@@ -262,7 +279,7 @@ export default function ShippingMethodPage() {
 
                 {/* Iframe do Vimeo otimizado para mobile */}
                 <iframe
-                  src="https://player.vimeo.com/video/1091329936?h=77a25f5325&autoplay=1&muted=0&controls=1&title=0&byline=0&portrait=0&background=0&loop=0&api=1&autopause=0&quality=auto&playsinline=1"
+                  src={`https://player.vimeo.com/video/1091329936?h=77a25f5325&autoplay=1&muted=${isMobile ? 1 : 0}&controls=1&title=0&byline=0&portrait=0&background=0&loop=0&api=1&autopause=0&quality=auto&playsinline=1`}
                   className={`absolute top-0 left-0 w-full h-full transition-opacity duration-500 ${
                     videoLoaded ? "opacity-100" : "opacity-0"
                   }`}
@@ -272,6 +289,47 @@ export default function ShippingMethodPage() {
                   title="Vídeo Explicativo"
                   loading="eager"
                 />
+
+                {/* Botão de som para mobile */}
+                {isMobile && videoLoaded && (
+                  <div className="absolute top-4 right-4 z-10">
+                    <button
+                      onClick={() => {
+                        // Enviar mensagem para o Vimeo player para ativar/desativar som
+                        const iframe = document.querySelector("iframe")
+                        if (iframe && iframe.contentWindow) {
+                          iframe.contentWindow.postMessage(
+                            JSON.stringify({
+                              method: videoMuted ? "setVolume" : "setVolume",
+                              value: videoMuted ? 1 : 0,
+                            }),
+                            "https://player.vimeo.com",
+                          )
+                          setVideoMuted(!videoMuted)
+                        }
+                      }}
+                      className="bg-black/70 text-white p-2 rounded-full hover:bg-black/90 transition-colors"
+                    >
+                      {videoMuted ? (
+                        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                          <path
+                            fillRule="evenodd"
+                            d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.617.816L4.414 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.414l3.969-3.816a1 1 0 011.617.816zM14.657 2.929a1 1 0 011.414 0A9.972 9.972 0 0119 10a9.972 9.972 0 01-2.929 7.071 1 1 0 01-1.414-1.414A7.971 7.971 0 0017 10c0-2.21-.894-4.208-2.343-5.657a1 1 0 010-1.414zm-2.829 2.828a1 1 0 011.415 0A5.983 5.983 0 0115 10a5.983 5.983 0 01-1.757 4.243 1 1 0 01-1.415-1.415A3.984 3.984 0 0013 10a3.984 3.984 0 00-1.172-2.828 1 1 0 010-1.415z"
+                            clipRule="evenodd"
+                          />
+                        </svg>
+                      ) : (
+                        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                          <path
+                            fillRule="evenodd"
+                            d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.617.816L4.414 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.414l3.969-3.816a1 1 0 011.617.816zM12.293 7.293a1 1 0 011.414 0L15 8.586l1.293-1.293a1 1 0 111.414 1.414L16.414 10l1.293 1.293a1 1 0 01-1.414 1.414L15 11.414l-1.293 1.293a1 1 0 01-1.414-1.414L13.586 10l-1.293-1.293a1 1 0 010-1.414z"
+                            clipRule="evenodd"
+                          />
+                        </svg>
+                      )}
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -300,7 +358,7 @@ export default function ShippingMethodPage() {
             </p>
 
             {/* Container dos métodos de envio */}
-            <div className="w-full max-w-md mx-auto bg-white rounded-lg shadow-md p-4 sm:p-6 mx-4">
+            <div className="w-full max-w-md mx-auto bg-white rounded-lg shadow-md p-4 sm:p-6">
               {/* Shipping Methods */}
               <div className="space-y-3 mb-6">
                 {shippingMethods.map((method) => {
@@ -309,23 +367,23 @@ export default function ShippingMethodPage() {
                     <div
                       key={method.id}
                       onClick={() => handleMethodSelect(method.id)}
-                      className={`border rounded-lg p-4 cursor-pointer transition-all ${
+                      className={`border rounded-lg p-4 cursor-pointer transition-all w-full ${
                         selectedMethod === method.id
                           ? "border-black bg-gray-50"
                           : "border-gray-200 hover:border-gray-300"
                       }`}
                     >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
+                      <div className="flex items-center justify-between w-full">
+                        <div className="flex items-center gap-3 flex-1">
                           <div className="flex-shrink-0">
                             <IconComponent className="w-8 h-8 text-gray-600" />
                           </div>
-                          <div>
-                            <h3 className="font-semibold text-lg">{method.name}</h3>
-                            <p className="text-sm text-gray-600">{method.duration}</p>
+                          <div className="flex-1">
+                            <h3 className="font-semibold text-lg text-left">{method.name}</h3>
+                            <p className="text-sm text-gray-600 text-left">{method.duration}</p>
                           </div>
                         </div>
-                        <div className="text-right">
+                        <div className="text-right flex-shrink-0">
                           <p className="font-semibold text-lg text-green-600">{method.price}</p>
                         </div>
                       </div>
