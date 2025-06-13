@@ -25,10 +25,10 @@ export default function ShippingMethodPage() {
   const [userAddress, setUserAddress] = useState<AddressData | null>(null)
   const [videoEnded, setVideoEnded] = useState(false)
   const [videoLoaded, setVideoLoaded] = useState(false)
+  const [videoVolume, setVideoVolume] = useState(0.5) // Volume inicial em 50%
 
   // Detectar se é mobile
   const [isMobile, setIsMobile] = useState(false)
-  const [videoMuted, setVideoMuted] = useState(true)
 
   useEffect(() => {
     const checkMobile = () => {
@@ -79,6 +79,20 @@ export default function ShippingMethodPage() {
         if (data.event === "ready") {
           setVideoLoaded(true)
           console.log("✅ Vídeo carregado e pronto!")
+
+          // Define o volume para 50% quando o vídeo estiver pronto
+          const iframe = document.querySelector("iframe")
+          if (iframe && iframe.contentWindow) {
+            setTimeout(() => {
+              iframe.contentWindow.postMessage(
+                JSON.stringify({
+                  method: "setVolume",
+                  value: 0.5,
+                }),
+                "https://player.vimeo.com",
+              )
+            }, 1000)
+          }
         }
 
         if (data.event === "ended") {
@@ -168,6 +182,21 @@ export default function ShippingMethodPage() {
   const handleConfirm = () => {
     // Redireciona para a página de provas sociais em vez da confirmação final
     router.push("/social-proof")
+  }
+
+  // Função para ajustar volume
+  const adjustVolume = (newVolume: number) => {
+    const iframe = document.querySelector("iframe")
+    if (iframe && iframe.contentWindow) {
+      iframe.contentWindow.postMessage(
+        JSON.stringify({
+          method: "setVolume",
+          value: newVolume,
+        }),
+        "https://player.vimeo.com",
+      )
+      setVideoVolume(newVolume)
+    }
   }
 
   // Encontra o método selecionado
@@ -277,9 +306,9 @@ export default function ShippingMethodPage() {
                   </div>
                 )}
 
-                {/* Iframe do Vimeo otimizado para mobile */}
+                {/* Iframe do Vimeo - sempre com som habilitado */}
                 <iframe
-                  src={`https://player.vimeo.com/video/1091329936?h=77a25f5325&autoplay=1&muted=${isMobile ? 1 : 0}&controls=1&title=0&byline=0&portrait=0&background=0&loop=0&api=1&autopause=0&quality=auto&playsinline=1`}
+                  src="https://player.vimeo.com/video/1091329936?h=77a25f5325&autoplay=1&muted=0&controls=1&title=0&byline=0&portrait=0&background=0&loop=0&api=1&autopause=0&quality=auto&playsinline=1"
                   className={`absolute top-0 left-0 w-full h-full transition-opacity duration-500 ${
                     videoLoaded ? "opacity-100" : "opacity-0"
                   }`}
@@ -290,43 +319,61 @@ export default function ShippingMethodPage() {
                   loading="eager"
                 />
 
-                {/* Botão de som para mobile */}
-                {isMobile && videoLoaded && (
-                  <div className="absolute top-4 right-4 z-10">
+                {/* Controles de volume */}
+                {videoLoaded && (
+                  <div className="absolute top-4 right-4 z-10 flex flex-col gap-2">
+                    {/* Botão de volume alto */}
                     <button
-                      onClick={() => {
-                        // Enviar mensagem para o Vimeo player para ativar/desativar som
-                        const iframe = document.querySelector("iframe")
-                        if (iframe && iframe.contentWindow) {
-                          iframe.contentWindow.postMessage(
-                            JSON.stringify({
-                              method: videoMuted ? "setVolume" : "setVolume",
-                              value: videoMuted ? 1 : 0,
-                            }),
-                            "https://player.vimeo.com",
-                          )
-                          setVideoMuted(!videoMuted)
-                        }
-                      }}
-                      className="bg-black/70 text-white p-2 rounded-full hover:bg-black/90 transition-colors"
+                      onClick={() => adjustVolume(1)}
+                      className={`p-2 rounded-full transition-colors ${
+                        videoVolume === 1 ? "bg-blue-600 text-white" : "bg-black/70 text-white hover:bg-black/90"
+                      }`}
+                      title="Volume Alto"
                     >
-                      {videoMuted ? (
-                        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                          <path
-                            fillRule="evenodd"
-                            d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.617.816L4.414 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.414l3.969-3.816a1 1 0 011.617.816zM14.657 2.929a1 1 0 011.414 0A9.972 9.972 0 0119 10a9.972 9.972 0 01-2.929 7.071 1 1 0 01-1.414-1.414A7.971 7.971 0 0017 10c0-2.21-.894-4.208-2.343-5.657a1 1 0 010-1.414zm-2.829 2.828a1 1 0 011.415 0A5.983 5.983 0 0115 10a5.983 5.983 0 01-1.757 4.243 1 1 0 01-1.415-1.415A3.984 3.984 0 0013 10a3.984 3.984 0 00-1.172-2.828 1 1 0 010-1.415z"
-                            clipRule="evenodd"
-                          />
-                        </svg>
-                      ) : (
-                        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                          <path
-                            fillRule="evenodd"
-                            d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.617.816L4.414 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.414l3.969-3.816a1 1 0 011.617.816zM12.293 7.293a1 1 0 011.414 0L15 8.586l1.293-1.293a1 1 0 111.414 1.414L16.414 10l1.293 1.293a1 1 0 01-1.414 1.414L15 11.414l-1.293 1.293a1 1 0 01-1.414-1.414L13.586 10l-1.293-1.293a1 1 0 010-1.414z"
-                            clipRule="evenodd"
-                          />
-                        </svg>
-                      )}
+                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                        <path
+                          fillRule="evenodd"
+                          d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.617.816L4.414 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.414l3.969-3.816a1 1 0 011.617.816zM14.657 2.929a1 1 0 011.414 0A9.972 9.972 0 0119 10a9.972 9.972 0 01-2.929 7.071 1 1 0 01-1.414-1.414A7.971 7.971 0 0017 10c0-2.21-.894-4.208-2.343-5.657a1 1 0 010-1.414zm-2.829 2.828a1 1 0 011.415 0A5.983 5.983 0 0115 10a5.983 5.983 0 01-1.757 4.243 1 1 0 01-1.415-1.415A3.984 3.984 0 0013 10a3.984 3.984 0 00-1.172-2.828 1 1 0 010-1.415z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
+                    </button>
+
+                    {/* Botão de volume médio (50%) */}
+                    <button
+                      onClick={() => adjustVolume(0.5)}
+                      className={`p-2 rounded-full transition-colors ${
+                        videoVolume === 0.5 ? "bg-blue-600 text-white" : "bg-black/70 text-white hover:bg-black/90"
+                      }`}
+                      title="Volume Médio (50%)"
+                    >
+                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                        <path
+                          fillRule="evenodd"
+                          d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.617.816L4.414 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.414l3.969-3.816a1 1 0 011.617.816zM12.293 7.293a1 1 0 011.414 0L15 8.586l1.293-1.293a1 1 0 111.414 1.414L16.414 10l1.293 1.293a1 1 0 01-1.414 1.414L15 11.414l-1.293 1.293a1 1 0 01-1.414-1.414L13.586 10l-1.293-1.293a1 1 0 010-1.414z"
+                          clipRule="evenodd"
+                        />
+                        <text x="10" y="14" fontSize="8" textAnchor="middle" fill="currentColor">
+                          50%
+                        </text>
+                      </svg>
+                    </button>
+
+                    {/* Botão de mudo */}
+                    <button
+                      onClick={() => adjustVolume(0)}
+                      className={`p-2 rounded-full transition-colors ${
+                        videoVolume === 0 ? "bg-red-600 text-white" : "bg-black/70 text-white hover:bg-black/90"
+                      }`}
+                      title="Mudo"
+                    >
+                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                        <path
+                          fillRule="evenodd"
+                          d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.617.816L4.414 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.414l3.969-3.816a1 1 0 011.617.816zM12.293 7.293a1 1 0 011.414 0L15 8.586l1.293-1.293a1 1 0 111.414 1.414L16.414 10l1.293 1.293a1 1 0 01-1.414 1.414L15 11.414l-1.293 1.293a1 1 0 01-1.414-1.414L13.586 10l-1.293-1.293a1 1 0 010-1.414z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
                     </button>
                   </div>
                 )}
