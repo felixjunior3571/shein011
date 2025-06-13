@@ -23,15 +23,12 @@ export default function RootLayout({
   return (
     <html lang="pt-BR">
       <head>
-        {/* Scripts da Utmify com tratamento de erro */}
+        {/* Scripts da Utmify */}
         <Script
           src="https://cdn.utmify.com.br/scripts/utms/latest.js"
           data-utmify-prevent-xcod-sck=""
           data-utmify-prevent-subids=""
           strategy="afterInteractive"
-          onError={(e) => {
-            console.warn("Erro ao carregar script Utmify UTMs:", e)
-          }}
         />
         <Script id="utmify-pixel" strategy="afterInteractive">
           {`
@@ -41,9 +38,6 @@ export default function RootLayout({
               a.setAttribute("async", "");
               a.setAttribute("defer", "");
               a.setAttribute("src", "https://cdn.utmify.com.br/scripts/pixel/pixel.js");
-              a.onerror = function() {
-                console.warn("Erro ao carregar pixel Utmify");
-              };
               document.head.appendChild(a);
             } catch (error) {
               console.warn("Erro ao inicializar Utmify:", error);
@@ -65,11 +59,6 @@ export default function RootLayout({
                 quality={100}
                 sizes="(max-width: 640px) 140px, (max-width: 768px) 160px, 180px"
                 className="select-none"
-                onError={(e) => {
-                  console.warn("Erro ao carregar logo do header")
-                  // Fallback para texto se a imagem falhar
-                  e.currentTarget.style.display = "none"
-                }}
               />
             </div>
           </div>
