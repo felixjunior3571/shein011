@@ -182,31 +182,31 @@ export function SocialNotifications() {
   if (!isVisible) return null
 
   return (
-    <div className="fixed bottom-4 left-2 sm:left-4 z-50 space-y-2">
+    <div className="fixed bottom-4 left-4 z-50 space-y-2">
       {notifications.map((notification) => (
         <div
           key={notification.id}
-          className="bg-white border border-gray-200 rounded-lg shadow-lg p-2 sm:p-4 max-w-xs sm:max-w-sm animate-in slide-in-from-left-5 duration-500"
+          className="bg-white border border-gray-200 rounded-lg shadow-lg p-4 max-w-sm animate-in slide-in-from-left-5 duration-500"
         >
-          <div className="flex items-start space-x-2 sm:space-x-3">
-            <div className={`${notification.bgColor} rounded-full p-1 sm:p-2 flex-shrink-0`}>
-              <div className="text-white scale-75 sm:scale-100">{notification.icon}</div>
+          <div className="flex items-start space-x-3">
+            <div className={`${notification.bgColor} rounded-full p-2 flex-shrink-0`}>
+              <div className="text-white">{notification.icon}</div>
             </div>
 
             <div className="flex-1 min-w-0">
               <div className="flex items-start justify-between">
                 <div className="flex-1">
-                  <p className="text-xs sm:text-sm font-semibold text-gray-900 truncate">{notification.name}</p>
+                  <p className="text-sm font-semibold text-gray-900 truncate">{notification.name}</p>
                   <p className="text-xs text-gray-500 mb-1">{notification.state}</p>
-                  <p className={`text-xs ${notification.textColor} font-medium leading-tight`}>{notification.action}</p>
+                  <p className={`text-xs ${notification.textColor} font-medium`}>{notification.action}</p>
                 </div>
 
-                <button onClick={handleClose} className="ml-1 sm:ml-2 text-gray-400 hover:text-gray-600 flex-shrink-0">
-                  <X className="w-3 h-3 sm:w-4 sm:h-4" />
+                <button onClick={handleClose} className="ml-2 text-gray-400 hover:text-gray-600 flex-shrink-0">
+                  <X className="w-4 h-4" />
                 </button>
               </div>
 
-              <div className="mt-1 sm:mt-2 text-xs text-gray-400">há {Math.floor(Math.random() * 5) + 1} minutos</div>
+              <div className="mt-2 text-xs text-gray-400">há {Math.floor(Math.random() * 5) + 1} minutos</div>
             </div>
           </div>
         </div>
