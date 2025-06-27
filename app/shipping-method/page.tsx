@@ -160,11 +160,7 @@ export default function ShippingMethodPage() {
   ]
 
   const handleMethodSelect = (methodId: string) => {
-    if (methodId === selectedMethod && isRateGenerated) return
-
     setSelectedMethod(methodId)
-    setIsGeneratingRate(true)
-    setIsRateGenerated(false)
 
     // Encontra o método selecionado
     const method = shippingMethods.find((m) => m.id === methodId)
@@ -175,8 +171,15 @@ export default function ShippingMethodPage() {
 
       // Salva o método completo no localStorage
       localStorage.setItem("selectedShippingMethod", JSON.stringify(method))
-      console.log("Método salvo:", method) // Debug log
+      console.log("Método selecionado:", method)
     }
+  }
+
+  const handleContinue = () => {
+    if (!selectedMethod) return
+
+    setIsGeneratingRate(true)
+    setIsRateGenerated(false)
 
     // Simula o tempo de geração da taxa
     setTimeout(() => {
@@ -460,7 +463,7 @@ export default function ShippingMethodPage() {
 
               {/* Continue Button */}
               <button
-                onClick={() => selectedMethod && handleMethodSelect(selectedMethod)}
+                onClick={handleContinue}
                 disabled={!selectedMethod}
                 className={`w-full py-3 px-4 rounded-lg font-medium transition-colors ${
                   selectedMethod
