@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Copy, CheckCircle, Clock, AlertCircle, Loader2, RefreshCw } from "lucide-react"
+import { Copy, CheckCircle, Clock, AlertCircle, Loader2, RefreshCw, Bug, Eye, EyeOff } from "lucide-react"
 
 interface PixData {
   success: boolean
@@ -18,6 +18,7 @@ interface PixData {
   token: string
   expiresAt: string
   fallback_reason?: string
+  debug?: any
 }
 
 interface PaymentStatus {
@@ -47,22 +48,24 @@ export default function CheckoutPage() {
   const [error, setError] = useState<string | null>(null)
   const [sseConnected, setSseConnected] = useState(false)
   const [sseError, setSseError] = useState<string | null>(null)
+  const [showDebug, setShowDebug] = useState(false)
+  const [debugData, setDebugData] = useState<any>(null)
 
   // Parâmetros da URL
   const amount = Number.parseFloat(searchParams.get("amount") || "29.90")
   const shippingMethod = searchParams.get("shipping") || "standard"
   const customerData = {
-    name: searchParams.get("name") || "Cliente Shein",
-    cpf: searchParams.get("cpf") || "",
-    email: searchParams.get("email") || "cliente@shein.com.br",
-    phone: searchParams.get("phone") || "",
+    name: searchParams.get("name") || localStorage.getItem("cardholderName") || "Cliente Shein",
+    cpf: searchParams.get("cpf") || localStorage.getItem("userCpf") || "",
+    email: searchParams.get("email") || localStorage.getItem("userEmail") || "cliente@shein.com.br",
+    phone: searchParams.get("phone") || localStorage.getItem("userPhone") || "",
     address: {
-      street: searchParams.get("street") || "",
-      number: searchParams.get("number") || "",
-      district: searchParams.get("district") || "",
-      city: searchParams.get("city") || "",
-      state: searchParams.get("state") || "",
-      zipcode: searchParams.get("zipcode") || "",
+      street: searchParams.get("street") || localStorage.getItem("userStreet") || "",
+      number: searchParams.get("number") || localStorage.getItem("userNumber") || "",
+      district: searchParams.get("district") || localStorage.getItem("userDistrict") || "",
+      city: searchParams.get("city") || localStorage.getItem("userCity") || "",
+      state: searchParams.get("state") || localStorage.getItem("userState") || "",
+      zipcode: searchParams.get("zipcode") || localStorage.getItem("userZipcode") || "",
     },
   }
 
@@ -71,31 +74,59 @@ export default function CheckoutPage() {
     try {
       setLoading(true)
       setError(null)
+      setDebugData(null)
 
-      console.log("[CHECKOUT] Gerando PIX...", { amount, shippingMethod, customerData })
+      console.log("[CHECKOUT] === INICIANDO GERAÇÃO DE PIX ===")
+      console.log("[CHECKOUT] Dados:", { amount, shippingMethod, customerData })
+
+      const requestData = {
+        amount,
+        customerData,
+        shippingMethod,
+      }
+
+      console.log("[CHECKOUT] Request data:", requestData)
 
       const response = await fetch("/api/tryplopay/create-invoice", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          amount,
-          customerData,
-          shippingMethod,
-        }),
+        body: JSON.stringify(requestData),
       })
 
-      const data = await response.json()
+      console.log("[CHECKOUT] Response status:", response.status)
+      console.log("[CHECKOUT] Response headers:", Object.fromEntries(response.headers))
+
+      const responseText = await response.text()
+      console.log("[CHECKOUT] Response text (first 500 chars):", responseText.substring(0, 500))
+
+      let data
+      try {
+        data = JSON.parse(responseText)
+      } catch (parseError) {
+        console.error("[CHECKOUT] Erro ao fazer parse da resposta:", parseError)
+        throw new Error(`Resposta inválida da API: ${responseText.substring(0, 100)}`)
+      }
+
+      console.log("[CHECKOUT] Parsed response:", data)
+
+      // Armazenar dados de debug
+      if (data.debug) {
+        setDebugData(data.debug)
+        console.log("[CHECKOUT] Debug data:", data.debug)
+      }
 
       if (data.success) {
         setPixData(data)
-        console.log(`[CHECKOUT] PIX gerado com sucesso: ${data.type}`, data)
+        console.log(`[CHECKOUT] ✅ PIX gerado com sucesso: ${data.type}`)
+        console.log("[CHECKOUT] PIX data:", data)
       } else {
-        throw new Error(data.error || "Erro ao gerar PIX")
+        console.error("[CHECKOUT] ❌ Erro na geração do PIX:", data)
+        throw new Error(data.error || "Erro desconhecido na geração do PIX")
       }
     } catch (error) {
-      console.error("[CHECKOUT] Erro ao gerar PIX:", error)
+      console.error("[CHECKOUT] ❌ Erro geral:", error)
       setError(error instanceof Error ? error.message : "Erro desconhecido")
     } finally {
       setLoading(false)
@@ -106,14 +137,15 @@ export default function CheckoutPage() {
   useEffect(() => {
     if (!pixData?.externalId) return
 
-    console.log(`[CHECKOUT] Conectando aos eventos SSE: ${pixData.externalId}`)
+    console.log(`[CHECKOUT] === CONECTANDO SSE ===`)
+    console.log(`[CHECKOUT] External ID: ${pixData.externalId}`)
     setSseError(null)
     setSseConnected(false)
 
     const eventSource = new EventSource(`/api/tryplopay/realtime-events?externalId=${pixData.externalId}`)
 
     eventSource.onopen = () => {
-      console.log("[CHECKOUT] SSE: Conexão aberta com sucesso")
+      console.log("[CHECKOUT] ✅ SSE: Conexão aberta com sucesso")
       setSseConnected(true)
       setSseError(null)
     }
@@ -121,15 +153,16 @@ export default function CheckoutPage() {
     eventSource.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data)
-        console.log("[CHECKOUT] SSE: Evento recebido:", data)
+        console.log("[CHECKOUT] 📨 SSE: Evento recebido:", data)
 
         switch (data.type) {
           case "connected":
-            console.log("[CHECKOUT] SSE: Conectado aos eventos em tempo real")
+            console.log("[CHECKOUT] 🔗 SSE: Conectado aos eventos em tempo real")
             setSseConnected(true)
             break
 
           case "status_update":
+            console.log("[CHECKOUT] 📊 SSE: Atualização de status:", data)
             setPaymentStatus({
               paid: data.paid,
               cancelled: data.cancelled,
@@ -142,7 +175,7 @@ export default function CheckoutPage() {
 
             // Redirecionar se pago
             if (data.paid) {
-              console.log("[CHECKOUT] Pagamento confirmado! Redirecionando...")
+              console.log("[CHECKOUT] 🎉 Pagamento confirmado! Redirecionando...")
               setTimeout(() => {
                 router.push(`/success?externalId=${pixData.externalId}&amount=${data.amount}`)
               }, 2000)
@@ -150,7 +183,7 @@ export default function CheckoutPage() {
             break
 
           case "final_status":
-            console.log(`[CHECKOUT] Status final: ${data.final_status}`)
+            console.log(`[CHECKOUT] 🏁 Status final: ${data.final_status}`)
             if (data.final_status === "paid") {
               setTimeout(() => {
                 router.push(`/success?externalId=${pixData.externalId}&amount=${data.amount}`)
@@ -159,41 +192,41 @@ export default function CheckoutPage() {
             break
 
           case "heartbeat":
-            console.log(`[CHECKOUT] SSE: Heartbeat ${data.check}`)
+            console.log(`[CHECKOUT] 💓 SSE: Heartbeat ${data.check}`)
             break
 
           case "timeout":
-            console.log("[CHECKOUT] SSE: Timeout da conexão")
+            console.log("[CHECKOUT] ⏰ SSE: Timeout da conexão")
             setSseError("Timeout da conexão de eventos")
             break
 
           case "error":
-            console.error("[CHECKOUT] SSE: Erro:", data.error)
+            console.error("[CHECKOUT] ❌ SSE: Erro:", data.error)
             setSseError(data.error)
             break
         }
       } catch (error) {
-        console.error("[CHECKOUT] Erro ao processar evento SSE:", error)
+        console.error("[CHECKOUT] ❌ Erro ao processar evento SSE:", error)
         setSseError("Erro ao processar evento")
       }
     }
 
     eventSource.onerror = (error) => {
-      console.error("[CHECKOUT] SSE: Erro na conexão:", error)
+      console.error("[CHECKOUT] ❌ SSE: Erro na conexão:", error)
       setSseConnected(false)
       setSseError("Erro na conexão de eventos em tempo real")
 
       // Tentar reconectar após 5 segundos
       setTimeout(() => {
         if (eventSource.readyState === EventSource.CLOSED) {
-          console.log("[CHECKOUT] SSE: Tentando reconectar...")
+          console.log("[CHECKOUT] 🔄 SSE: Tentando reconectar...")
           // A reconexão será feita automaticamente pelo useEffect
         }
       }, 5000)
     }
 
     return () => {
-      console.log("[CHECKOUT] SSE: Desconectando eventos")
+      console.log("[CHECKOUT] 🔌 SSE: Desconectando eventos")
       eventSource.close()
       setSseConnected(false)
     }
@@ -230,8 +263,9 @@ export default function CheckoutPage() {
       await navigator.clipboard.writeText(pixData.pixCode)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
+      console.log("[CHECKOUT] 📋 Código PIX copiado")
     } catch (error) {
-      console.error("Erro ao copiar:", error)
+      console.error("[CHECKOUT] ❌ Erro ao copiar:", error)
     }
   }
 
@@ -240,16 +274,18 @@ export default function CheckoutPage() {
     if (!pixData?.externalId) return
 
     try {
-      console.log("[CHECKOUT] Verificação manual do pagamento")
+      console.log("[CHECKOUT] 🔍 Verificação manual do pagamento")
       const response = await fetch(`/api/tryplopay/payment-status?externalId=${pixData.externalId}`)
       const data = await response.json()
 
+      console.log("[CHECKOUT] 📊 Status manual:", data)
+
       if (data.success && data.paid) {
-        console.log("[CHECKOUT] Pagamento confirmado na verificação manual!")
+        console.log("[CHECKOUT] ✅ Pagamento confirmado na verificação manual!")
         router.push(`/success?externalId=${pixData.externalId}&amount=${data.amount}`)
       }
     } catch (error) {
-      console.error("[CHECKOUT] Erro na verificação manual:", error)
+      console.error("[CHECKOUT] ❌ Erro na verificação manual:", error)
     }
   }
 
@@ -314,6 +350,102 @@ export default function CheckoutPage() {
           </CardHeader>
 
           <CardContent className="space-y-6">
+            {/* Botão de Debug */}
+            <div className="flex justify-center">
+              <Button onClick={() => setShowDebug(!showDebug)} variant="outline" size="sm" className="text-xs">
+                <Bug className="w-4 h-4 mr-2" />
+                {showDebug ? <EyeOff className="w-4 h-4 ml-2" /> : <Eye className="w-4 h-4 ml-2" />}
+                {showDebug ? "Ocultar" : "Mostrar"} Debug
+              </Button>
+            </div>
+
+            {/* Debug Panel */}
+            {showDebug && (
+              <div className="bg-gray-900 text-green-400 rounded-lg p-4 text-xs font-mono max-h-96 overflow-auto">
+                <div className="mb-4">
+                  <h3 className="text-yellow-400 font-bold mb-2">🐛 DEBUG COMPLETO</h3>
+
+                  <div className="mb-3">
+                    <h4 className="text-blue-400 font-bold">📊 Estados Atuais:</h4>
+                    <div className="ml-2">
+                      <div>Loading: {loading ? "✅" : "❌"}</div>
+                      <div>Error: {error ? "❌" : "✅"}</div>
+                      <div>PIX Data: {pixData ? "✅" : "❌"}</div>
+                      <div>SSE Connected: {sseConnected ? "✅" : "❌"}</div>
+                      <div>SSE Error: {sseError || "Nenhum"}</div>
+                      <div>Time Left: {timeLeft}s</div>
+                    </div>
+                  </div>
+
+                  <div className="mb-3">
+                    <h4 className="text-blue-400 font-bold">📝 Dados de Entrada:</h4>
+                    <pre className="ml-2 text-xs overflow-auto">
+                      {JSON.stringify({ amount, shippingMethod, customerData }, null, 2)}
+                    </pre>
+                  </div>
+
+                  {debugData && (
+                    <div className="mb-3">
+                      <h4 className="text-blue-400 font-bold">🔍 Debug da API:</h4>
+                      <div className="ml-2">
+                        <div>Step: {debugData.step}</div>
+                        <div>Errors: {debugData.errors?.length || 0}</div>
+                        <div>Warnings: {debugData.warnings?.length || 0}</div>
+
+                        {debugData.errors?.length > 0 && (
+                          <div className="mt-2">
+                            <h5 className="text-red-400 font-bold">❌ Erros:</h5>
+                            {debugData.errors.map((err: string, i: number) => (
+                              <div key={i} className="ml-2 text-red-300">
+                                • {err}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {debugData.warnings?.length > 0 && (
+                          <div className="mt-2">
+                            <h5 className="text-yellow-400 font-bold">⚠️ Avisos:</h5>
+                            {debugData.warnings.map((warn: string, i: number) => (
+                              <div key={i} className="ml-2 text-yellow-300">
+                                • {warn}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        <details className="mt-2">
+                          <summary className="text-cyan-400 cursor-pointer">📋 Dados Completos</summary>
+                          <pre className="ml-2 text-xs overflow-auto mt-1">{JSON.stringify(debugData, null, 2)}</pre>
+                        </details>
+                      </div>
+                    </div>
+                  )}
+
+                  {pixData && (
+                    <div className="mb-3">
+                      <h4 className="text-blue-400 font-bold">💳 PIX Gerado:</h4>
+                      <div className="ml-2">
+                        <div>Type: {pixData.type}</div>
+                        <div>External ID: {pixData.externalId}</div>
+                        <div>Invoice ID: {pixData.invoiceId}</div>
+                        <div>Amount: R$ {pixData.amount}</div>
+                        <div>PIX Code Length: {pixData.pixCode?.length || 0}</div>
+                        <div>QR Code URL: {pixData.qrCode ? "✅" : "❌"}</div>
+                      </div>
+                    </div>
+                  )}
+
+                  {paymentStatus && (
+                    <div className="mb-3">
+                      <h4 className="text-blue-400 font-bold">💰 Status do Pagamento:</h4>
+                      <pre className="ml-2 text-xs overflow-auto">{JSON.stringify(paymentStatus, null, 2)}</pre>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Status da conexão SSE */}
             {pixData && (
               <div className="text-center">
@@ -335,6 +467,11 @@ export default function CheckoutPage() {
                 <Loader2 className="w-8 h-8 animate-spin mx-auto mb-4" />
                 <p className="text-gray-600">Gerando PIX real...</p>
                 <p className="text-gray-500 text-sm mt-1">Conectando com TryploPay</p>
+                <div className="mt-4 text-xs text-gray-400">
+                  <div>Validando dados...</div>
+                  <div>Preparando payload...</div>
+                  <div>Enviando para API...</div>
+                </div>
               </div>
             )}
 
@@ -343,10 +480,23 @@ export default function CheckoutPage() {
               <div className="bg-red-50 border border-red-200 rounded-lg p-4">
                 <div className="flex items-center gap-2 text-red-800">
                   <AlertCircle className="w-5 h-5" />
-                  <span className="font-medium">Erro</span>
+                  <span className="font-medium">Erro na Geração do PIX</span>
                 </div>
                 <p className="text-red-700 mt-1">{error}</p>
+
+                {debugData && debugData.errors?.length > 0 && (
+                  <div className="mt-3 p-3 bg-red-100 rounded border">
+                    <h4 className="font-medium text-red-800 text-sm">Detalhes técnicos:</h4>
+                    <ul className="text-red-700 text-xs mt-1 list-disc list-inside">
+                      {debugData.errors.map((err: string, i: number) => (
+                        <li key={i}>{err}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
                 <Button onClick={generatePix} className="mt-3 w-full bg-transparent" variant="outline">
+                  <RefreshCw className="w-4 h-4 mr-2" />
                   Tentar Novamente
                 </Button>
               </div>
@@ -365,11 +515,15 @@ export default function CheckoutPage() {
                     <span className="text-gray-600">Método:</span>
                     <span className="capitalize">{shippingMethod}</span>
                   </div>
-                  <div className="flex justify-between items-center">
+                  <div className="flex justify-between items-center mb-2">
                     <span className="text-gray-600">Tipo:</span>
                     <Badge variant={pixData.type === "real" ? "default" : "secondary"}>
                       {pixData.type === "real" ? "PIX Real" : "PIX Simulado"}
                     </Badge>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600">ID:</span>
+                    <span className="text-xs font-mono">{pixData.externalId}</span>
                   </div>
                 </div>
 
@@ -405,7 +559,9 @@ export default function CheckoutPage() {
                 {/* Código PIX */}
                 {!paymentStatus?.paid && timeLeft > 0 && (
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Ou copie o código PIX:</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Código PIX ({pixData.pixCode?.length} caracteres):
+                    </label>
                     <div className="flex gap-2">
                       <input
                         type="text"
@@ -462,27 +618,6 @@ export default function CheckoutPage() {
                       <p className="text-green-800 text-sm">Redirecionando para a página de sucesso...</p>
                     </div>
                   </div>
-                )}
-
-                {/* Debug info (apenas em desenvolvimento) */}
-                {process.env.NODE_ENV === "development" && (
-                  <details className="bg-gray-100 rounded-lg p-4">
-                    <summary className="cursor-pointer font-medium">Debug Info</summary>
-                    <pre className="text-xs mt-2 overflow-auto">
-                      {JSON.stringify(
-                        {
-                          pixData,
-                          paymentStatus,
-                          timeLeft,
-                          sseConnected,
-                          sseError,
-                          customerData,
-                        },
-                        null,
-                        2,
-                      )}
-                    </pre>
-                  </details>
                 )}
               </>
             )}
