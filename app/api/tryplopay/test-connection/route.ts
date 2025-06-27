@@ -1,8 +1,16 @@
 import { NextResponse } from "next/server"
 
+// Função para criar Basic Auth header
+function createBasicAuthHeader(token: string, secretKey: string): string {
+  const credentials = `${token}:${secretKey}`
+  const base64Credentials = Buffer.from(credentials).toString("base64")
+  return `Basic ${base64Credentials}`
+}
+
 export async function GET() {
   const debugInfo = {
     timestamp: new Date().toISOString(),
+    auth_method: "Basic Auth (Correto conforme documentação)",
     config: {
       token: !!process.env.TRYPLOPAY_TOKEN,
       tokenLength: process.env.TRYPLOPAY_TOKEN?.length || 0,
@@ -38,15 +46,17 @@ export async function GET() {
     })
   }
 
-  // Teste 1: Verificar conectividade básica
+  // Criar Basic Auth header
+  const basicAuthHeader = createBasicAuthHeader(process.env.TRYPLOPAY_TOKEN!, process.env.TRYPLOPAY_SECRET_KEY!)
+
+  // Teste 1: Verificar conectividade básica com Basic Auth
   try {
     const response = await fetch(`${process.env.TRYPLOPAY_API_URL}/invoices`, {
       method: "GET",
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
-        Authorization: `Bearer ${process.env.TRYPLOPAY_TOKEN}`,
-        "X-Secret-Key": process.env.TRYPLOPAY_SECRET_KEY,
+        Authorization: basicAuthHeader,
         "User-Agent": "SHEIN-Test/1.0",
       },
     })
@@ -61,22 +71,25 @@ export async function GET() {
     }
 
     debugInfo.tests.push({
-      test: "Conectividade API",
+      test: "Conectividade API (Basic Auth)",
       status: response.status,
       success: response.ok,
       response: parsedResponse,
       headers: Object.fromEntries(response.headers),
+      auth_header: `Basic ${Buffer.from(`${process.env.TRYPLOPAY_TOKEN}:${process.env.TRYPLOPAY_SECRET_KEY}`).toString("base64").substring(0, 20)}...`,
     })
 
     if (!response.ok) {
       debugInfo.errors.push(
         `Erro de autenticação: ${response.status} - ${parsedResponse.message || parsedResponse.error || "Unauthorized"}`,
       )
+    } else {
+      debugInfo.warnings.push("✅ Autenticação Basic Auth funcionando!")
     }
   } catch (error) {
     debugInfo.errors.push(`Erro de conexão: ${error instanceof Error ? error.message : String(error)}`)
     debugInfo.tests.push({
-      test: "Conectividade API",
+      test: "Conectividade API (Basic Auth)",
       status: 0,
       success: false,
       error: error instanceof Error ? error.message : String(error),
@@ -130,8 +143,7 @@ export async function GET() {
         headers: {
           "Content-Type": "application/json",
           Accept: "application/json",
-          Authorization: `Bearer ${process.env.TRYPLOPAY_TOKEN}`,
-          "X-Secret-Key": process.env.TRYPLOPAY_SECRET_KEY,
+          Authorization: basicAuthHeader,
           "User-Agent": "SHEIN-Test/1.0",
         },
         body: JSON.stringify(testPayload),
@@ -147,15 +159,26 @@ export async function GET() {
       }
 
       debugInfo.tests.push({
-        test: "Criação de Fatura",
+        test: "Criação de Fatura (Basic Auth)",
         status: response.status,
         success: response.ok,
         response: parsedResponse,
         payload: testPayload,
+        auth_method: "Basic Auth",
       })
 
       if (response.ok) {
-        debugInfo.warnings.push("✅ Teste de criação de fatura bem-sucedido")
+        debugInfo.warnings.push("✅ Teste de criação de fatura bem-sucedido com Basic Auth!")
+
+        // Verificar se PIX foi gerado
+        const invoiceData = parsedResponse.fatura || parsedResponse.invoice || parsedResponse
+        const pixCode = invoiceData.pix?.payload || invoiceData.pix_code
+
+        if (pixCode) {
+          debugInfo.warnings.push("✅ PIX code gerado com sucesso!")
+        } else {
+          debugInfo.warnings.push("⚠️ Fatura criada mas PIX code não encontrado")
+        }
       } else {
         debugInfo.errors.push(
           `Erro na criação de fatura: ${response.status} - ${parsedResponse.message || parsedResponse.error}`,
@@ -164,7 +187,7 @@ export async function GET() {
     } catch (error) {
       debugInfo.errors.push(`Erro no teste de criação: ${error instanceof Error ? error.message : String(error)}`)
       debugInfo.tests.push({
-        test: "Criação de Fatura",
+        test: "Criação de Fatura (Basic Auth)",
         status: 0,
         success: false,
         error: error instanceof Error ? error.message : String(error),
@@ -177,7 +200,8 @@ export async function GET() {
 
   return NextResponse.json({
     success: isFullyWorking,
-    status: isFullyWorking ? "✅ Totalmente funcional" : "❌ Problemas encontrados",
+    status: isFullyWorking ? "✅ Totalmente funcional com Basic Auth" : "❌ Problemas encontrados",
+    auth_method: "Basic Auth (Conforme documentação TryploPay)",
     summary: {
       total_tests: debugInfo.tests.length,
       successful_tests: debugInfo.tests.filter((t) => t.success).length,
@@ -189,13 +213,21 @@ export async function GET() {
     warnings: debugInfo.warnings,
     tests: debugInfo.tests,
     config: debugInfo.config,
+    basic_auth_example: {
+      format: "Authorization: Basic base64(TOKEN:SECRET_KEY)",
+      your_credentials: `${process.env.TRYPLOPAY_TOKEN}:${process.env.TRYPLOPAY_SECRET_KEY?.substring(0, 10)}...`,
+      base64_preview:
+        Buffer.from(`${process.env.TRYPLOPAY_TOKEN}:${process.env.TRYPLOPAY_SECRET_KEY}`)
+          .toString("base64")
+          .substring(0, 30) + "...",
+    },
     recommendations: isFullyWorking
-      ? ["Sistema funcionando corretamente", "Pode usar PIX real em produção"]
+      ? ["✅ Sistema funcionando corretamente com Basic Auth", "✅ Pode usar PIX real em produção"]
       : [
-          "Verifique as credenciais da TryploPay",
-          "Confirme se o token não expirou",
-          "Verifique se a Secret Key está correta",
-          "Entre em contato com suporte TryploPay se necessário",
+          "🔧 Agora usando Basic Auth conforme documentação",
+          "🔑 Verifique se TOKEN e SECRET_KEY estão corretos",
+          "📋 Consulte /api/tryplopay/fix-credentials para ajuda",
+          "📞 Entre em contato com suporte TryploPay se necessário",
         ],
     debug: debugInfo,
   })

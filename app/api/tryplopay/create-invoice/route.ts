@@ -95,6 +95,13 @@ function generateValidCPF(): string {
   return cpf.join("")
 }
 
+// Função para criar Basic Auth header
+function createBasicAuthHeader(token: string, secretKey: string): string {
+  const credentials = `${token}:${secretKey}`
+  const base64Credentials = Buffer.from(credentials).toString("base64")
+  return `Basic ${base64Credentials}`
+}
+
 export async function POST(request: NextRequest) {
   const debugInfo: any = {
     timestamp: new Date().toISOString(),
@@ -293,12 +300,14 @@ export async function POST(request: NextRequest) {
 
     debugInfo.step = "preparing_request"
 
-    // Headers conforme documentação TryploPay - FORMATO EXATO
+    // Criar Basic Auth header conforme documentação TryploPay
+    const basicAuthHeader = createBasicAuthHeader(process.env.TRYPLOPAY_TOKEN, process.env.TRYPLOPAY_SECRET_KEY)
+
+    // Headers conforme documentação TryploPay - BASIC AUTH
     const headers = {
       "Content-Type": "application/json",
       Accept: "application/json",
-      Authorization: `Bearer ${process.env.TRYPLOPAY_TOKEN}`,
-      "X-Secret-Key": process.env.TRYPLOPAY_SECRET_KEY,
+      Authorization: basicAuthHeader,
       "User-Agent": "SHEIN-Checkout/1.0",
     }
 
@@ -306,16 +315,21 @@ export async function POST(request: NextRequest) {
 
     debugInfo.data.request = {
       url: requestUrl,
+      auth_method: "Basic Auth",
+      credentials: `${process.env.TRYPLOPAY_TOKEN}:${process.env.TRYPLOPAY_SECRET_KEY?.substring(0, 10)}...`,
       headers: {
         ...headers,
-        Authorization: `Bearer ${process.env.TRYPLOPAY_TOKEN?.substring(0, 10)}...`,
-        "X-Secret-Key": `${process.env.TRYPLOPAY_SECRET_KEY?.substring(0, 10)}...`,
+        Authorization: `Basic ${Buffer.from(`${process.env.TRYPLOPAY_TOKEN}:${process.env.TRYPLOPAY_SECRET_KEY}`).toString("base64").substring(0, 20)}...`,
       },
       method: "POST",
     }
 
     console.log("[TRYPLOPAY] Fazendo request para:", requestUrl)
-    console.log("[TRYPLOPAY] Headers preparados conforme documentação")
+    console.log("[TRYPLOPAY] Usando Basic Auth conforme documentação")
+    console.log(
+      "[TRYPLOPAY] Credentials:",
+      `${process.env.TRYPLOPAY_TOKEN}:${process.env.TRYPLOPAY_SECRET_KEY?.substring(0, 5)}...`,
+    )
 
     debugInfo.step = "making_api_request"
 
@@ -433,7 +447,7 @@ export async function POST(request: NextRequest) {
 
       switch (response.status) {
         case 401:
-          errorMessage = "Erro de autenticação no sistema de pagamento. Entre em contato com o suporte."
+          errorMessage = "Erro de autenticação no sistema de pagamento. Verifique as credenciais."
           statusCode = 401
           break
         case 403:
@@ -475,11 +489,12 @@ export async function POST(request: NextRequest) {
     console.log("[TRYPLOPAY] Response data:", data)
 
     // Extrair dados conforme estrutura da TryploPay
-    const invoiceData = data.invoice || data.invoices || data
+    const invoiceData = data.fatura || data.invoice || data.invoices || data
     debugInfo.data.invoice_data = invoiceData
 
-    // Buscar PIX code em diferentes locais possíveis
+    // Buscar PIX code em diferentes locais possíveis conforme documentação
     const pixCode =
+      invoiceData.pix?.payload ||
       invoiceData.payment?.details?.pix_code ||
       invoiceData.pix_code ||
       invoiceData.details?.pix_code ||
@@ -489,6 +504,7 @@ export async function POST(request: NextRequest) {
       invoiceData.payment?.details?.qr_code
 
     const qrCodeUrl =
+      invoiceData.pix?.image ||
       invoiceData.payment?.details?.qrcode ||
       invoiceData.qrcode ||
       invoiceData.details?.qrcode ||

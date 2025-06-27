@@ -1,93 +1,107 @@
 import { NextResponse } from "next/server"
 
 export async function GET() {
-  return NextResponse.json({
-    title: "🔧 Como Corrigir Credenciais TryploPay",
-    problem: "AccessToken is Invalid or Expired",
+  const guide = {
+    timestamp: new Date().toISOString(),
+    title: "🔧 Guia Completo - Correção TryploPay",
+    problem: "Método de autenticação incorreto - deve usar Basic Auth",
     solution: {
-      step1: {
-        title: "1. Acesse o Dashboard TryploPay",
-        url: "https://dashboard.tryplopay.com",
-        action: "Faça login na sua conta TryploPay",
-      },
-      step2: {
-        title: "2. Navegue para API/Integrações",
-        action: "Procure pela seção de API Keys ou Tokens",
-      },
-      step3: {
-        title: "3. Gere Novas Credenciais",
-        action: "Crie um novo Token de API e Secret Key",
-        note: "Anote as credenciais imediatamente - elas podem não ser mostradas novamente",
-      },
-      step4: {
-        title: "4. Configure no Vercel",
-        url: "https://vercel.com/dashboard",
+      current_method: "❌ Bearer Token (INCORRETO)",
+      correct_method: "✅ Basic Auth com base64(token:secret)",
+      format: "Authorization: Basic base64(TOKEN:SECRET_KEY)",
+    },
+    steps: [
+      {
+        step: 1,
+        title: "Verificar Credenciais TryploPay",
+        description: "Confirme se você tem TOKEN e SECRET_KEY válidos",
         actions: [
-          "Acesse seu projeto no Vercel",
-          "Vá em Settings → Environment Variables",
-          "Atualize TRYPLOPAY_TOKEN com o novo token",
-          "Atualize TRYPLOPAY_SECRET_KEY com a nova secret key",
-          "Confirme que TRYPLOPAY_API_URL = https://api.tryplopay.com",
+          "Acesse https://dashboard.tryplopay.com",
+          "Vá em API/Integrações",
+          "Copie o TOKEN (ClientID)",
+          "Copie a SECRET_KEY (ClientSecret)",
         ],
       },
-      step5: {
-        title: "5. Faça Redeploy",
-        action: "Faça um novo deploy para aplicar as mudanças",
-        note: "As variáveis de ambiente só são atualizadas após redeploy",
+      {
+        step: 2,
+        title: "Configurar no Vercel",
+        description: "Configure as variáveis de ambiente",
+        variables: [
+          {
+            name: "TRYPLOPAY_TOKEN",
+            description: "Token/ClientID da TryploPay",
+            example: "WmCVLneePWrUMgJ",
+          },
+          {
+            name: "TRYPLOPAY_SECRET_KEY",
+            description: "Secret/ClientSecret da TryploPay",
+            example: "V21DVkxuZWVQV3JVTWdKX1NFQ1JFVF9LRVk=",
+          },
+          {
+            name: "TRYPLOPAY_API_URL",
+            description: "URL da API TryploPay",
+            example: "https://api.tryplopay.com",
+          },
+          {
+            name: "TRYPLOPAY_WEBHOOK_URL",
+            description: "URL do webhook para receber notificações",
+            example: "https://seu-dominio.vercel.app/api/tryplopay/webhook",
+          },
+        ],
       },
-      step6: {
-        title: "6. Teste a Conexão",
-        action: "Acesse /api/tryplopay/debug-auth para verificar",
+      {
+        step: 3,
+        title: "Fazer Deploy",
+        description: "Após configurar as variáveis",
+        actions: ["Faça um novo deploy no Vercel", "Aguarde o deploy completar", "Teste a conexão"],
       },
-    },
-    current_config: {
-      TRYPLOPAY_TOKEN: {
-        exists: !!process.env.TRYPLOPAY_TOKEN,
-        length: process.env.TRYPLOPAY_TOKEN?.length || 0,
-        preview: process.env.TRYPLOPAY_TOKEN
-          ? `${process.env.TRYPLOPAY_TOKEN.substring(0, 5)}...${process.env.TRYPLOPAY_TOKEN.substring(-3)}`
-          : "não configurado",
-      },
-      TRYPLOPAY_SECRET_KEY: {
-        exists: !!process.env.TRYPLOPAY_SECRET_KEY,
-        length: process.env.TRYPLOPAY_SECRET_KEY?.length || 0,
-        preview: process.env.TRYPLOPAY_SECRET_KEY
-          ? `${process.env.TRYPLOPAY_SECRET_KEY.substring(0, 5)}...${process.env.TRYPLOPAY_SECRET_KEY.substring(-3)}`
-          : "não configurado",
-      },
-      TRYPLOPAY_API_URL: process.env.TRYPLOPAY_API_URL || "não configurado",
-    },
-    troubleshooting: {
-      common_issues: [
-        {
-          issue: "Token expirado",
-          solution: "Gere um novo token no dashboard TryploPay",
-        },
-        {
-          issue: "Secret Key incorreta",
-          solution: "Verifique se copiou a secret key completa",
-        },
-        {
-          issue: "URL da API incorreta",
-          solution: "Confirme que está usando https://api.tryplopay.com",
-        },
-        {
-          issue: "Variáveis não atualizadas",
-          solution: "Faça redeploy após alterar as variáveis",
-        },
-      ],
-      contact_support: {
-        email: "suporte@tryplopay.com",
-        documentation: "https://docs.tryplopay.com",
-        note: "Se o problema persistir, entre em contato com o suporte TryploPay",
-      },
-    },
-    next_steps: [
-      "1. Acesse https://dashboard.tryplopay.com",
-      "2. Gere novas credenciais",
-      "3. Atualize no Vercel",
-      "4. Faça redeploy",
-      "5. Teste em /api/tryplopay/debug-auth",
     ],
+    auth_format: {
+      description: "Formato correto da autenticação Basic Auth",
+      username: "TOKEN (ClientID)",
+      password: "SECRET_KEY (ClientSecret)",
+      header_format: "Authorization: Basic base64(TOKEN:SECRET_KEY)",
+      example: {
+        token: "WmCVLneePWrUMgJ",
+        secret: "V21DVkxuZWVQV3JVTWdKX1NFQ1JFVF9LRVk=",
+        combined: "WmCVLneePWrUMgJ:V21DVkxuZWVQV3JVTWdKX1NFQ1JFVF9LRVk=",
+        base64: "V21DVkxuZWVQV3JVTWdKOlYyMURWa3h1WldWUVYzSlVUV2RLWDFORlExSkZWRjlMUlZrPQ==",
+        header: "Authorization: Basic V21DVkxuZWVQV3JVTWdKOlYyMURWa3h1WldWUVYzSlVUV2RLWDFORlExSkZWRjlMUlZrPQ==",
+      },
+    },
+    troubleshooting: [
+      {
+        problem: "401 Unauthorized",
+        causes: ["Token inválido", "Secret Key incorreta", "Formato de autenticação errado"],
+        solutions: ["Verificar credenciais no dashboard", "Usar Basic Auth", "Verificar base64 encoding"],
+      },
+      {
+        problem: "404 Not Found",
+        causes: ["URL da API incorreta", "Endpoint não existe"],
+        solutions: ["Usar https://api.tryplopay.com", "Verificar documentação"],
+      },
+      {
+        problem: "422 Unprocessable Entity",
+        causes: ["Dados do payload incorretos", "Campos obrigatórios faltando"],
+        solutions: ["Verificar estrutura do payload", "Validar dados do cliente"],
+      },
+    ],
+    next_steps: [
+      "1. Configure as variáveis no Vercel",
+      "2. Faça deploy",
+      "3. Teste em /api/tryplopay/test-connection",
+      "4. Se funcionou, teste o checkout",
+      "5. Monitore em /webhook-monitor",
+    ],
+    support: {
+      vercel: "https://vercel.com/help",
+      tryplopay: "Contate o suporte da TryploPay para credenciais",
+    },
+  }
+
+  return NextResponse.json(guide, {
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+    },
   })
 }
