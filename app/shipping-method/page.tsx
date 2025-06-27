@@ -192,6 +192,13 @@ export default function ShippingMethodPage() {
     const selectedMethodDetails = shippingMethods.find((method) => method.id === selectedMethod)
 
     if (selectedMethodDetails) {
+      console.log("Redirecionando para checkout com:", {
+        amount: selectedMethodDetails.numericPrice,
+        shipping: selectedMethod,
+        method: selectedMethodDetails.name,
+        price: selectedMethodDetails.price,
+      })
+
       // Redireciona para checkout com os parâmetros corretos
       router.push(
         `/checkout?amount=${selectedMethodDetails.numericPrice}&shipping=${selectedMethod}&method=${selectedMethodDetails.name}`,

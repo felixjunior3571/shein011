@@ -85,7 +85,8 @@ export default function CheckoutPage() {
       setError(null)
 
       console.log("🔄 Criando fatura PIX...")
-      console.log("Parâmetros:", { amount, shipping, method })
+      console.log("Parâmetros:", { amount: Number.parseFloat(amount), shipping, method })
+      console.log("Valor formatado:", `R$ ${Number.parseFloat(amount).toFixed(2)}`)
 
       const response = await fetch("/api/tryplopay/create-invoice", {
         method: "POST",
@@ -276,7 +277,7 @@ export default function CheckoutPage() {
           {/* Valor */}
           <div className="text-center mb-6">
             <p className="text-gray-600 mb-1">Valor a pagar</p>
-            <p className="text-3xl font-bold text-green-600">R$ {(invoice?.valores.bruto / 100).toFixed(2)}</p>
+            <p className="text-3xl font-bold text-green-600">R$ {Number.parseFloat(amount).toFixed(2)}</p>
             <p className="text-sm text-gray-500">Frete {method} - Cartão SHEIN</p>
           </div>
 
