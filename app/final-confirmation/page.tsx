@@ -148,28 +148,18 @@ export default function FinalConfirmationPage() {
     },
   ]
 
-  // Função para redirecionar para o pagamento baseado no método selecionado
+  // Função para redirecionar para o checkout PIX
   const handlePayment = () => {
     if (!selectedMethod) return
 
     // Rastreia a tentativa de pagamento
     trackPaymentAttempt(selectedMethod.name, selectedMethod.price)
 
-    // URLs de pagamento para cada método - ATUALIZADAS
-    const paymentUrls = {
-      pac: "https://pay.shelnpay.shop/7vJOGY42p1pZKXd", // R$ 27,97
-      express: "https://pay.shelnpay.shop/PyE2Zy80R1x3qRb", // R$ 29,58
-      sedex: "https://pay.shelnpay.shop/nWrxGWAVpVw3654", // R$ 34,90
-    }
+    // Salva dados para o checkout
+    localStorage.setItem("selectedShippingMethod", JSON.stringify(selectedMethod))
 
-    const url = paymentUrls[selectedMethod.id.toLowerCase()]
-
-    if (url) {
-      window.location.href = url
-    } else {
-      // Fallback para SEDEX se não encontrar o método
-      window.location.href = paymentUrls.sedex
-    }
+    // Redireciona para checkout PIX
+    window.location.href = `/checkout?method=${selectedMethod.id.toLowerCase()}`
   }
 
   if (!selectedMethod) {
@@ -247,10 +237,8 @@ export default function FinalConfirmationPage() {
                 </div>
 
                 <div>
-                  <p className="font-medium text-gray-800">Pagamento em Até 10 Minutos</p>
-                  <p className="text-gray-600">
-                    Realize o pagamento do frete em até 10 minutos para ativar o cartão virtual.
-                  </p>
+                  <p className="font-medium text-gray-800">Pagamento via PIX</p>
+                  <p className="text-gray-600">Pagamento instantâneo e seguro via PIX.</p>
                 </div>
 
                 <div>
@@ -265,7 +253,7 @@ export default function FinalConfirmationPage() {
             {/* Valor do Frete */}
             <div className="text-center mb-4">
               <p className="text-2xl font-bold text-black">{selectedMethod.price}</p>
-              <p className="text-xs text-gray-600">O pagamento será confirmado imediatamente</p>
+              <p className="text-xs text-gray-600">Pagamento via PIX - Aprovação instantânea</p>
             </div>
 
             {/* Botão de Pagamento */}
@@ -273,13 +261,13 @@ export default function FinalConfirmationPage() {
               onClick={handlePayment}
               className="w-full bg-black text-white font-bold py-3 px-4 rounded-md hover:bg-black/90 transition-colors mb-2 text-sm"
             >
-              Pagar Frete - {selectedMethod.price}
+              Pagar via PIX - {selectedMethod.price}
             </button>
 
             {/* Pagamento Seguro */}
             <div className="flex justify-center items-center text-green-600 text-xs mb-3">
               <Lock className="w-3 h-3 mr-1 flex-shrink-0" />
-              <span>Pagamento 100% seguro</span>
+              <span>Pagamento 100% seguro via PIX</span>
             </div>
 
             {/* Alerta de Unidades Limitadas */}
