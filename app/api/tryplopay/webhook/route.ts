@@ -1,157 +1,131 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getGlobalInvoices } from "../create-invoice/route"
 
-// Sistema de eventos em tempo real
-const eventListeners = new Map()
+// Armazenamento global de status de pagamento
+const globalPaymentStatus = new Map<string, any>()
 
-// Função para notificar listeners
-function notifyListeners(externalId: string, data: any) {
-  const listeners = eventListeners.get(externalId) || []
-  listeners.forEach((listener: any) => {
-    try {
-      listener(data)
-    } catch (error) {
-      console.error("[WEBHOOK] Erro ao notificar listener:", error)
-    }
-  })
-}
-
-// Função para adicionar listener
-export function addEventListener(externalId: string, callback: Function) {
-  if (!eventListeners.has(externalId)) {
-    eventListeners.set(externalId, [])
-  }
-  eventListeners.get(externalId).push(callback)
-}
-
-// Função para remover listener
-export function removeEventListener(externalId: string, callback: Function) {
-  const listeners = eventListeners.get(externalId) || []
-  const index = listeners.indexOf(callback)
-  if (index > -1) {
-    listeners.splice(index, 1)
-  }
+export function getGlobalPaymentStatus() {
+  return globalPaymentStatus
 }
 
 export async function POST(request: NextRequest) {
   try {
+    console.log("[WEBHOOK] Webhook recebido da TryploPay")
+
+    // Verificar headers
+    const headers = Object.fromEntries(request.headers)
+    console.log("[WEBHOOK] Headers:", headers)
+
+    // Ler body
     const body = await request.json()
+    console.log("[WEBHOOK] Body recebido:", JSON.stringify(body, null, 2))
 
-    console.log("[WEBHOOK] Webhook recebido:", JSON.stringify(body, null, 2))
-
-    // Validar estrutura do webhook
+    // Validar estrutura do webhook conforme documentação TryploPay
     if (!body.event || !body.invoices) {
       console.error("[WEBHOOK] Estrutura inválida do webhook")
-      return NextResponse.json({ success: false, error: "Estrutura inválida" }, { status: 400 })
+      return NextResponse.json({ error: "Estrutura inválida" }, { status: 400 })
     }
 
     const { event, invoices } = body
-    const externalId = invoices.external_id
+    const { type: eventType, date: eventDate } = event
+    const {
+      id: invoiceId,
+      external_id: externalId,
+      token,
+      status,
+      customer,
+      prices,
+      type: paymentType,
+      payment,
+    } = invoices
 
-    if (!externalId) {
-      console.error("[WEBHOOK] External ID não encontrado")
-      return NextResponse.json({ success: false, error: "External ID não encontrado" }, { status: 400 })
+    console.log("[WEBHOOK] Processando evento:", {
+      eventType,
+      externalId,
+      invoiceId,
+      statusCode: status?.code,
+      statusTitle: status?.title,
+    })
+
+    // Processar diferentes tipos de evento
+    if (eventType === "invoice.update") {
+      const globalInvoices = getGlobalInvoices()
+      const existingInvoice = globalInvoices.get(externalId)
+
+      // Determinar status baseado no código
+      const isPaid = status?.code === 5 // Código 5 = Pagamento Confirmado
+      const isCancelled = status?.code === 6 // Código 6 = Cancelado
+      const isRefunded = status?.code === 7 // Código 7 = Estornado
+      const isPending = status?.code === 3 || status?.code === 1 // Códigos 1,3 = Pendente
+
+      // Atualizar invoice global
+      if (existingInvoice) {
+        existingInvoice.status = status?.code
+        existingInvoice.statusTitle = status?.title
+        existingInvoice.statusDescription = status?.description
+        existingInvoice.paid = isPaid
+        existingInvoice.cancelled = isCancelled
+        existingInvoice.refunded = isRefunded
+        existingInvoice.pending = isPending
+        existingInvoice.updated_at = new Date().toISOString()
+        existingInvoice.webhook_data = body
+
+        console.log("[WEBHOOK] Invoice atualizada:", {
+          externalId,
+          paid: isPaid,
+          cancelled: isCancelled,
+          refunded: isRefunded,
+        })
+      }
+
+      // Atualizar status global
+      globalPaymentStatus.set(externalId, {
+        externalId,
+        invoiceId,
+        token,
+        status: status?.code,
+        statusTitle: status?.title,
+        statusDescription: status?.description,
+        paid: isPaid,
+        cancelled: isCancelled,
+        refunded: isRefunded,
+        pending: isPending,
+        amount: prices?.total,
+        type: paymentType,
+        customer,
+        payment,
+        updated_at: new Date().toISOString(),
+        webhook_received_at: new Date().toISOString(),
+        event_type: eventType,
+        event_date: eventDate,
+      })
+
+      // Log do status crítico
+      if (isPaid) {
+        console.log(`[WEBHOOK] 🎉 PAGAMENTO CONFIRMADO para: ${externalId}`)
+      } else if (isCancelled) {
+        console.log(`[WEBHOOK] ❌ PAGAMENTO CANCELADO para: ${externalId}`)
+      } else if (isRefunded) {
+        console.log(`[WEBHOOK] 💸 PAGAMENTO ESTORNADO para: ${externalId}`)
+      } else {
+        console.log(`[WEBHOOK] ⏳ Status atualizado para: ${externalId} - ${status?.title}`)
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: "Webhook processado com sucesso",
+        externalId,
+        status: status?.code,
+        processed_at: new Date().toISOString(),
+      })
     }
 
-    // Obter dados da invoice global
-    const globalInvoices = getGlobalInvoices()
-    const invoice = globalInvoices.get(externalId)
-
-    if (!invoice) {
-      console.error(`[WEBHOOK] Invoice não encontrada: ${externalId}`)
-      return NextResponse.json({ success: false, error: "Invoice não encontrada" }, { status: 404 })
-    }
-
-    // Processar diferentes tipos de eventos
-    switch (event.type) {
-      case "invoice.update":
-        console.log(`[WEBHOOK] Atualizando status da invoice ${externalId}`)
-
-        // Atualizar dados da invoice
-        invoice.status = invoices.status
-        invoice.payment = { ...invoice.payment, ...invoices.payment }
-        invoice.updated_at = new Date().toISOString()
-
-        // Processar status específicos
-        switch (invoices.status.code) {
-          case 5: // Pagamento Confirmado
-            console.log(`[WEBHOOK] ✅ Pagamento CONFIRMADO para ${externalId}`)
-            invoice.paid = true
-            invoice.paid_at = new Date().toISOString()
-
-            // Notificar listeners em tempo real
-            notifyListeners(externalId, {
-              type: "payment_confirmed",
-              externalId,
-              status: "paid",
-              paid: true,
-              amount: invoice.amount,
-              paid_at: invoice.paid_at,
-            })
-            break
-
-          case 6: // Cancelado
-            console.log(`[WEBHOOK] ❌ Pagamento CANCELADO para ${externalId}`)
-            invoice.cancelled = true
-            invoice.cancelled_at = new Date().toISOString()
-
-            notifyListeners(externalId, {
-              type: "payment_cancelled",
-              externalId,
-              status: "cancelled",
-              cancelled: true,
-            })
-            break
-
-          case 7: // Estornado
-            console.log(`[WEBHOOK] 🔄 Pagamento ESTORNADO para ${externalId}`)
-            invoice.refunded = true
-            invoice.refunded_at = new Date().toISOString()
-
-            notifyListeners(externalId, {
-              type: "payment_refunded",
-              externalId,
-              status: "refunded",
-              refunded: true,
-            })
-            break
-
-          case 3: // Pendente
-            console.log(`[WEBHOOK] ⏳ Pagamento PENDENTE para ${externalId}`)
-            notifyListeners(externalId, {
-              type: "payment_pending",
-              externalId,
-              status: "pending",
-            })
-            break
-
-          case 1: // Aguardando
-            console.log(`[WEBHOOK] ⏰ Aguardando pagamento para ${externalId}`)
-            notifyListeners(externalId, {
-              type: "payment_waiting",
-              externalId,
-              status: "waiting",
-            })
-            break
-
-          default:
-            console.log(`[WEBHOOK] Status desconhecido ${invoices.status.code} para ${externalId}`)
-        }
-
-        // Salvar dados atualizados
-        globalInvoices.set(externalId, invoice)
-        break
-
-      default:
-        console.log(`[WEBHOOK] Tipo de evento não processado: ${event.type}`)
-    }
-
-    // Resposta de sucesso para TryploPay
+    // Outros tipos de evento
+    console.log(`[WEBHOOK] Tipo de evento não processado: ${eventType}`)
     return NextResponse.json({
       success: true,
-      message: "Webhook processado com sucesso",
-      external_id: externalId,
-      processed_at: new Date().toISOString(),
+      message: "Evento recebido mas não processado",
+      event_type: eventType,
     })
   } catch (error) {
     console.error("[WEBHOOK] Erro ao processar webhook:", error)
@@ -160,7 +134,7 @@ export async function POST(request: NextRequest) {
       {
         success: false,
         error: "Erro interno do servidor",
-        details: error instanceof Error ? error.message : "Erro desconhecido",
+        message: error instanceof Error ? error.message : "Erro desconhecido",
       },
       { status: 500 },
     )
@@ -173,25 +147,30 @@ export async function OPTIONS(request: NextRequest) {
     const body = await request.json()
     const { token } = body
 
-    if (!token) {
-      return NextResponse.json({ success: false }, { status: 400 })
+    console.log("[WEBHOOK] Validação OPTIONS recebida:", { token })
+
+    // Validar token conforme documentação TryploPay
+    // O token vem em base64 e contém: "user_id:webhook_token"
+    if (token) {
+      try {
+        const decoded = Buffer.from(token, "base64").toString("utf-8")
+        const [userId, webhookToken] = decoded.split(":")
+
+        console.log("[WEBHOOK] Token decodificado:", { userId, webhookToken })
+
+        // Aqui você validaria o webhookToken com o que foi configurado
+        // Por enquanto, aceitar qualquer token válido
+        if (userId && webhookToken) {
+          return NextResponse.json({ success: true })
+        }
+      } catch (decodeError) {
+        console.error("[WEBHOOK] Erro ao decodificar token:", decodeError)
+      }
     }
 
-    // Decodificar token base64
-    try {
-      const decoded = Buffer.from(token, "base64").toString("utf-8")
-      const [userId, webhookToken] = decoded.split(":")
-
-      console.log(`[WEBHOOK_VALIDATION] Validando token para usuário ${userId}`)
-
-      // Aqui você pode implementar validação adicional se necessário
-      return NextResponse.json({ success: true })
-    } catch (error) {
-      console.error("[WEBHOOK_VALIDATION] Erro ao decodificar token:", error)
-      return NextResponse.json({ success: false }, { status: 404 })
-    }
+    return NextResponse.json({ success: false }, { status: 404 })
   } catch (error) {
-    console.error("[WEBHOOK_VALIDATION] Erro na validação:", error)
-    return NextResponse.json({ success: false }, { status: 500 })
+    console.error("[WEBHOOK] Erro na validação OPTIONS:", error)
+    return NextResponse.json({ success: false }, { status: 404 })
   }
 }

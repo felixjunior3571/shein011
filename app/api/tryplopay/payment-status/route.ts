@@ -1,80 +1,32 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { getGlobalInvoices } from "../create-invoice/route"
+import { getGlobalPaymentStatus } from "../webhook/route"
 
 // Rate limiting por IP
 const rateLimitMap = new Map()
 
-function checkRateLimit(ip: string): { allowed: boolean; resetTime?: number; attempts?: number } {
+function checkRateLimit(ip: string): boolean {
   const now = Date.now()
   const windowMs = 60 * 1000 // 1 minuto
-  const maxRequests = 3
+  const maxRequests = 3 // Máximo 3 consultas por minuto
 
   if (!rateLimitMap.has(ip)) {
-    rateLimitMap.set(ip, {
-      count: 1,
-      resetTime: now + windowMs,
-      blockUntil: 0,
-      totalAttempts: 1,
-    })
-    return { allowed: true }
+    rateLimitMap.set(ip, { count: 1, resetTime: now + windowMs })
+    return true
   }
 
   const limit = rateLimitMap.get(ip)
-
-  // Verificar se está bloqueado
-  if (limit.blockUntil > now) {
-    const remainingTime = Math.ceil((limit.blockUntil - now) / 1000)
-    return {
-      allowed: false,
-      resetTime: limit.blockUntil,
-      attempts: limit.totalAttempts,
-    }
-  }
-
-  // Reset da janela de tempo
   if (now > limit.resetTime) {
     limit.count = 1
     limit.resetTime = now + windowMs
-    limit.totalAttempts++
-    return { allowed: true }
+    return true
   }
 
-  // Verificar limite
   if (limit.count >= maxRequests) {
-    limit.totalAttempts++
-
-    // Sistema de bloqueio progressivo
-    let blockDuration
-    if (limit.totalAttempts <= 5)
-      blockDuration = 5 * 60 * 1000 // 5 min
-    else if (limit.totalAttempts <= 10)
-      blockDuration = 30 * 60 * 1000 // 30 min
-    else if (limit.totalAttempts <= 15)
-      blockDuration = 60 * 60 * 1000 // 1 hora
-    else if (limit.totalAttempts <= 20)
-      blockDuration = 12 * 60 * 60 * 1000 // 12 horas
-    else if (limit.totalAttempts <= 25)
-      blockDuration = 24 * 60 * 60 * 1000 // 24 horas
-    else if (limit.totalAttempts <= 30)
-      blockDuration = 48 * 60 * 60 * 1000 // 48 horas
-    else blockDuration = 100 * 60 * 60 * 1000 // 100 horas
-
-    limit.blockUntil = now + blockDuration
-
-    console.warn(
-      `[RATE_LIMIT] IP ${ip} bloqueado por ${blockDuration / 1000 / 60} minutos. Tentativas: ${limit.totalAttempts}`,
-    )
-
-    return {
-      allowed: false,
-      resetTime: limit.blockUntil,
-      attempts: limit.totalAttempts,
-    }
+    return false
   }
 
   limit.count++
-  limit.totalAttempts++
-  return { allowed: true }
+  return true
 }
 
 export async function GET(request: NextRequest) {
@@ -84,123 +36,119 @@ export async function GET(request: NextRequest) {
     const invoiceId = searchParams.get("invoiceId")
     const token = searchParams.get("token")
 
-    if (!externalId && !invoiceId && !token) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Parâmetro obrigatório não fornecido (externalId, invoiceId ou token)",
-        },
-        { status: 400 },
-      )
-    }
-
-    // Rate limiting
     const clientIp = request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "127.0.0.1"
 
-    const rateLimit = checkRateLimit(clientIp)
-    if (!rateLimit.allowed) {
-      const remainingTime = Math.ceil((rateLimit.resetTime! - Date.now()) / 1000)
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Rate limit excedido",
-          rate_limit: {
-            blocked: true,
-            reset_in_seconds: remainingTime,
-            total_attempts: rateLimit.attempts,
-          },
-        },
-        { status: 429 },
-      )
+    // Rate limiting
+    if (!checkRateLimit(clientIp)) {
+      console.log(`[PAYMENT_STATUS] Rate limit exceeded for IP: ${clientIp}`)
+      return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 })
     }
 
-    // Buscar dados globalmente primeiro (dados do webhook)
-    const globalInvoices = getGlobalInvoices()
-    let invoice = null
-
-    // Buscar por externalId primeiro
-    if (externalId) {
-      invoice = globalInvoices.get(externalId)
+    if (!externalId && !invoiceId && !token) {
+      return NextResponse.json({ error: "externalId, invoiceId ou token é obrigatório" }, { status: 400 })
     }
 
-    // Se não encontrou, buscar por outros identificadores
-    if (!invoice && (invoiceId || token)) {
-      for (const [key, value] of globalInvoices.entries()) {
-        if ((invoiceId && value.id === invoiceId) || (token && value.token === token)) {
-          invoice = value
-          break
-        }
-      }
-    }
+    console.log(`[PAYMENT_STATUS] Consultando status: ${externalId || invoiceId || token}`)
 
-    if (invoice) {
-      console.log(`[PAYMENT_STATUS] Status encontrado localmente para ${externalId || invoiceId || token}`)
+    // Primeiro, verificar dados do webhook (prioritário)
+    const globalPaymentStatus = getGlobalPaymentStatus()
+
+    if (externalId && globalPaymentStatus.has(externalId)) {
+      const status = globalPaymentStatus.get(externalId)
+      console.log(`[PAYMENT_STATUS] Status encontrado no webhook: ${status.status}`)
 
       return NextResponse.json({
         success: true,
-        source: "webhook_data",
-        externalId: externalId || invoice.external_id,
-        status: invoice.status,
-        paid: invoice.paid || invoice.status?.code === 5,
-        cancelled: invoice.cancelled || invoice.status?.code === 6,
-        refunded: invoice.refunded || invoice.status?.code === 7,
-        amount: invoice.amount,
-        created_at: invoice.created_at,
-        updated_at: invoice.updated_at,
-        paid_at: invoice.paid_at,
-        type: invoice.type || "unknown",
-        payment_details: invoice.payment?.details,
+        source: "webhook",
+        paid: status.paid,
+        cancelled: status.cancelled,
+        refunded: status.refunded,
+        pending: status.pending,
+        status: status.status,
+        statusTitle: status.statusTitle,
+        statusDescription: status.statusDescription,
+        amount: status.amount,
+        externalId: status.externalId,
+        invoiceId: status.invoiceId,
+        token: status.token,
+        updated_at: status.updated_at,
       })
     }
 
-    // Se não encontrou localmente e tem credenciais, tentar consultar API
-    if (process.env.TRYPLOPAY_TOKEN && externalId) {
-      try {
-        console.log(`[PAYMENT_STATUS] Consultando TryploPay API para ${externalId}`)
+    // Se não encontrou no webhook, tentar consultar na API TryploPay
+    try {
+      let apiUrl = `${process.env.TRYPLOPAY_API_URL}/invoices`
 
-        const response = await fetch(`${process.env.TRYPLOPAY_API_URL}/invoices?external_id=${externalId}`, {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${process.env.TRYPLOPAY_TOKEN}`,
-            "Content-Type": "application/json",
-          },
-          signal: AbortSignal.timeout(5000), // 5 segundos timeout
-        })
-
-        if (response.ok) {
-          const data = await response.json()
-          console.log(`[PAYMENT_STATUS] Dados obtidos da API TryploPay`)
-
-          return NextResponse.json({
-            success: true,
-            source: "api_query",
-            externalId,
-            status: data.status,
-            paid: data.status?.code === 5,
-            cancelled: data.status?.code === 6,
-            refunded: data.status?.code === 7,
-            amount: data.prices?.total,
-            type: "real",
-            payment_details: data.payment?.details,
-            api_data: data,
-          })
-        } else {
-          console.warn(`[PAYMENT_STATUS] API TryploPay retornou ${response.status}`)
-        }
-      } catch (error) {
-        console.error(`[PAYMENT_STATUS] Erro ao consultar API TryploPay:`, error)
+      if (externalId) {
+        apiUrl += `?external_id=${externalId}`
+      } else if (invoiceId) {
+        apiUrl += `/${invoiceId}`
+      } else if (token) {
+        apiUrl += `?token=${token}`
       }
+
+      const response = await fetch(apiUrl, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.TRYPLOPAY_TOKEN}`,
+        },
+        signal: AbortSignal.timeout(8000), // 8 segundos timeout
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        console.log(`[PAYMENT_STATUS] Resposta da API TryploPay:`, data)
+
+        const invoice = data.invoices || data
+        const status = invoice.status || {}
+
+        const isPaid = status.code === 5
+        const isCancelled = status.code === 6
+        const isRefunded = status.code === 7
+        const isPending = status.code === 1 || status.code === 3
+
+        return NextResponse.json({
+          success: true,
+          source: "api",
+          paid: isPaid,
+          cancelled: isCancelled,
+          refunded: isRefunded,
+          pending: isPending,
+          status: status.code,
+          statusTitle: status.title,
+          statusDescription: status.description,
+          amount: invoice.prices?.total || 0,
+          externalId: invoice.external_id,
+          invoiceId: invoice.id,
+          token: invoice.token,
+          data: invoice,
+        })
+      } else {
+        console.log(`[PAYMENT_STATUS] API TryploPay retornou: ${response.status}`)
+      }
+    } catch (apiError) {
+      console.error(`[PAYMENT_STATUS] Erro na API TryploPay:`, apiError)
     }
 
-    // Não encontrado
-    return NextResponse.json(
-      {
-        success: false,
-        error: "Pagamento não encontrado",
-        searched_for: { externalId, invoiceId, token },
-      },
-      { status: 404 },
-    )
+    // Fallback para simulação se não encontrou em lugar nenhum
+    console.log(`[PAYMENT_STATUS] Usando fallback simulado para: ${externalId || invoiceId || token}`)
+
+    return NextResponse.json({
+      success: true,
+      source: "fallback",
+      paid: false,
+      cancelled: false,
+      refunded: false,
+      pending: true,
+      status: 1,
+      statusTitle: "Aguardando Pagamento",
+      statusDescription: "Status não encontrado - usando fallback",
+      amount: 0,
+      externalId: externalId || "unknown",
+      invoiceId: invoiceId || "unknown",
+      token: token || "unknown",
+    })
   } catch (error) {
     console.error("[PAYMENT_STATUS] Erro geral:", error)
 
