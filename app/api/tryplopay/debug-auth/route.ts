@@ -22,7 +22,7 @@ async function testAuthMethod(
         "Content-Type": "application/json",
         Accept: "application/json",
         "User-Agent": "SHEIN-Debug/1.0",
-        ...headers,
+        ...headers, // USAR HEADERS COMPLETOS
       },
     })
 
@@ -119,29 +119,30 @@ export async function GET() {
   const secretKey = process.env.TRYPLOPAY_SECRET_KEY!
   const apiUrl = process.env.TRYPLOPAY_API_URL!
 
+  // USAR HEADERS COMPLETOS, NÃO TRUNCADOS
   const authMethods = [
     {
       name: "Basic Auth (Recomendado)",
       headers: {
-        Authorization: createBasicAuthHeader(token, secretKey),
+        Authorization: createBasicAuthHeader(token, secretKey), // HEADER COMPLETO
       },
     },
     {
       name: "Bearer Token",
       headers: {
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${token}`, // HEADER COMPLETO
       },
     },
     {
       name: "Token Header",
       headers: {
-        Token: token,
+        Token: token, // HEADER COMPLETO
       },
     },
     {
       name: "API Key Header",
       headers: {
-        "X-API-Key": token,
+        "X-API-Key": token, // HEADER COMPLETO
       },
     },
   ]
@@ -269,18 +270,18 @@ export async function POST() {
     },
   }
 
-  // Testar diferentes métodos
+  // Testar diferentes métodos - USAR HEADERS COMPLETOS
   const authMethods = [
     {
       name: "Basic Auth",
       headers: {
-        Authorization: createBasicAuthHeader(token, secretKey),
+        Authorization: createBasicAuthHeader(token, secretKey), // HEADER COMPLETO
       },
     },
     {
       name: "Bearer Token",
       headers: {
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${token}`, // HEADER COMPLETO
       },
     },
   ]
@@ -293,7 +294,7 @@ export async function POST() {
           "Content-Type": "application/json",
           Accept: "application/json",
           "User-Agent": "SHEIN-Debug-Create/1.0",
-          ...method.headers,
+          ...method.headers, // USAR HEADERS COMPLETOS
         },
         body: JSON.stringify(testPayload),
       })

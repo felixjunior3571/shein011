@@ -101,7 +101,7 @@ export async function GET() {
     })
   }
 
-  // Teste 3: Autenticação Basic Auth
+  // Teste 3: Autenticação Basic Auth - USAR HEADER COMPLETO
   try {
     const basicAuthHeader = createBasicAuthHeader(token, secretKey)
     const authTest = await fetch(`${apiUrl}/auth`, {
@@ -109,7 +109,7 @@ export async function GET() {
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
-        Authorization: basicAuthHeader,
+        Authorization: basicAuthHeader, // USAR HEADER COMPLETO
         "User-Agent": "SHEIN-Auth-Test/1.0",
       },
     })
@@ -147,7 +147,7 @@ export async function GET() {
     })
   }
 
-  // Teste 4: Endpoint de faturas
+  // Teste 4: Endpoint de faturas - USAR HEADER COMPLETO
   try {
     const basicAuthHeader = createBasicAuthHeader(token, secretKey)
     const invoicesTest = await fetch(`${apiUrl}/invoices?p=1`, {
@@ -155,7 +155,7 @@ export async function GET() {
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
-        Authorization: basicAuthHeader,
+        Authorization: basicAuthHeader, // USAR HEADER COMPLETO
         "User-Agent": "SHEIN-Invoices-Test/1.0",
       },
     })

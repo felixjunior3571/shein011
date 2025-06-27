@@ -307,17 +307,18 @@ export async function POST(request: NextRequest) {
     const headers = {
       "Content-Type": "application/json",
       Accept: "application/json",
-      Authorization: basicAuthHeader,
+      Authorization: basicAuthHeader, // USAR O HEADER COMPLETO, NÃO TRUNCADO
       "User-Agent": "SHEIN-Checkout/1.0",
     }
 
     const requestUrl = `${process.env.TRYPLOPAY_API_URL}/invoices`
 
+    // Para debug, mostrar apenas preview das credenciais, mas usar o header completo na requisição
     debugInfo.data.request = {
       url: requestUrl,
       auth_method: "Basic Auth",
-      credentials: `${process.env.TRYPLOPAY_TOKEN}:${process.env.TRYPLOPAY_SECRET_KEY?.substring(0, 10)}...`,
-      headers: {
+      credentials_preview: `${process.env.TRYPLOPAY_TOKEN}:${process.env.TRYPLOPAY_SECRET_KEY?.substring(0, 10)}...`,
+      headers_preview: {
         ...headers,
         Authorization: `Basic ${Buffer.from(`${process.env.TRYPLOPAY_TOKEN}:${process.env.TRYPLOPAY_SECRET_KEY}`).toString("base64").substring(0, 20)}...`,
       },
@@ -327,7 +328,7 @@ export async function POST(request: NextRequest) {
     console.log("[TRYPLOPAY] Fazendo request para:", requestUrl)
     console.log("[TRYPLOPAY] Usando Basic Auth conforme documentação")
     console.log(
-      "[TRYPLOPAY] Credentials:",
+      "[TRYPLOPAY] Credentials preview:",
       `${process.env.TRYPLOPAY_TOKEN}:${process.env.TRYPLOPAY_SECRET_KEY?.substring(0, 5)}...`,
     )
 
@@ -341,7 +342,7 @@ export async function POST(request: NextRequest) {
     try {
       response = await fetch(requestUrl, {
         method: "POST",
-        headers,
+        headers, // USAR HEADERS COMPLETOS, NÃO TRUNCADOS
         body: JSON.stringify(payload),
         signal: controller.signal,
       })
