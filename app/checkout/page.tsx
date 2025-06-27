@@ -2,11 +2,12 @@
 
 import { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
-import { Copy, CheckCircle, Clock, Smartphone, QrCode } from "lucide-react"
+import { Copy, CheckCircle, Clock, Smartphone, QrCode, AlertCircle, RefreshCw } from "lucide-react"
 import { usePageTracking, useTracking } from "@/hooks/use-tracking"
 
 interface InvoiceData {
   id: string
+  invoice_id: string
   secure: {
     id: string
     url: string
@@ -14,17 +15,25 @@ interface InvoiceData {
   pix: {
     payload: string
     image: string
+    status: string
   }
   status: {
     code: number
     title: string
+    text: string
+    description: string
   }
   valores: {
     bruto: number
+    liquido: number
+    original: number
+    desconto: number
   }
   vencimento: {
     dia: string
+    original: string
   }
+  criacao: string
 }
 
 interface CheckoutData {
@@ -51,26 +60,52 @@ export default function CheckoutPage() {
   const [isCheckingPayment, setIsCheckingPayment] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [paymentStatus, setPaymentStatus] = useState<"pending" | "checking" | "paid" | "expired">("pending")
+  const [invoiceType, setInvoiceType] = useState<"real" | "simulated" | "emergency">("real")
 
   // Carregar dados do localStorage
   useEffect(() => {
     try {
-      const savedCheckoutData = localStorage.getItem("checkoutData")
-      const savedInvoice = localStorage.getItem("tryploPayInvoice")
+      // Primeiro, tentar carregar dados do checkout
+      const urlParams = new URLSearchParams(window.location.search)
+      const amount = urlParams.get("amount")
+      const shipping = urlParams.get("shipping")
 
-      if (savedCheckoutData) {
-        setCheckoutData(JSON.parse(savedCheckoutData))
-      }
+      if (amount && shipping) {
+        // Dados vêm da URL (do shipping-method)
+        const newCheckoutData = {
+          amount: Number.parseFloat(amount),
+          clientName: localStorage.getItem("cardholderName") || "Cliente SHEIN",
+          clientDocument: localStorage.getItem("userCpf") || "00000000000",
+          clientEmail: localStorage.getItem("userEmail") || "cliente@shein.com",
+          clientPhone: localStorage.getItem("userPhone") || "",
+          productTitle: `Frete ${shipping.toUpperCase()} - Cartão SHEIN`,
+          orderId: `SHEIN_${Date.now()}`,
+        }
 
-      if (savedInvoice) {
-        setInvoice(JSON.parse(savedInvoice))
-        setIsLoading(false)
-      } else if (savedCheckoutData) {
-        // Se não tem invoice salva, criar uma nova
-        createInvoice(JSON.parse(savedCheckoutData))
+        setCheckoutData(newCheckoutData)
+        localStorage.setItem("checkoutData", JSON.stringify(newCheckoutData))
+
+        // Criar fatura automaticamente
+        createInvoice(newCheckoutData)
       } else {
-        // Se não tem dados, redirecionar
-        router.push("/shipping-method")
+        // Tentar carregar dados salvos
+        const savedCheckoutData = localStorage.getItem("checkoutData")
+        const savedInvoice = localStorage.getItem("tryploPayInvoice")
+
+        if (savedCheckoutData) {
+          setCheckoutData(JSON.parse(savedCheckoutData))
+        }
+
+        if (savedInvoice) {
+          setInvoice(JSON.parse(savedInvoice))
+          setIsLoading(false)
+        } else if (savedCheckoutData) {
+          // Se não tem invoice salva, criar uma nova
+          createInvoice(JSON.parse(savedCheckoutData))
+        } else {
+          // Se não tem dados, redirecionar
+          router.push("/shipping-method")
+        }
       }
     } catch (error) {
       console.error("Erro ao carregar dados:", error)
@@ -117,12 +152,15 @@ export default function CheckoutPage() {
       setInvoice(result.fatura)
       localStorage.setItem("tryploPayInvoice", JSON.stringify(result.fatura))
 
-      // Mostrar tipo de fatura nos logs
+      // Identificar tipo de fatura
       if (result.simulated) {
+        setInvoiceType("simulated")
         console.log("ℹ️ Usando fatura simulada")
       } else if (result.emergency) {
+        setInvoiceType("emergency")
         console.log("⚠️ Usando fatura de emergência")
       } else if (result.real) {
+        setInvoiceType("real")
         console.log("✅ Usando fatura real da TryploPay")
       }
     } catch (error) {
@@ -232,7 +270,12 @@ export default function CheckoutPage() {
         <div className="bg-white rounded-lg shadow-md p-8 w-full max-w-md text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-black mx-auto mb-4"></div>
           <h2 className="text-xl font-bold mb-2">Gerando PIX...</h2>
-          <p className="text-gray-600">Aguarde enquanto preparamos seu pagamento</p>
+          <p className="text-gray-600 mb-2">Aguarde enquanto preparamos seu pagamento</p>
+          <div className="text-xs text-gray-500 space-y-1">
+            <div>• Validando dados do cliente</div>
+            <div>• Conectando com TryploPay</div>
+            <div>• Gerando código PIX</div>
+          </div>
         </div>
       </div>
     )
@@ -243,14 +286,15 @@ export default function CheckoutPage() {
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
         <div className="bg-white rounded-lg shadow-md p-8 w-full max-w-md text-center">
           <div className="text-red-500 mb-4">
-            <Clock size={48} className="mx-auto" />
+            <AlertCircle size={48} className="mx-auto" />
           </div>
           <h2 className="text-xl font-bold mb-2 text-red-600">Erro no Pagamento</h2>
           <p className="text-gray-600 mb-6">{error}</p>
           <button
             onClick={() => window.location.reload()}
-            className="w-full bg-black hover:bg-black/80 text-white font-bold py-3 px-4 rounded-md transition"
+            className="w-full bg-black hover:bg-black/80 text-white font-bold py-3 px-4 rounded-md transition flex items-center justify-center gap-2"
           >
+            <RefreshCw size={20} />
             TENTAR NOVAMENTE
           </button>
         </div>
@@ -320,6 +364,21 @@ export default function CheckoutPage() {
           <div className="text-center">
             <p className="text-2xl font-bold text-green-600 mb-2">{formatCurrency(invoice.valores.bruto)}</p>
             <p className="text-sm text-gray-600">{checkoutData?.productTitle || "Cartão SHEIN"}</p>
+
+            {/* Indicador do tipo de fatura */}
+            <div className="mt-2">
+              <span
+                className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${
+                  invoiceType === "real"
+                    ? "bg-green-100 text-green-800"
+                    : invoiceType === "simulated"
+                      ? "bg-blue-100 text-blue-800"
+                      : "bg-yellow-100 text-yellow-800"
+                }`}
+              >
+                {invoiceType === "real" ? "PIX Real" : invoiceType === "simulated" ? "PIX Simulado" : "PIX Emergência"}
+              </span>
+            </div>
           </div>
         </div>
 
@@ -417,9 +476,19 @@ export default function CheckoutPage() {
               <button
                 onClick={checkPayment}
                 disabled={isCheckingPayment}
-                className="w-full bg-gray-100 hover:bg-gray-200 text-gray-800 font-medium py-2 px-4 rounded-md transition disabled:opacity-50"
+                className="w-full bg-gray-100 hover:bg-gray-200 text-gray-800 font-medium py-2 px-4 rounded-md transition disabled:opacity-50 flex items-center justify-center gap-2"
               >
-                {isCheckingPayment ? "VERIFICANDO..." : "VERIFICAR AGORA"}
+                {isCheckingPayment ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-600"></div>
+                    VERIFICANDO...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw size={16} />
+                    VERIFICAR AGORA
+                  </>
+                )}
               </button>
             </div>
           )}
@@ -429,6 +498,7 @@ export default function CheckoutPage() {
         <div className="mt-6 text-center">
           <p className="text-xs text-gray-500 leading-relaxed">
             Após o pagamento, você será redirecionado automaticamente. O PIX é processado instantaneamente.
+            {invoiceType === "simulated" && " (Modo simulado - pagamento será confirmado em 2 minutos)"}
           </p>
         </div>
       </div>

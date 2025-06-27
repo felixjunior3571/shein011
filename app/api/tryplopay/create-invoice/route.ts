@@ -96,7 +96,7 @@ function getClientIP(request: NextRequest): string {
   return "127.0.0.1"
 }
 
-// Função para obter access token
+// Função para obter access token conforme documentação TryploPay
 async function getAccessToken(): Promise<string | null> {
   try {
     console.log("=== GERANDO ACCESS TOKEN ===")
@@ -110,6 +110,7 @@ async function getAccessToken(): Promise<string | null> {
       return null
     }
 
+    // Basic Auth conforme documentação TryploPay
     const basicAuth = Buffer.from(`${token}:${secretKey}`).toString("base64")
 
     const response = await fetch(`${apiUrl}/auth`, {
@@ -123,12 +124,15 @@ async function getAccessToken(): Promise<string | null> {
     })
 
     if (!response.ok) {
-      console.log("❌ Erro na autenticação:", response.status)
+      const errorText = await response.text()
+      console.log("❌ Erro na autenticação:", response.status, errorText)
       return null
     }
 
     const data = await response.json()
     console.log("✅ Access token obtido:", data.access_token ? "OK" : "FALHOU")
+    console.log("Working:", data.working)
+    console.log("Account:", data.account)
 
     return data.access_token || null
   } catch (error) {
@@ -137,7 +141,7 @@ async function getAccessToken(): Promise<string | null> {
   }
 }
 
-// Função para criar fatura PIX
+// Função para criar fatura PIX conforme documentação TryploPay
 async function createPixInvoice(invoiceData: any, accessToken: string): Promise<any> {
   try {
     console.log("=== CRIANDO FATURA PIX ===")
@@ -154,14 +158,17 @@ async function createPixInvoice(invoiceData: any, accessToken: string): Promise<
       body: JSON.stringify(invoiceData),
     })
 
+    const responseText = await response.text()
+    console.log("Response status:", response.status)
+    console.log("Response body:", responseText.substring(0, 500))
+
     if (!response.ok) {
-      const errorText = await response.text()
-      console.log("❌ Erro ao criar fatura:", response.status, errorText)
-      throw new Error(`Erro ${response.status}: ${errorText}`)
+      console.log("❌ Erro ao criar fatura:", response.status, responseText)
+      throw new Error(`Erro ${response.status}: ${responseText}`)
     }
 
-    const data = await response.json()
-    console.log("✅ Fatura criada:", data.fatura?.id || "ID não encontrado")
+    const data = JSON.parse(responseText)
+    console.log("✅ Fatura criada:", data.fatura?.id || data.invoice?.id || "ID não encontrado")
 
     return data
   } catch (error) {
@@ -181,6 +188,7 @@ function createSimulatedPix(amount: number, clientName: string): any {
     success: true,
     fatura: {
       id: invoiceId,
+      invoice_id: `${invoiceId}_INVOICE`,
       secure: {
         id: `token_${invoiceId}`,
         url: `https://checkout.tryplopay.com/${invoiceId}`,
@@ -188,17 +196,25 @@ function createSimulatedPix(amount: number, clientName: string): any {
       pix: {
         payload: pixCode,
         image: `https://quickchart.io/qr?text=${encodeURIComponent(pixCode)}&size=250`,
+        status: "qr_code_created",
       },
       status: {
         code: 1,
         title: "Aguardando Pagamento",
+        text: "pending",
+        description: "No momento, estamos aguardando o processamento do pagamento.",
       },
       valores: {
         bruto: Math.round(amount * 100), // em centavos
+        liquido: Math.round(amount * 100),
+        original: Math.round(amount * 100),
+        desconto: 0,
       },
       vencimento: {
         dia: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0],
+        original: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0],
       },
+      criacao: new Date().toISOString().replace("T", " ").substring(0, 19),
     },
     simulated: true,
   }
@@ -273,7 +289,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(simulatedResult)
     }
 
-    // Preparar dados da fatura
+    // Preparar dados da fatura conforme documentação TryploPay
     const invoiceData = {
       client: {
         name: clientName,
@@ -294,10 +310,10 @@ export async function POST(request: NextRequest) {
       payment: {
         product_type: 1, // Produto digital
         id: orderId || `SHEIN_${Date.now()}`,
-        type: 3, // PIX
-        due_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0],
+        type: "3", // PIX (string conforme documentação)
+        due_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0], // YYYY-MM-DD
         referer: orderId || `SHEIN_${Date.now()}`,
-        installments: 1,
+        installments: "1", // string conforme documentação
         order_url: process.env.NEXT_PUBLIC_SITE_URL || "https://shein-checkout.vercel.app",
         store_url: process.env.NEXT_PUBLIC_SITE_URL || "https://shein-checkout.vercel.app",
         webhook: process.env.TRYPLOPAY_WEBHOOK_URL || `${process.env.NEXT_PUBLIC_SITE_URL}/api/tryplopay/webhook`,
@@ -309,7 +325,7 @@ export async function POST(request: NextRequest) {
             title: productTitle,
             qnt: 1,
             discount: "0.00",
-            amount: amount.toFixed(2),
+            amount: amount.toFixed(2), // string conforme documentação
           },
         ],
       },
@@ -317,6 +333,8 @@ export async function POST(request: NextRequest) {
         amount: 0,
       },
     }
+
+    console.log("Payload TryploPay:", JSON.stringify(invoiceData, null, 2))
 
     try {
       // Tentar criar fatura real
@@ -330,6 +348,7 @@ export async function POST(request: NextRequest) {
     } catch (error) {
       // Se falhar, usar simulação
       console.log("⚠️ API real falhou, usando simulação")
+      console.log("Erro:", error.message)
       const simulatedResult = createSimulatedPix(amount, clientName)
       return NextResponse.json(simulatedResult)
     }
@@ -341,6 +360,7 @@ export async function POST(request: NextRequest) {
       success: true,
       fatura: {
         id: `EMG_${Date.now()}`,
+        invoice_id: `EMG_${Date.now()}_INVOICE`,
         secure: {
           id: `token_emg_${Date.now()}`,
           url: "#",
@@ -348,17 +368,25 @@ export async function POST(request: NextRequest) {
         pix: {
           payload: "PIX_CODIGO_EMERGENCIA",
           image: "/placeholder.svg?height=250&width=250",
+          status: "qr_code_created",
         },
         status: {
           code: 1,
           title: "Aguardando Pagamento",
+          text: "pending",
+          description: "No momento, estamos aguardando o processamento do pagamento.",
         },
         valores: {
           bruto: 2830, // valor padrão em centavos
+          liquido: 2830,
+          original: 2830,
+          desconto: 0,
         },
         vencimento: {
           dia: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0],
+          original: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0],
         },
+        criacao: new Date().toISOString().replace("T", " ").substring(0, 19),
       },
       emergency: true,
     })

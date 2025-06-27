@@ -34,7 +34,7 @@ async function getAccessToken(): Promise<string | null> {
   }
 }
 
-// Função para verificar status da fatura
+// Função para verificar status da fatura conforme documentação TryploPay
 async function checkInvoiceStatus(invoiceId: string, accessToken: string): Promise<any> {
   try {
     console.log("=== VERIFICANDO PAGAMENTO ===")
@@ -42,7 +42,8 @@ async function checkInvoiceStatus(invoiceId: string, accessToken: string): Promi
 
     const apiUrl = process.env.TRYPLOPAY_API_URL
 
-    const response = await fetch(`${apiUrl}/invoices/${invoiceId}`, {
+    // Usar endpoint de lista de faturas com ID específico
+    const response = await fetch(`${apiUrl}/invoices?id=${invoiceId}`, {
       method: "GET",
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -57,7 +58,10 @@ async function checkInvoiceStatus(invoiceId: string, accessToken: string): Promi
     }
 
     const data = await response.json()
-    console.log("✅ Status verificado:", data.fatura?.status?.title || "Status não encontrado")
+    console.log(
+      "✅ Status verificado:",
+      data.fatura?.status?.title || data.invoice?.status?.title || "Status não encontrado",
+    )
 
     return data
   } catch (error) {
@@ -84,6 +88,23 @@ function simulatePaymentCheck(invoiceId: string): any {
       status: {
         code: isPaid ? 5 : 1,
         title: isPaid ? "Pago" : "Aguardando Pagamento",
+        text: isPaid ? "paid" : "pending",
+        description: isPaid
+          ? "Pagamento confirmado com sucesso!"
+          : "No momento, estamos aguardando o processamento do pagamento.",
+      },
+      valores: {
+        bruto: 2830,
+        liquido: 2830,
+        original: 2830,
+      },
+      pagamento: {
+        total: isPaid ? 2830 : null,
+        datas: {
+          sistema: isPaid ? new Date().toISOString().replace("T", " ").substring(0, 19) : null,
+          cliente: isPaid ? new Date().toISOString().replace("T", " ").substring(0, 19) : null,
+          capturado: isPaid ? new Date().toISOString().replace("T", " ").substring(0, 19) : null,
+        },
       },
     },
     isPaid,
@@ -130,8 +151,8 @@ export async function GET(request: NextRequest) {
       // Verificar status real da fatura
       const result = await checkInvoiceStatus(invoiceId, accessToken)
 
-      // Determinar se está pago
-      const isPaid = result.fatura?.status?.code === 5
+      // Determinar se está pago (status code 5 conforme documentação)
+      const isPaid = result.fatura?.status?.code === 5 || result.invoice?.status?.code === 5
 
       return NextResponse.json({
         success: true,
