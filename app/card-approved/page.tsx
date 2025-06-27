@@ -8,11 +8,21 @@ import { useEffect } from "react"
 export default function CardApprovedPage() {
   const { trackCardApproval } = useTracking()
 
-  // Rastreia a página de aprovação e o evento de aprovação
+  // Rastreia a página de aprovação
   usePageTracking("card_approved")
 
+  // Rastreia o evento de aprovação com tratamento de erro
   useEffect(() => {
-    trackCardApproval("R$ 11.700,00")
+    try {
+      // Aguarda um pouco para garantir que os scripts de rastreamento carregaram
+      const timer = setTimeout(() => {
+        trackCardApproval("R$ 11.700,00")
+      }, 1000)
+
+      return () => clearTimeout(timer)
+    } catch (error) {
+      console.warn("Erro ao rastrear aprovação do cartão:", error)
+    }
   }, [trackCardApproval])
 
   return (

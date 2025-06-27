@@ -5,26 +5,76 @@ import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import Image from "next/image"
 
+// Função para abreviar o nome do titular de forma inteligente
+const abbreviateName = (fullName: string): string => {
+  if (!fullName) return "Santos Silva"
+
+  const words = fullName.trim().split(" ")
+
+  if (words.length <= 2) {
+    return fullName
+  }
+
+  // Preposições que não devem ser abreviadas
+  const prepositions = ["DE", "DA", "DOS", "DAS", "DO", "DI", "E"]
+
+  const firstName = words[0]
+  const lastName = words[words.length - 1]
+  const middleNames = words.slice(1, -1)
+
+  // Processa os nomes do meio
+  const processedMiddleNames = middleNames.map((name) => {
+    // Se for uma preposição, mantém completa
+    if (prepositions.includes(name.toUpperCase())) {
+      return name
+    }
+    // Se não for preposição, abrevia para primeira letra sem ponto
+    return name.charAt(0).toUpperCase()
+  })
+
+  const result = [firstName, ...processedMiddleNames, lastName].join(" ")
+
+  // Se ainda estiver muito longo, faz uma abreviação mais agressiva
+  if (result.length > 20) {
+    // Mantém apenas primeiro nome, preposições importantes e último nome
+    const importantMiddle = middleNames.filter((name) => prepositions.includes(name.toUpperCase()))
+    return [firstName, ...importantMiddle, lastName].join(" ")
+  }
+
+  return result
+}
+
 export default function ChooseCardDesignPage() {
   const searchParams = useSearchParams()
   const [cardColor, setCardColor] = useState("black")
   const [cardholderName, setCardholderName] = useState("Santos Silva")
+  const [abbreviatedName, setAbbreviatedName] = useState("Santos Silva")
 
   useEffect(() => {
     // Try to get the name from localStorage first, then URL params
     const nameFromStorage = typeof window !== "undefined" ? localStorage.getItem("cardholderName") : null
     const nameFromParams = searchParams.get("name")
 
+    let fullName = "Santos Silva" // Nome padrão
+
     if (nameFromStorage) {
+      fullName = nameFromStorage
       setCardholderName(nameFromStorage)
     } else if (nameFromParams) {
+      fullName = nameFromParams
       setCardholderName(nameFromParams)
       // Save to localStorage for future use
       if (typeof window !== "undefined") {
         localStorage.setItem("cardholderName", nameFromParams)
       }
     }
-    // Se não encontrar nenhum nome, mantém o padrão "Santos Silva"
+
+    // Abrevia o nome para exibição no cartão
+    const abbreviated = abbreviateName(fullName)
+    setAbbreviatedName(abbreviated)
+
+    console.log("Nome completo:", fullName)
+    console.log("Nome abreviado:", abbreviated)
   }, [searchParams])
 
   const colors = [
@@ -142,7 +192,7 @@ export default function ChooseCardDesignPage() {
               <div className="flex justify-between items-end">
                 <div>
                   <p className="text-xs opacity-80 mb-1">TITULAR DO CARTÃO</p>
-                  <p className="font-medium">{cardholderName}</p>
+                  <p className="font-medium text-sm">{abbreviatedName}</p>
                 </div>
                 <div className="text-right">
                   <p className="text-xs opacity-80 mb-1">VÁLIDO ATÉ</p>

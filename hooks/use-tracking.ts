@@ -20,38 +20,65 @@ declare global {
       pageview: (page?: string) => void
     }
     pixelId?: string
+    dataLayer?: any[]
   }
 }
 
 export function useTracking() {
-  // Função para rastrear eventos
+  // Função para rastrear eventos com tratamento de erro robusto
   const trackEvent = (eventData: TrackingEvent) => {
     try {
-      // Rastreamento via Utmify
-      if (typeof window !== "undefined" && window.utmify) {
-        window.utmify.track(eventData.event, eventData)
+      // Verifica se está no ambiente do navegador
+      if (typeof window === "undefined") {
+        console.log("Tracking Event (SSR):", eventData)
+        return
       }
 
-      // Rastreamento via dataLayer (Google Analytics/GTM)
-      if (typeof window !== "undefined" && (window as any).dataLayer) {
-        ;(window as any).dataLayer.push({
-          event: eventData.event,
-          ...eventData,
-        })
+      // Rastreamento via Utmify com verificação
+      if (window.utmify && typeof window.utmify.track === "function") {
+        try {
+          window.utmify.track(eventData.event, eventData)
+        } catch (utmifyError) {
+          console.warn("Erro no rastreamento Utmify:", utmifyError)
+        }
       }
 
-      // Log para debug
-      console.log("Tracking Event:", eventData)
+      // Rastreamento via dataLayer (Google Analytics/GTM) com verificação
+      if (window.dataLayer && Array.isArray(window.dataLayer)) {
+        try {
+          window.dataLayer.push({
+            event: eventData.event,
+            ...eventData,
+          })
+        } catch (dataLayerError) {
+          console.warn("Erro no dataLayer:", dataLayerError)
+        }
+      }
+
+      // Log para debug apenas em desenvolvimento
+      if (process.env.NODE_ENV === "development") {
+        console.log("Tracking Event:", eventData)
+      }
     } catch (error) {
-      console.error("Erro no rastreamento:", error)
+      console.warn("Erro geral no rastreamento:", error)
     }
   }
 
-  // Função para rastrear pageview
+  // Função para rastrear pageview com tratamento de erro robusto
   const trackPageView = (page: string) => {
     try {
-      if (typeof window !== "undefined" && window.utmify) {
-        window.utmify.pageview(page)
+      // Verifica se está no ambiente do navegador
+      if (typeof window === "undefined") {
+        console.log("Page View (SSR):", page)
+        return
+      }
+
+      if (window.utmify && typeof window.utmify.pageview === "function") {
+        try {
+          window.utmify.pageview(page)
+        } catch (utmifyError) {
+          console.warn("Erro no pageview Utmify:", utmifyError)
+        }
       }
 
       trackEvent({
@@ -59,56 +86,80 @@ export function useTracking() {
         page: page,
       })
     } catch (error) {
-      console.error("Erro no rastreamento de pageview:", error)
+      console.warn("Erro no rastreamento de pageview:", error)
     }
   }
 
-  // Funções específicas para eventos do funil
+  // Funções específicas para eventos do funil com tratamento de erro
   const trackFunnelStep = (step: string, page: string) => {
-    trackEvent({
-      event: "funnel_step",
-      step: step,
-      page: page,
-    })
+    try {
+      trackEvent({
+        event: "funnel_step",
+        step: step,
+        page: page,
+      })
+    } catch (error) {
+      console.warn("Erro no rastreamento de funnel step:", error)
+    }
   }
 
   const trackQuizAnswer = (question: string, answer: string) => {
-    trackEvent({
-      event: "quiz_answer",
-      question: question,
-      answer: answer,
-    })
+    try {
+      trackEvent({
+        event: "quiz_answer",
+        question: question,
+        answer: answer,
+      })
+    } catch (error) {
+      console.warn("Erro no rastreamento de quiz answer:", error)
+    }
   }
 
   const trackFormSubmit = (formType: string, success = true) => {
-    trackEvent({
-      event: "form_submit",
-      form_type: formType,
-      success: success,
-    })
+    try {
+      trackEvent({
+        event: "form_submit",
+        form_type: formType,
+        success: success,
+      })
+    } catch (error) {
+      console.warn("Erro no rastreamento de form submit:", error)
+    }
   }
 
   const trackShippingSelection = (method: string, price: string) => {
-    trackEvent({
-      event: "shipping_selected",
-      shipping_method: method,
-      shipping_price: price,
-    })
+    try {
+      trackEvent({
+        event: "shipping_selected",
+        shipping_method: method,
+        shipping_price: price,
+      })
+    } catch (error) {
+      console.warn("Erro no rastreamento de shipping selection:", error)
+    }
   }
 
   const trackPaymentAttempt = (method: string, amount: string) => {
-    trackEvent({
-      event: "payment_attempt",
-      payment_method: method,
-      amount: amount,
-    })
+    try {
+      trackEvent({
+        event: "payment_attempt",
+        payment_method: method,
+        amount: amount,
+      })
+    } catch (error) {
+      console.warn("Erro no rastreamento de payment attempt:", error)
+    }
   }
 
   const trackCardApproval = (limit: string) => {
-    trackEvent({
-      event: "card_approved",
-      credit_limit: limit,
-    })
+    try {
+      trackEvent({
+        event: "card_approved",
+        credit_limit: limit,
+      })
+    } catch (error) {
+      console.warn("Erro no rastreamento de card approval:", error)
+    }
   }
 
   return {
@@ -123,12 +174,34 @@ export function useTracking() {
   }
 }
 
-// Hook para rastrear automaticamente pageviews
+// Hook para rastrear automaticamente pageviews com tratamento de erro robusto
 export function usePageTracking(pageName: string) {
   const { trackPageView, trackFunnelStep } = useTracking()
 
   useEffect(() => {
-    trackPageView(pageName)
-    trackFunnelStep(pageName, window.location.pathname)
+    // Verifica se está no ambiente do navegador
+    if (typeof window === "undefined") {
+      return
+    }
+
+    try {
+      // Aguarda um pouco para garantir que a página carregou
+      const timer = setTimeout(() => {
+        try {
+          trackPageView(pageName)
+
+          // Verifica se window.location está disponível antes de usar
+          if (window.location && window.location.pathname) {
+            trackFunnelStep(pageName, window.location.pathname)
+          }
+        } catch (trackingError) {
+          console.warn("Erro no rastreamento da página:", trackingError)
+        }
+      }, 100)
+
+      return () => clearTimeout(timer)
+    } catch (error) {
+      console.warn("Erro no setup do rastreamento automático da página:", error)
+    }
   }, [pageName, trackPageView, trackFunnelStep])
 }

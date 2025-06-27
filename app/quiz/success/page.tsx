@@ -1,4 +1,10 @@
+"use client"
+import { usePageTracking } from "@/hooks/use-tracking"
+
 export default function QuizSuccessPage() {
+  // Rastreia a página de sucesso do quiz
+  usePageTracking("quiz_success")
+
   return (
     <main className="min-h-full bg-gray-50">
       {/* Success Content */}
