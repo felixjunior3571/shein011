@@ -12,10 +12,19 @@ export async function GET(request: NextRequest) {
         exists: !!process.env.TRYPLOPAY_TOKEN,
         length: process.env.TRYPLOPAY_TOKEN?.length || 0,
         preview: process.env.TRYPLOPAY_TOKEN ? `${process.env.TRYPLOPAY_TOKEN.substring(0, 10)}...` : "❌ NÃO DEFINIDO",
+        value: process.env.TRYPLOPAY_TOKEN || "❌ NÃO DEFINIDO",
       },
       TRYPLOPAY_API_URL: {
         exists: !!process.env.TRYPLOPAY_API_URL,
         value: process.env.TRYPLOPAY_API_URL || "❌ NÃO DEFINIDO",
+      },
+      TRYPLOPAY_SECRET_KEY: {
+        exists: !!process.env.TRYPLOPAY_SECRET_KEY,
+        length: process.env.TRYPLOPAY_SECRET_KEY?.length || 0,
+        preview: process.env.TRYPLOPAY_SECRET_KEY
+          ? `${process.env.TRYPLOPAY_SECRET_KEY.substring(0, 10)}...`
+          : "❌ NÃO DEFINIDO",
+        value: process.env.TRYPLOPAY_SECRET_KEY || "❌ NÃO DEFINIDO",
       },
       TRYPLOPAY_WEBHOOK_URL: {
         exists: !!process.env.TRYPLOPAY_WEBHOOK_URL,
@@ -34,7 +43,14 @@ export async function GET(request: NextRequest) {
       required_vars: {
         TRYPLOPAY_TOKEN: !!process.env.TRYPLOPAY_TOKEN,
         TRYPLOPAY_API_URL: !!process.env.TRYPLOPAY_API_URL,
+        TRYPLOPAY_SECRET_KEY: !!process.env.TRYPLOPAY_SECRET_KEY,
         TRYPLOPAY_WEBHOOK_URL: !!process.env.TRYPLOPAY_WEBHOOK_URL,
+      },
+      current_values: {
+        TRYPLOPAY_TOKEN: process.env.TRYPLOPAY_TOKEN || "undefined",
+        TRYPLOPAY_API_URL: process.env.TRYPLOPAY_API_URL || "undefined",
+        TRYPLOPAY_SECRET_KEY: process.env.TRYPLOPAY_SECRET_KEY || "undefined",
+        TRYPLOPAY_WEBHOOK_URL: process.env.TRYPLOPAY_WEBHOOK_URL || "undefined",
       },
     })
 
@@ -51,6 +67,7 @@ export async function GET(request: NextRequest) {
         "Content-Type": "application/json",
         Accept: "application/json",
         Authorization: `Bearer ${process.env.TRYPLOPAY_TOKEN}`,
+        "X-Secret-Key": process.env.TRYPLOPAY_SECRET_KEY || "",
       },
       signal: AbortSignal.timeout(10000), // 10 segundos
     })
@@ -193,6 +210,7 @@ export async function POST(request: NextRequest) {
         "Content-Type": "application/json",
         Accept: "application/json",
         Authorization: `Bearer ${process.env.TRYPLOPAY_TOKEN}`,
+        "X-Secret-Key": process.env.TRYPLOPAY_SECRET_KEY || "",
       },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(15000),

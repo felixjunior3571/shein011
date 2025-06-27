@@ -250,8 +250,10 @@ export async function POST(request: NextRequest) {
     const envCheck = {
       TRYPLOPAY_TOKEN: !!process.env.TRYPLOPAY_TOKEN,
       TRYPLOPAY_API_URL: !!process.env.TRYPLOPAY_API_URL,
+      TRYPLOPAY_SECRET_KEY: !!process.env.TRYPLOPAY_SECRET_KEY,
       TRYPLOPAY_WEBHOOK_URL: !!process.env.TRYPLOPAY_WEBHOOK_URL,
       token_length: process.env.TRYPLOPAY_TOKEN?.length || 0,
+      secret_length: process.env.TRYPLOPAY_SECRET_KEY?.length || 0,
       api_url: process.env.TRYPLOPAY_API_URL,
       webhook_url: process.env.TRYPLOPAY_WEBHOOK_URL,
     }
@@ -261,6 +263,7 @@ export async function POST(request: NextRequest) {
     console.log("[TRYPLOPAY] Verificando variáveis de ambiente...")
     console.log("[TRYPLOPAY] TRYPLOPAY_TOKEN:", envCheck.TRYPLOPAY_TOKEN ? "✅ Definido" : "❌ Não definido")
     console.log("[TRYPLOPAY] TRYPLOPAY_API_URL:", envCheck.TRYPLOPAY_API_URL ? "✅ Definido" : "❌ Não definido")
+    console.log("[TRYPLOPAY] TRYPLOPAY_SECRET_KEY:", envCheck.TRYPLOPAY_SECRET_KEY ? "✅ Definido" : "❌ Não definido")
     console.log(
       "[TRYPLOPAY] TRYPLOPAY_WEBHOOK_URL:",
       envCheck.TRYPLOPAY_WEBHOOK_URL ? "✅ Definido" : "❌ Não definido",
@@ -270,6 +273,13 @@ export async function POST(request: NextRequest) {
     if (!process.env.TRYPLOPAY_TOKEN || !process.env.TRYPLOPAY_API_URL) {
       debugInfo.warnings.push("Variáveis de ambiente não configuradas - usando PIX simulado")
       console.log("[TRYPLOPAY] ⚠️ Variáveis de ambiente não configuradas, gerando PIX simulado")
+      console.log("[TRYPLOPAY] Token exists:", !!process.env.TRYPLOPAY_TOKEN)
+      console.log("[TRYPLOPAY] API URL exists:", !!process.env.TRYPLOPAY_API_URL)
+      console.log(
+        "[TRYPLOPAY] Token value:",
+        process.env.TRYPLOPAY_TOKEN ? `${process.env.TRYPLOPAY_TOKEN.substring(0, 10)}...` : "undefined",
+      )
+      console.log("[TRYPLOPAY] API URL value:", process.env.TRYPLOPAY_API_URL || "undefined")
 
       const simulatedPix = generateSimulatedPix(amount, externalId, "Variáveis de ambiente TryploPay não configuradas")
 
@@ -325,23 +335,31 @@ export async function POST(request: NextRequest) {
 
     debugInfo.step = "preparing_request"
 
-    // Headers conforme documentação
+    // Headers conforme documentação TryploPay
     const headers = {
       "Content-Type": "application/json",
       Accept: "application/json",
       Authorization: `Bearer ${process.env.TRYPLOPAY_TOKEN}`,
       "User-Agent": "SHEIN-Checkout/1.0",
+      "X-Secret-Key": process.env.TRYPLOPAY_SECRET_KEY || "",
     }
 
     const requestUrl = `${process.env.TRYPLOPAY_API_URL}/invoices`
 
     debugInfo.data.request = {
       url: requestUrl,
-      headers: { ...headers, Authorization: `Bearer ${process.env.TRYPLOPAY_TOKEN?.substring(0, 10)}...` },
+      headers: {
+        ...headers,
+        Authorization: `Bearer ${process.env.TRYPLOPAY_TOKEN?.substring(0, 10)}...`,
+        "X-Secret-Key": process.env.TRYPLOPAY_SECRET_KEY
+          ? `${process.env.TRYPLOPAY_SECRET_KEY.substring(0, 10)}...`
+          : "undefined",
+      },
       method: "POST",
     }
 
     console.log("[TRYPLOPAY] Fazendo request para:", requestUrl)
+    console.log("[TRYPLOPAY] Headers preparados com token e secret key")
 
     debugInfo.step = "making_api_request"
 
