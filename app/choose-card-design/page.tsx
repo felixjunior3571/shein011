@@ -5,7 +5,7 @@ import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import Image from "next/image"
 
-// Função para abreviar o nome do titular de forma inteligente
+// Função para abreviar o nome do titular
 const abbreviateName = (fullName: string): string => {
   if (!fullName) return "Santos Silva"
 
@@ -15,33 +15,16 @@ const abbreviateName = (fullName: string): string => {
     return fullName
   }
 
-  // Preposições que não devem ser abreviadas
-  const prepositions = ["DE", "DA", "DOS", "DAS", "DO", "DI", "E"]
-
+  // Pega o primeiro nome e o último sobrenome
   const firstName = words[0]
   const lastName = words[words.length - 1]
-  const middleNames = words.slice(1, -1)
 
-  // Processa os nomes do meio
-  const processedMiddleNames = middleNames.map((name) => {
-    // Se for uma preposição, mantém completa
-    if (prepositions.includes(name.toUpperCase())) {
-      return name
-    }
-    // Se não for preposição, abrevia para primeira letra sem ponto
-    return name.charAt(0).toUpperCase()
-  })
-
-  const result = [firstName, ...processedMiddleNames, lastName].join(" ")
-
-  // Se ainda estiver muito longo, faz uma abreviação mais agressiva
-  if (result.length > 20) {
-    // Mantém apenas primeiro nome, preposições importantes e último nome
-    const importantMiddle = middleNames.filter((name) => prepositions.includes(name.toUpperCase()))
-    return [firstName, ...importantMiddle, lastName].join(" ")
+  // Se o nome for muito longo, abrevia ainda mais
+  if (`${firstName} ${lastName}`.length > 18) {
+    return `${firstName.substring(0, 10)} ${lastName.substring(0, 8)}`
   }
 
-  return result
+  return `${firstName} ${lastName}`
 }
 
 export default function ChooseCardDesignPage() {
