@@ -1,49 +1,29 @@
 import { type NextRequest, NextResponse } from "next/server"
 
-// Método OPTIONS para validação do webhook
-export async function OPTIONS(request: NextRequest) {
-  console.log("=== WEBHOOK VALIDATION ===")
-
-  return new NextResponse(null, {
-    status: 200,
-    headers: {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization",
-    },
-  })
-}
-
-// Método POST para receber notificações
 export async function POST(request: NextRequest) {
   try {
     console.log("=== WEBHOOK RECEBIDO ===")
 
     const body = await request.json()
-    console.log("📨 Dados do webhook:", JSON.stringify(body, null, 2))
+    console.log("Dados do webhook:", body)
 
-    // Processar diferentes tipos de notificação
-    const { type, data } = body
+    // Processar notificação conforme documentação TryploPay
+    const { fatura, status, event } = body
 
-    switch (type) {
-      case "invoice.paid":
-        console.log("✅ Pagamento confirmado:", data.invoice_id)
-        // Aqui você pode atualizar o banco de dados, enviar emails, etc.
-        break
+    if (fatura && status) {
+      console.log(`📨 Fatura ${fatura.id} - Status: ${status.title} (${status.code})`)
 
-      case "invoice.canceled":
-        console.log("❌ Pagamento cancelado:", data.invoice_id)
-        break
+      // Aqui você pode implementar lógica adicional:
+      // - Atualizar banco de dados
+      // - Enviar emails
+      // - Notificar outros sistemas
+      // - etc.
 
-      case "invoice.expired":
-        console.log("⏰ Pagamento expirado:", data.invoice_id)
-        break
-
-      default:
-        console.log("📋 Tipo de notificação:", type)
+      if (status.code === 5) {
+        console.log("🎉 Pagamento confirmado via webhook!")
+      }
     }
 
-    // Sempre retornar 200 para confirmar recebimento
     return NextResponse.json({
       success: true,
       message: "Webhook processado com sucesso",
@@ -51,11 +31,26 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.log("❌ Erro ao processar webhook:", error)
 
-    // Mesmo com erro, retornar 200 para evitar reenvios
-    return NextResponse.json({
-      success: false,
-      error: "Erro interno",
-      message: "Webhook recebido mas com erro no processamento",
-    })
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Erro ao processar webhook",
+      },
+      { status: 500 },
+    )
   }
+}
+
+export async function OPTIONS() {
+  // Método OPTIONS para validação conforme documentação TryploPay
+  return NextResponse.json(
+    { success: true },
+    {
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      },
+    },
+  )
 }

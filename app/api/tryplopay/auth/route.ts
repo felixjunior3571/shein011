@@ -1,6 +1,6 @@
-import { type NextRequest, NextResponse } from "next/server"
+import { NextResponse } from "next/server"
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
     console.log("=== GERANDO ACCESS TOKEN ===")
 
@@ -9,21 +9,20 @@ export async function GET(request: NextRequest) {
     const apiUrl = process.env.TRYPLOPAY_API_URL || "https://api.tryplopay.com"
 
     if (!token || !secretKey) {
-      console.log("❌ Credenciais não configuradas")
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Credenciais TryploPay não configuradas",
-          fallback: true,
+      console.log("⚠️ Credenciais não configuradas, usando simulação")
+      return NextResponse.json({
+        success: true,
+        data: {
+          access_token: "simulated_token",
+          account: "simulated_account",
+          working: "SIMULATION",
         },
-        { status: 401 },
-      )
+        fallback: true,
+      })
     }
 
-    // Basic Auth para autenticação
+    // Basic Auth conforme documentação TryploPay
     const basicAuth = Buffer.from(`${token}:${secretKey}`).toString("base64")
-
-    console.log("🔐 Fazendo requisição de autenticação...")
 
     const response = await fetch(`${apiUrl}/auth`, {
       method: "GET",
@@ -35,12 +34,12 @@ export async function GET(request: NextRequest) {
     })
 
     if (!response.ok) {
-      console.log("❌ Erro na autenticação:", response.status)
       throw new Error(`Erro na autenticação: ${response.status}`)
     }
 
     const data = await response.json()
-    console.log("✅ Access token gerado com sucesso")
+    console.log("✅ Access token obtido com sucesso")
+    console.log("Working:", data.working)
 
     return NextResponse.json({
       success: true,
@@ -49,23 +48,19 @@ export async function GET(request: NextRequest) {
         account: data.account,
         working: data.working,
         expires_in: data.expires_in,
-        token_type: data.token_type,
       },
     })
   } catch (error) {
-    console.log("❌ Erro ao gerar access token:", error)
+    console.log("❌ Erro na autenticação, usando simulação:", error)
 
-    // Fallback para simulação
     return NextResponse.json({
       success: true,
-      fallback: true,
       data: {
-        access_token: "SIMULATED_TOKEN_" + Date.now(),
-        account: "SIMULATED_ACCOUNT",
+        access_token: "simulated_token",
+        account: "simulated_account",
         working: "SIMULATION",
-        expires_in: Date.now() + 3600000,
-        token_type: "Bearer",
       },
+      fallback: true,
     })
   }
 }

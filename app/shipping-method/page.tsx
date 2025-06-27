@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Package, Truck, Gift, CheckCircle, Play } from "lucide-react"
+import { Package, Truck, Gift, CheckCircle } from "lucide-react"
 import { usePageTracking, useTracking } from "@/hooks/use-tracking"
 
 interface AddressData {
@@ -26,7 +26,7 @@ export default function ShippingMethodPage() {
   const [videoEnded, setVideoEnded] = useState(false)
   const [videoLoaded, setVideoLoaded] = useState(false)
   const [videoStarted, setVideoStarted] = useState(false)
-  const [videoVolume, setVideoVolume] = useState(0.5) // Volume inicial em 50%
+  const [videoVolume, setVideoVolume] = useState(0.35) // Volume inicial em 35%
 
   // Detectar se é mobile
   const [isMobile, setIsMobile] = useState(false)
@@ -81,14 +81,14 @@ export default function ShippingMethodPage() {
           setVideoLoaded(true)
           console.log("✅ Vídeo carregado e pronto!")
 
-          // Define o volume para 50% quando o vídeo estiver pronto
+          // Define o volume para 35% quando o vídeo estiver pronto
           const iframe = document.querySelector("iframe")
           if (iframe && iframe.contentWindow) {
             setTimeout(() => {
               iframe.contentWindow.postMessage(
                 JSON.stringify({
                   method: "setVolume",
-                  value: 0.5,
+                  value: 0.35,
                 }),
                 "https://player.vimeo.com",
               )
@@ -186,8 +186,14 @@ export default function ShippingMethodPage() {
   }
 
   const handleConfirm = () => {
-    // Redireciona para a página de provas sociais em vez da confirmação final
-    router.push("/social-proof")
+    const selectedMethodDetails = shippingMethods.find((method) => method.id === selectedMethod)
+
+    if (selectedMethodDetails) {
+      // Redireciona para checkout com os parâmetros corretos
+      router.push(
+        `/checkout?amount=${selectedMethodDetails.numericPrice}&shipping=${selectedMethod}&method=${selectedMethodDetails.name}`,
+      )
+    }
   }
 
   // Função para ajustar volume
@@ -299,23 +305,6 @@ export default function ShippingMethodPage() {
         ) : (
           // Tela principal com vídeo e seleção de método de envio
           <div className="flex flex-col items-center justify-center text-center space-y-8">
-            {/* Instrução para reproduzir o vídeo */}
-            {videoLoaded && !videoStarted && (
-              <div className="bg-blue-50 border-2 border-blue-300 rounded-lg p-4 max-w-2xl mx-auto shadow-md animate-bounce">
-                <div className="flex items-center justify-center space-x-3">
-                  <div className="bg-blue-500 rounded-full p-2">
-                    <Play className="w-5 h-5 text-white" />
-                  </div>
-                  <div>
-                    <p className="text-blue-800 font-bold text-lg">👆 Toque no vídeo para reproduzir</p>
-                    <p className="text-blue-700 text-sm">
-                      Assista ao vídeo explicativo antes de escolher o método de envio
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
-
             {/* Container do Vídeo com Loading */}
             <div className="w-full max-w-3xl px-4">
               <div className="relative w-full bg-black rounded-lg overflow-hidden" style={{ paddingBottom: "56.25%" }}>
@@ -362,13 +351,13 @@ export default function ShippingMethodPage() {
                       </svg>
                     </button>
 
-                    {/* Botão de volume médio (50%) */}
+                    {/* Botão de volume médio (35%) */}
                     <button
-                      onClick={() => adjustVolume(0.5)}
+                      onClick={() => adjustVolume(0.35)}
                       className={`p-2 rounded-full transition-colors ${
-                        videoVolume === 0.5 ? "bg-blue-600 text-white" : "bg-black/70 text-white hover:bg-black/90"
+                        videoVolume === 0.35 ? "bg-blue-600 text-white" : "bg-black/70 text-white hover:bg-black/90"
                       }`}
-                      title="Volume Médio (50%)"
+                      title="Volume Médio (35%)"
                     >
                       <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                         <path
@@ -376,9 +365,6 @@ export default function ShippingMethodPage() {
                           d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.617.816L4.414 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.414l3.969-3.816a1 1 0 011.617.816zM12.293 7.293a1 1 0 011.414 0L15 8.586l1.293-1.293a1 1 0 111.414 1.414L16.414 10l1.293 1.293a1 1 0 01-1.414 1.414L15 11.414l-1.293 1.293a1 1 0 01-1.414-1.414L13.586 10l-1.293-1.293a1 1 0 010-1.414z"
                           clipRule="evenodd"
                         />
-                        <text x="10" y="14" fontSize="8" textAnchor="middle" fill="currentColor">
-                          50%
-                        </text>
                       </svg>
                     </button>
 

