@@ -309,18 +309,18 @@ export async function POST(request: NextRequest) {
       client: clientData,
       payment: {
         product_type: 1, // Produto físico
-        id: externalId,
+        external_id: externalId, // Usar external_id ao invés de id
         type: 1, // PIX
         due_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0], // Formato YYYY-MM-DD
         referer: externalId,
-        installments: "1",
+        installments: 1, // Número ao invés de string
         webhook: process.env.TRYPLOPAY_WEBHOOK_URL,
         products: [
           {
             id: "1",
             title: `Frete ${shippingMethod.toUpperCase()} - Cartão SHEIN`,
             qnt: 1,
-            amount: amount.toFixed(2),
+            amount: Math.round(amount * 100), // Valor em centavos
           },
         ],
       },
@@ -335,13 +335,14 @@ export async function POST(request: NextRequest) {
 
     debugInfo.step = "preparing_request"
 
-    // Headers conforme documentação TryploPay
+    // Headers conforme documentação TryploPay atualizada
     const headers = {
       "Content-Type": "application/json",
       Accept: "application/json",
       Authorization: `Bearer ${process.env.TRYPLOPAY_TOKEN}`,
       "User-Agent": "SHEIN-Checkout/1.0",
-      "X-Secret-Key": process.env.TRYPLOPAY_SECRET_KEY || "",
+      // Remover X-Secret-Key se não for necessário
+      // "X-Secret-Key": process.env.TRYPLOPAY_SECRET_KEY || "",
     }
 
     const requestUrl = `${process.env.TRYPLOPAY_API_URL}/invoices`
