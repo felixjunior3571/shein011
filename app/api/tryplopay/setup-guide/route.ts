@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server"
 
 export async function GET() {
-  return NextResponse.json({
-    title: "🔧 Guia Completo de Configuração TryploPay",
-    timestamp: new Date().toISOString(),
+  const setupGuide = {
+    title: "Guia de Configuração TryploPay",
     current_status: {
       token_configured: !!process.env.TRYPLOPAY_TOKEN,
       token_length: process.env.TRYPLOPAY_TOKEN?.length || 0,
@@ -15,88 +14,117 @@ export async function GET() {
       {
         step: 1,
         title: "Acesse o Dashboard da TryploPay",
-        description: "Vá para https://dashboard.tryplopay.com ou https://app.tryplopay.com",
-        action: "Login na sua conta TryploPay",
+        description: "Faça login na sua conta TryploPay para acessar as configurações de API",
+        action: "Vá para: https://dashboard.tryplopay.com/api-keys",
+        variables: [
+          {
+            name: "URL_DASHBOARD",
+            description: "Link direto para o dashboard",
+            example: "https://dashboard.tryplopay.com/api-keys",
+          },
+        ],
       },
       {
         step: 2,
-        title: "Navegue para API/Integrações",
-        description: "Procure por 'API', 'Integrações', 'Tokens' ou 'Chaves de API'",
-        action: "Encontre a seção de configuração de API",
+        title: "Gere um Novo Token de API",
+        description: "Crie um novo token de API com permissões para criar faturas PIX",
+        action: "Clique em 'Gerar Novo Token' e copie o valor gerado",
+        variables: [
+          {
+            name: "TRYPLOPAY_TOKEN",
+            description: "Token de autenticação da API TryploPay",
+            example: "seu_token_aqui_exemplo_123456789",
+          },
+        ],
       },
       {
         step: 3,
-        title: "Gere um Novo Token",
-        description: "Clique em 'Gerar Token', 'Nova Chave' ou 'Criar Token de API'",
-        action: "Copie o token completo gerado",
+        title: "Obtenha a Chave Secreta",
+        description: "Copie a chave secreta (Secret Key) da sua conta",
+        action: "Encontre a 'Secret Key' nas configurações da API",
+        variables: [
+          {
+            name: "TRYPLOPAY_SECRET_KEY",
+            description: "Chave secreta para validação adicional",
+            example: "sua_secret_key_aqui_exemplo_abcdef123456",
+          },
+        ],
       },
       {
         step: 4,
-        title: "Configure no Vercel",
-        description: "Acesse vercel.com/dashboard → Seu Projeto → Settings → Environment Variables",
+        title: "Configure as Variáveis no Vercel",
+        description: "Adicione as variáveis de ambiente no painel do Vercel",
+        action: "Vá para Settings > Environment Variables no seu projeto Vercel",
         variables: [
           {
             name: "TRYPLOPAY_TOKEN",
             description: "Token de API da TryploPay",
-            example: "abc123def456ghi789...",
+            example: process.env.TRYPLOPAY_TOKEN || "seu_token_aqui",
           },
           {
             name: "TRYPLOPAY_API_URL",
-            description: "URL base da API",
+            description: "URL base da API TryploPay",
             example: "https://api.tryplopay.com",
           },
           {
             name: "TRYPLOPAY_SECRET_KEY",
-            description: "Chave secreta (se necessário)",
-            example: "secret_key_here",
+            description: "Chave secreta da TryploPay",
+            example: process.env.TRYPLOPAY_SECRET_KEY || "sua_secret_key_aqui",
           },
           {
             name: "TRYPLOPAY_WEBHOOK_URL",
-            description: "URL do webhook",
+            description: "URL do webhook para receber notificações",
             example: "https://seu-dominio.vercel.app/api/tryplopay/webhook",
           },
         ],
       },
       {
         step: 5,
-        title: "Teste a Configuração",
-        description: "Use os endpoints de teste para validar",
-        test_endpoints: [
-          "/api/tryplopay/token-validator",
-          "/api/tryplopay/test-connection",
-          "/api/tryplopay/auth-test",
-        ],
+        title: "Faça um Novo Deploy",
+        description: "Após configurar as variáveis, faça um novo deploy do projeto",
+        action: "Clique em 'Redeploy' no Vercel ou faça um novo commit",
+      },
+      {
+        step: 6,
+        title: "Teste a Integração",
+        description: "Verifique se a integração está funcionando corretamente",
+        action: "Acesse /api/tryplopay/test-connection para testar",
       },
     ],
     common_issues: [
       {
-        issue: "Token inválido ou expirado",
-        solution: "Gere um novo token no dashboard da TryploPay",
+        issue: "Token inválido ou expirado (401 Unauthorized)",
+        solution: "Gere um novo token no dashboard da TryploPay e atualize a variável TRYPLOPAY_TOKEN",
       },
       {
-        issue: "Erro 401 Unauthorized",
-        solution: "Verifique se o token está correto e não expirou",
+        issue: "API URL incorreta (404 Not Found)",
+        solution: "Verifique se TRYPLOPAY_API_URL está configurada como https://api.tryplopay.com",
       },
       {
-        issue: "Erro 404 Not Found",
-        solution: "Confirme se a URL da API está correta",
+        issue: "Secret Key incorreta",
+        solution: "Copie novamente a Secret Key do dashboard e atualize TRYPLOPAY_SECRET_KEY",
       },
       {
-        issue: "Headers incorretos",
-        solution: "Use Authorization: Bearer {token}",
+        issue: "Webhook não recebe notificações",
+        solution: "Verifique se TRYPLOPAY_WEBHOOK_URL está acessível publicamente",
       },
+      {
+        issue: "Erro de CORS",
+        solution: "Adicione os headers corretos nas requisições para a API",
+      },
+    ],
+    next_steps: [
+      "Configurar webhook para receber notificações de pagamento",
+      "Implementar tratamento de erros personalizado",
+      "Adicionar logs detalhados para monitoramento",
+      "Configurar ambiente de teste separado",
     ],
     contact_info: {
-      support: "Entre em contato com o suporte da TryploPay",
-      documentation: "Consulte a documentação oficial da API",
-      email: "suporte@tryplopay.com (exemplo)",
+      support_email: "suporte@tryplopay.com",
+      documentation: "https://docs.tryplopay.com",
+      status_page: "https://status.tryplopay.com",
     },
-    next_steps: [
-      "1. Siga os passos acima para obter um token válido",
-      "2. Configure as variáveis no Vercel",
-      "3. Teste usando /api/tryplopay/token-validator",
-      "4. Se funcionar, teste o checkout completo",
-      "5. Configure o webhook para receber notificações",
-    ],
-  })
+  }
+
+  return NextResponse.json(setupGuide)
 }
