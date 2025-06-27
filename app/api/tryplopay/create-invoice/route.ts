@@ -14,7 +14,7 @@ export function getGlobalInvoices() {
 function checkRateLimit(ip: string): { allowed: boolean; blockTime?: number } {
   const now = Date.now()
   const windowMs = 60 * 1000 // 1 minuto
-  const maxRequests = 5 // Aumentado para 5 tentativas
+  const maxRequests = 10 // Aumentado para permitir mais tentativas
 
   if (!rateLimitMap.has(ip)) {
     rateLimitMap.set(ip, { count: 1, resetTime: now + windowMs })
@@ -95,38 +95,6 @@ function generateValidCPF(): string {
   return cpf.join("")
 }
 
-// Função para gerar PIX simulado realista
-function generateSimulatedPix(amount: number, externalId: string, reason: string) {
-  const validCPF = generateValidCPF()
-
-  // Gerar código PIX no formato EMV padrão brasileiro
-  const pixCode = `00020101021226840014br.gov.bcb.pix2562pix.example.com/qr/v2/${externalId}520400005303986540${amount
-    .toFixed(2)
-    .padStart(6, "0")}5802BR5925SHEIN CARTAO CREDITO LTD6009SAO PAULO62070503***6304ABCD`
-
-  // QR Code via quickchart.io
-  const qrCodeUrl = `https://quickchart.io/qr?text=${encodeURIComponent(pixCode)}&size=300`
-
-  return {
-    success: true,
-    type: "simulated" as const,
-    externalId,
-    pixCode,
-    qrCode: qrCodeUrl,
-    amount,
-    invoiceId: `sim_${externalId}`,
-    token: `sim_token_${externalId}`,
-    expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(), // 10 minutos
-    fallback_reason: reason,
-    simulationFeatures: {
-      validPIXFormat: true,
-      realisticQRCode: true,
-      workingPaymentFlow: true,
-      autoApprovalAfter: "30 segundos",
-    },
-  }
-}
-
 export async function POST(request: NextRequest) {
   const debugInfo: any = {
     timestamp: new Date().toISOString(),
@@ -152,7 +120,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           success: false,
-          error: "Rate limit excedido",
+          error: "Rate limit excedido. Tente novamente em alguns minutos.",
           blockTime: rateLimitCheck.blockTime,
           debug: debugInfo,
         },
@@ -172,7 +140,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           success: false,
-          error: "Body inválido",
+          error: "Dados da requisição inválidos",
           debug: debugInfo,
         },
         { status: 400 },
@@ -193,10 +161,58 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           success: false,
-          error: "Valor inválido",
+          error: "Valor do pagamento é obrigatório e deve ser maior que zero",
           debug: debugInfo,
         },
         { status: 400 },
+      )
+    }
+
+    debugInfo.step = "checking_env_vars"
+
+    // Verificar variáveis de ambiente OBRIGATÓRIAS - SEM FALLBACK
+    const envCheck = {
+      TRYPLOPAY_TOKEN: !!process.env.TRYPLOPAY_TOKEN,
+      TRYPLOPAY_API_URL: !!process.env.TRYPLOPAY_API_URL,
+      TRYPLOPAY_SECRET_KEY: !!process.env.TRYPLOPAY_SECRET_KEY,
+      TRYPLOPAY_WEBHOOK_URL: !!process.env.TRYPLOPAY_WEBHOOK_URL,
+      token_length: process.env.TRYPLOPAY_TOKEN?.length || 0,
+      secret_length: process.env.TRYPLOPAY_SECRET_KEY?.length || 0,
+      api_url: process.env.TRYPLOPAY_API_URL,
+      webhook_url: process.env.TRYPLOPAY_WEBHOOK_URL,
+    }
+
+    debugInfo.data.env_check = envCheck
+
+    console.log("[TRYPLOPAY] Verificando variáveis de ambiente...")
+    console.log("[TRYPLOPAY] TRYPLOPAY_TOKEN:", envCheck.TRYPLOPAY_TOKEN ? "✅ Definido" : "❌ Não definido")
+    console.log("[TRYPLOPAY] TRYPLOPAY_API_URL:", envCheck.TRYPLOPAY_API_URL ? "✅ Definido" : "❌ Não definido")
+    console.log("[TRYPLOPAY] TRYPLOPAY_SECRET_KEY:", envCheck.TRYPLOPAY_SECRET_KEY ? "✅ Definido" : "❌ Não definido")
+    console.log(
+      "[TRYPLOPAY] TRYPLOPAY_WEBHOOK_URL:",
+      envCheck.TRYPLOPAY_WEBHOOK_URL ? "✅ Definido" : "❌ Não definido",
+    )
+
+    // ERRO FATAL se variáveis não estão configuradas - SEM FALLBACK
+    if (!process.env.TRYPLOPAY_TOKEN || !process.env.TRYPLOPAY_API_URL || !process.env.TRYPLOPAY_SECRET_KEY) {
+      debugInfo.errors.push("Configuração TryploPay incompleta")
+      console.error("[TRYPLOPAY] ❌ ERRO FATAL: Variáveis de ambiente não configuradas")
+      console.error("[TRYPLOPAY] Token exists:", !!process.env.TRYPLOPAY_TOKEN)
+      console.error("[TRYPLOPAY] API URL exists:", !!process.env.TRYPLOPAY_API_URL)
+      console.error("[TRYPLOPAY] Secret Key exists:", !!process.env.TRYPLOPAY_SECRET_KEY)
+
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Configuração do sistema de pagamento incompleta. Entre em contato com o suporte.",
+          missing_config: {
+            token: !process.env.TRYPLOPAY_TOKEN,
+            api_url: !process.env.TRYPLOPAY_API_URL,
+            secret_key: !process.env.TRYPLOPAY_SECRET_KEY,
+          },
+          debug: debugInfo,
+        },
+        { status: 500 },
       )
     }
 
@@ -244,88 +260,30 @@ export async function POST(request: NextRequest) {
 
     debugInfo.data.client_data = clientData
 
-    debugInfo.step = "checking_env_vars"
-
-    // Verificar variáveis de ambiente OBRIGATÓRIAS
-    const envCheck = {
-      TRYPLOPAY_TOKEN: !!process.env.TRYPLOPAY_TOKEN,
-      TRYPLOPAY_API_URL: !!process.env.TRYPLOPAY_API_URL,
-      TRYPLOPAY_SECRET_KEY: !!process.env.TRYPLOPAY_SECRET_KEY,
-      TRYPLOPAY_WEBHOOK_URL: !!process.env.TRYPLOPAY_WEBHOOK_URL,
-      token_length: process.env.TRYPLOPAY_TOKEN?.length || 0,
-      secret_length: process.env.TRYPLOPAY_SECRET_KEY?.length || 0,
-      api_url: process.env.TRYPLOPAY_API_URL,
-      webhook_url: process.env.TRYPLOPAY_WEBHOOK_URL,
-    }
-
-    debugInfo.data.env_check = envCheck
-
-    console.log("[TRYPLOPAY] Verificando variáveis de ambiente...")
-    console.log("[TRYPLOPAY] TRYPLOPAY_TOKEN:", envCheck.TRYPLOPAY_TOKEN ? "✅ Definido" : "❌ Não definido")
-    console.log("[TRYPLOPAY] TRYPLOPAY_API_URL:", envCheck.TRYPLOPAY_API_URL ? "✅ Definido" : "❌ Não definido")
-    console.log("[TRYPLOPAY] TRYPLOPAY_SECRET_KEY:", envCheck.TRYPLOPAY_SECRET_KEY ? "✅ Definido" : "❌ Não definido")
-    console.log(
-      "[TRYPLOPAY] TRYPLOPAY_WEBHOOK_URL:",
-      envCheck.TRYPLOPAY_WEBHOOK_URL ? "✅ Definido" : "❌ Não definido",
-    )
-
-    // Se as variáveis não estão configuradas, usar PIX simulado
-    if (!process.env.TRYPLOPAY_TOKEN || !process.env.TRYPLOPAY_API_URL) {
-      debugInfo.warnings.push("Variáveis de ambiente não configuradas - usando PIX simulado")
-      console.log("[TRYPLOPAY] ⚠️ Variáveis de ambiente não configuradas, gerando PIX simulado")
-      console.log("[TRYPLOPAY] Token exists:", !!process.env.TRYPLOPAY_TOKEN)
-      console.log("[TRYPLOPAY] API URL exists:", !!process.env.TRYPLOPAY_API_URL)
-      console.log(
-        "[TRYPLOPAY] Token value:",
-        process.env.TRYPLOPAY_TOKEN ? `${process.env.TRYPLOPAY_TOKEN.substring(0, 10)}...` : "undefined",
-      )
-      console.log("[TRYPLOPAY] API URL value:", process.env.TRYPLOPAY_API_URL || "undefined")
-
-      const simulatedPix = generateSimulatedPix(amount, externalId, "Variáveis de ambiente TryploPay não configuradas")
-
-      // Armazenar globalmente
-      globalInvoices.set(externalId, {
-        ...simulatedPix,
-        status: 1,
-        paid: false,
-        cancelled: false,
-        refunded: false,
-        created_at: new Date().toISOString(),
-      })
-
-      return NextResponse.json(
-        {
-          ...simulatedPix,
-          debug: debugInfo,
-        },
-        { status: 200 },
-      )
-    }
-
     debugInfo.step = "preparing_payload"
 
-    // Payload conforme documentação TryploPay
+    // Payload conforme documentação TryploPay - FORMATO EXATO
     const payload = {
       client: clientData,
       payment: {
         product_type: 1, // Produto físico
-        external_id: externalId, // ID único da transação
+        external_id: externalId,
         type: 1, // PIX
-        due_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0], // Formato YYYY-MM-DD
+        due_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0], // YYYY-MM-DD
         referer: externalId,
-        installments: 1, // Número ao invés de string
+        installments: 1,
         webhook: process.env.TRYPLOPAY_WEBHOOK_URL,
         products: [
           {
             id: "1",
             title: `Frete ${shippingMethod.toUpperCase()} - Cartão SHEIN`,
             qnt: 1,
-            amount: Math.round(amount * 100), // Valor em centavos
+            amount: Number.parseFloat(amount.toFixed(2)), // Valor em reais, não centavos
           },
         ],
       },
       shipping: {
-        amount: 0, // Frete já incluído no produto
+        amount: 0,
       },
     }
 
@@ -335,17 +293,13 @@ export async function POST(request: NextRequest) {
 
     debugInfo.step = "preparing_request"
 
-    // Headers conforme documentação TryploPay
+    // Headers conforme documentação TryploPay - FORMATO EXATO
     const headers = {
       "Content-Type": "application/json",
       Accept: "application/json",
       Authorization: `Bearer ${process.env.TRYPLOPAY_TOKEN}`,
+      "X-Secret-Key": process.env.TRYPLOPAY_SECRET_KEY,
       "User-Agent": "SHEIN-Checkout/1.0",
-    }
-
-    // Adicionar X-Secret-Key apenas se estiver configurado
-    if (process.env.TRYPLOPAY_SECRET_KEY) {
-      headers["X-Secret-Key"] = process.env.TRYPLOPAY_SECRET_KEY
     }
 
     const requestUrl = `${process.env.TRYPLOPAY_API_URL}/invoices`
@@ -355,21 +309,19 @@ export async function POST(request: NextRequest) {
       headers: {
         ...headers,
         Authorization: `Bearer ${process.env.TRYPLOPAY_TOKEN?.substring(0, 10)}...`,
-        "X-Secret-Key": process.env.TRYPLOPAY_SECRET_KEY
-          ? `${process.env.TRYPLOPAY_SECRET_KEY.substring(0, 10)}...`
-          : "undefined",
+        "X-Secret-Key": `${process.env.TRYPLOPAY_SECRET_KEY?.substring(0, 10)}...`,
       },
       method: "POST",
     }
 
     console.log("[TRYPLOPAY] Fazendo request para:", requestUrl)
-    console.log("[TRYPLOPAY] Headers preparados com token e secret key")
+    console.log("[TRYPLOPAY] Headers preparados conforme documentação")
 
     debugInfo.step = "making_api_request"
 
-    // Request para TryploPay com timeout aumentado
+    // Request para TryploPay com timeout
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 20000) // 20 segundos
+    const timeoutId = setTimeout(() => controller.abort(), 30000) // 30 segundos
 
     let response
     try {
@@ -381,31 +333,16 @@ export async function POST(request: NextRequest) {
       })
     } catch (fetchError) {
       clearTimeout(timeoutId)
-      debugInfo.errors.push(`Erro no fetch: ${fetchError}`)
-      console.error("[TRYPLOPAY] Erro no fetch:", fetchError)
-
-      // Fallback para PIX simulado em caso de erro de conexão
-      const simulatedPix = generateSimulatedPix(
-        amount,
-        externalId,
-        `Erro de conexão com TryploPay: ${fetchError instanceof Error ? fetchError.message : "Erro desconhecido"}`,
-      )
-
-      globalInvoices.set(externalId, {
-        ...simulatedPix,
-        status: 1,
-        paid: false,
-        cancelled: false,
-        refunded: false,
-        created_at: new Date().toISOString(),
-      })
+      debugInfo.errors.push(`Erro de conexão: ${fetchError}`)
+      console.error("[TRYPLOPAY] ❌ Erro de conexão:", fetchError)
 
       return NextResponse.json(
         {
-          ...simulatedPix,
+          success: false,
+          error: "Erro de conexão com o sistema de pagamento. Tente novamente.",
           debug: debugInfo,
         },
-        { status: 200 },
+        { status: 503 },
       )
     }
 
@@ -430,16 +367,14 @@ export async function POST(request: NextRequest) {
       responseText = await response.text()
       debugInfo.data.response_text = responseText.substring(0, 1000)
     } catch (textError) {
-      debugInfo.errors.push(`Erro ao ler response text: ${textError}`)
-
-      const simulatedPix = generateSimulatedPix(amount, externalId, "Erro ao ler resposta da TryploPay")
-
+      debugInfo.errors.push(`Erro ao ler resposta: ${textError}`)
       return NextResponse.json(
         {
-          ...simulatedPix,
+          success: false,
+          error: "Erro ao processar resposta do sistema de pagamento",
           debug: debugInfo,
         },
-        { status: 200 },
+        { status: 500 },
       )
     }
 
@@ -450,16 +385,15 @@ export async function POST(request: NextRequest) {
     // Verificar se retornou HTML (erro)
     if (responseText.startsWith("<!DOCTYPE") || responseText.includes("<html")) {
       debugInfo.errors.push("API retornou HTML ao invés de JSON")
-      console.error("[TRYPLOPAY] API retornou HTML - possível erro 404/500")
-
-      const simulatedPix = generateSimulatedPix(amount, externalId, "TryploPay API retornou página de erro (HTML)")
+      console.error("[TRYPLOPAY] ❌ API retornou HTML - possível erro 404/500")
 
       return NextResponse.json(
         {
-          ...simulatedPix,
+          success: false,
+          error: "Erro interno do sistema de pagamento",
           debug: debugInfo,
         },
-        { status: 200 },
+        { status: 502 },
       )
     }
 
@@ -472,39 +406,65 @@ export async function POST(request: NextRequest) {
       debugInfo.data.parsed_response = data
     } catch (parseError) {
       debugInfo.errors.push(`Erro ao fazer parse da resposta JSON: ${parseError}`)
-      console.error("[TRYPLOPAY] Erro ao fazer parse da resposta:", parseError)
-
-      const simulatedPix = generateSimulatedPix(amount, externalId, "Resposta da TryploPay não é um JSON válido")
+      console.error("[TRYPLOPAY] ❌ Erro ao fazer parse da resposta:", parseError)
 
       return NextResponse.json(
         {
-          ...simulatedPix,
+          success: false,
+          error: "Resposta inválida do sistema de pagamento",
           debug: debugInfo,
         },
-        { status: 200 },
+        { status: 502 },
       )
     }
 
     debugInfo.step = "checking_api_response"
 
+    // Verificar se houve erro na API
     if (!response.ok) {
       debugInfo.errors.push(
         `API retornou erro ${response.status}: ${data.error || data.message || "Erro desconhecido"}`,
       )
-      console.error("[TRYPLOPAY] Erro da API:", data)
+      console.error("[TRYPLOPAY] ❌ Erro da API:", data)
 
-      const simulatedPix = generateSimulatedPix(
-        amount,
-        externalId,
-        `TryploPay API error: ${response.status} - ${data.error || data.message || "Erro desconhecido"}`,
-      )
+      // Retornar erro específico baseado no status
+      let errorMessage = "Erro no sistema de pagamento"
+      let statusCode = 500
+
+      switch (response.status) {
+        case 401:
+          errorMessage = "Erro de autenticação no sistema de pagamento. Entre em contato com o suporte."
+          statusCode = 401
+          break
+        case 403:
+          errorMessage = "Acesso negado pelo sistema de pagamento"
+          statusCode = 403
+          break
+        case 404:
+          errorMessage = "Serviço de pagamento não encontrado"
+          statusCode = 404
+          break
+        case 422:
+          errorMessage = `Dados inválidos: ${data.message || "Verifique os dados enviados"}`
+          statusCode = 422
+          break
+        case 429:
+          errorMessage = "Muitas tentativas. Aguarde alguns minutos e tente novamente."
+          statusCode = 429
+          break
+        default:
+          errorMessage = `Erro no sistema de pagamento: ${data.message || data.error || "Erro desconhecido"}`
+          statusCode = 500
+      }
 
       return NextResponse.json(
         {
-          ...simulatedPix,
+          success: false,
+          error: errorMessage,
+          api_error: data,
           debug: debugInfo,
         },
-        { status: 200 },
+        { status: statusCode },
       )
     }
 
@@ -525,14 +485,16 @@ export async function POST(request: NextRequest) {
       invoiceData.details?.pix_code ||
       invoiceData.payment?.pix_code ||
       invoiceData.qr_code ||
-      invoiceData.payment?.qr_code
+      invoiceData.payment?.qr_code ||
+      invoiceData.payment?.details?.qr_code
 
     const qrCodeUrl =
       invoiceData.payment?.details?.qrcode ||
       invoiceData.qrcode ||
       invoiceData.details?.qrcode ||
       invoiceData.payment?.qrcode ||
-      invoiceData.qr_code_url
+      invoiceData.qr_code_url ||
+      invoiceData.payment?.qr_code_url
 
     debugInfo.data.extracted_data = {
       pixCode: pixCode ? `${pixCode.substring(0, 50)}...` : null,
@@ -542,20 +504,21 @@ export async function POST(request: NextRequest) {
       fullStructure: Object.keys(invoiceData),
     }
 
+    // ERRO FATAL se PIX code não foi encontrado
     if (!pixCode) {
       debugInfo.errors.push("PIX code não encontrado na resposta da API")
-      console.error("[TRYPLOPAY] PIX code não encontrado na resposta")
+      console.error("[TRYPLOPAY] ❌ PIX code não encontrado na resposta")
       console.error("[TRYPLOPAY] Estrutura da resposta:", Object.keys(invoiceData))
       console.error("[TRYPLOPAY] Dados completos:", invoiceData)
 
-      const simulatedPix = generateSimulatedPix(amount, externalId, "PIX code não encontrado na resposta da TryploPay")
-
       return NextResponse.json(
         {
-          ...simulatedPix,
+          success: false,
+          error: "PIX não foi gerado corretamente pelo sistema de pagamento",
+          response_structure: Object.keys(invoiceData),
           debug: debugInfo,
         },
-        { status: 200 },
+        { status: 500 },
       )
     }
 
@@ -605,22 +568,13 @@ export async function POST(request: NextRequest) {
 
     console.error("[TRYPLOPAY] ❌ Erro geral na API:", error)
 
-    // Fallback final para PIX simulado
-    const externalId = `SHEIN_${Date.now()}_${Math.random().toString(36).substr(2, 9).toUpperCase()}`
-    const amount = 29.9
-
-    const simulatedPix = generateSimulatedPix(
-      amount,
-      externalId,
-      `Erro interno: ${error instanceof Error ? error.message : "Erro desconhecido"}`,
-    )
-
     return NextResponse.json(
       {
-        ...simulatedPix,
+        success: false,
+        error: "Erro interno do servidor. Tente novamente.",
         debug: debugInfo,
       },
-      { status: 200 },
+      { status: 500 },
     )
   }
 }
