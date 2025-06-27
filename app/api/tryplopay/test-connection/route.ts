@@ -8,227 +8,233 @@ function createBasicAuthHeader(token: string, secretKey: string): string {
 }
 
 export async function GET() {
-  const debugInfo = {
+  const testResults = {
+    success: false,
     timestamp: new Date().toISOString(),
-    auth_method: "Basic Auth (Correto conforme documentação)",
-    config: {
-      token: !!process.env.TRYPLOPAY_TOKEN,
-      tokenLength: process.env.TRYPLOPAY_TOKEN?.length || 0,
-      apiUrl: process.env.TRYPLOPAY_API_URL,
-      hasSecretKey: !!process.env.TRYPLOPAY_SECRET_KEY,
-      secretKeyLength: process.env.TRYPLOPAY_SECRET_KEY?.length || 0,
-      webhookUrl: process.env.TRYPLOPAY_WEBHOOK_URL,
+    tryplopay_config: {
+      TRYPLOPAY_TOKEN: {
+        exists: !!process.env.TRYPLOPAY_TOKEN,
+        length: process.env.TRYPLOPAY_TOKEN?.length || 0,
+        preview: process.env.TRYPLOPAY_TOKEN ? `${process.env.TRYPLOPAY_TOKEN.substring(0, 8)}...` : "❌ Não definido",
+      },
+      TRYPLOPAY_SECRET_KEY: {
+        exists: !!process.env.TRYPLOPAY_SECRET_KEY,
+        length: process.env.TRYPLOPAY_SECRET_KEY?.length || 0,
+        preview: process.env.TRYPLOPAY_SECRET_KEY
+          ? `${process.env.TRYPLOPAY_SECRET_KEY.substring(0, 8)}...`
+          : "❌ Não definido",
+      },
+      TRYPLOPAY_API_URL: {
+        exists: !!process.env.TRYPLOPAY_API_URL,
+        value: process.env.TRYPLOPAY_API_URL || "❌ Não definido",
+      },
+      TRYPLOPAY_WEBHOOK_URL: {
+        exists: !!process.env.TRYPLOPAY_WEBHOOK_URL,
+        value: process.env.TRYPLOPAY_WEBHOOK_URL || "❌ Não definido",
+      },
     },
     tests: [] as any[],
-    errors: [] as string[],
-    warnings: [] as string[],
+    summary: {
+      total: 0,
+      passed: 0,
+      failed: 0,
+    },
+    recommendations: [] as string[],
   }
 
-  // Verificar configuração obrigatória
-  if (!process.env.TRYPLOPAY_TOKEN) {
-    debugInfo.errors.push("TRYPLOPAY_TOKEN não configurado")
+  // Teste 1: Verificar configuração
+  testResults.tests.push({
+    name: "Configuração de Variáveis",
+    status:
+      testResults.tryplopay_config.TRYPLOPAY_TOKEN.exists &&
+      testResults.tryplopay_config.TRYPLOPAY_SECRET_KEY.exists &&
+      testResults.tryplopay_config.TRYPLOPAY_API_URL.exists
+        ? "✅ PASS"
+        : "❌ FAIL",
+    message: "Verificando se todas as variáveis estão configuradas",
+    details: testResults.tryplopay_config,
+  })
+
+  if (!process.env.TRYPLOPAY_TOKEN || !process.env.TRYPLOPAY_SECRET_KEY || !process.env.TRYPLOPAY_API_URL) {
+    testResults.tests.push({
+      name: "Configuração Incompleta",
+      status: "❌ FAIL",
+      message: "Variáveis de ambiente não configuradas",
+      error: "Configure TRYPLOPAY_TOKEN, TRYPLOPAY_SECRET_KEY e TRYPLOPAY_API_URL",
+    })
+
+    testResults.recommendations.push("Configure todas as variáveis de ambiente necessárias")
+    testResults.recommendations.push("Verifique o arquivo .env.local")
+    testResults.recommendations.push("Reinicie o servidor após configurar")
+
+    return NextResponse.json(testResults)
   }
 
-  if (!process.env.TRYPLOPAY_API_URL) {
-    debugInfo.errors.push("TRYPLOPAY_API_URL não configurado")
-  }
+  const token = process.env.TRYPLOPAY_TOKEN
+  const secretKey = process.env.TRYPLOPAY_SECRET_KEY
+  const apiUrl = process.env.TRYPLOPAY_API_URL
 
-  if (!process.env.TRYPLOPAY_SECRET_KEY) {
-    debugInfo.errors.push("TRYPLOPAY_SECRET_KEY não configurado")
-  }
+  // Teste 2: Conectividade básica
+  try {
+    const connectivityTest = await fetch(apiUrl, {
+      method: "GET",
+      headers: {
+        "User-Agent": "SHEIN-Test/1.0",
+      },
+    })
 
-  if (debugInfo.errors.length > 0) {
-    return NextResponse.json({
-      success: false,
-      error: "Configuração incompleta",
-      missing_config: debugInfo.errors,
-      debug: debugInfo,
+    testResults.tests.push({
+      name: "Conectividade com API",
+      status: connectivityTest.status < 500 ? "✅ PASS" : "❌ FAIL",
+      message: `Testando conectividade com ${apiUrl}`,
+      details: {
+        status: connectivityTest.status,
+        statusText: connectivityTest.statusText,
+      },
+    })
+  } catch (error) {
+    testResults.tests.push({
+      name: "Conectividade com API",
+      status: "❌ FAIL",
+      message: "Erro de conectividade",
+      error: error instanceof Error ? error.message : String(error),
     })
   }
 
-  // Criar Basic Auth header
-  const basicAuthHeader = createBasicAuthHeader(process.env.TRYPLOPAY_TOKEN!, process.env.TRYPLOPAY_SECRET_KEY!)
-
-  // Teste 1: Verificar conectividade básica com Basic Auth
+  // Teste 3: Autenticação Basic Auth
   try {
-    const response = await fetch(`${process.env.TRYPLOPAY_API_URL}/invoices`, {
+    const basicAuthHeader = createBasicAuthHeader(token, secretKey)
+    const authTest = await fetch(`${apiUrl}/auth`, {
       method: "GET",
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
         Authorization: basicAuthHeader,
-        "User-Agent": "SHEIN-Test/1.0",
+        "User-Agent": "SHEIN-Auth-Test/1.0",
       },
     })
 
-    const responseText = await response.text()
-    let parsedResponse
-
+    const authResponseText = await authTest.text()
+    let authData
     try {
-      parsedResponse = JSON.parse(responseText)
+      authData = JSON.parse(authResponseText)
     } catch {
-      parsedResponse = { raw: responseText.substring(0, 200) }
+      authData = { raw: authResponseText.substring(0, 200) }
     }
 
-    debugInfo.tests.push({
-      test: "Conectividade API (Basic Auth)",
-      status: response.status,
-      success: response.ok,
-      response: parsedResponse,
-      headers: Object.fromEntries(response.headers),
-      auth_header: `Basic ${Buffer.from(`${process.env.TRYPLOPAY_TOKEN}:${process.env.TRYPLOPAY_SECRET_KEY}`).toString("base64").substring(0, 20)}...`,
+    const authSuccess = authTest.ok && !authData.error
+
+    testResults.tests.push({
+      name: "Autenticação Basic Auth",
+      status: authSuccess ? "✅ PASS" : "❌ FAIL",
+      message: "Testando autenticação com Basic Auth",
+      details: {
+        status: authTest.status,
+        statusText: authTest.statusText,
+        response: authData,
+      },
     })
 
-    if (!response.ok) {
-      debugInfo.errors.push(
-        `Erro de autenticação: ${response.status} - ${parsedResponse.message || parsedResponse.error || "Unauthorized"}`,
-      )
-    } else {
-      debugInfo.warnings.push("✅ Autenticação Basic Auth funcionando!")
+    if (authSuccess) {
+      testResults.success = true
     }
   } catch (error) {
-    debugInfo.errors.push(`Erro de conexão: ${error instanceof Error ? error.message : String(error)}`)
-    debugInfo.tests.push({
-      test: "Conectividade API (Basic Auth)",
-      status: 0,
-      success: false,
+    testResults.tests.push({
+      name: "Autenticação Basic Auth",
+      status: "❌ FAIL",
+      message: "Erro na autenticação",
       error: error instanceof Error ? error.message : String(error),
     })
   }
 
-  // Teste 2: Criar fatura de teste (apenas se autenticação passou)
-  if (debugInfo.errors.length === 0) {
+  // Teste 4: Endpoint de faturas
+  try {
+    const basicAuthHeader = createBasicAuthHeader(token, secretKey)
+    const invoicesTest = await fetch(`${apiUrl}/invoices?p=1`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        Authorization: basicAuthHeader,
+        "User-Agent": "SHEIN-Invoices-Test/1.0",
+      },
+    })
+
+    const invoicesResponseText = await invoicesTest.text()
+    let invoicesData
     try {
-      const testPayload = {
-        client: {
-          name: "Cliente Teste",
-          document: "12345678901",
-          email: "teste@exemplo.com",
-          phone: "11999999999",
-          address: {
-            street: "Rua Teste",
-            number: "123",
-            district: "Centro",
-            city: "São Paulo",
-            state: "SP",
-            zipcode: "01000000",
-            country: "BRA",
-          },
-          ip: "127.0.0.1",
-        },
-        payment: {
-          product_type: 1,
-          external_id: `TEST_${Date.now()}`,
-          type: 1,
-          due_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0],
-          referer: `TEST_${Date.now()}`,
-          installments: 1,
-          webhook: process.env.TRYPLOPAY_WEBHOOK_URL,
-          products: [
-            {
-              id: "1",
-              title: "Produto Teste",
-              qnt: 1,
-              amount: 1.0,
-            },
-          ],
-        },
-        shipping: {
-          amount: 0,
-        },
-      }
+      invoicesData = JSON.parse(invoicesResponseText)
+    } catch {
+      invoicesData = { raw: invoicesResponseText.substring(0, 200) }
+    }
 
-      const response = await fetch(`${process.env.TRYPLOPAY_API_URL}/invoices`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-          Authorization: basicAuthHeader,
-          "User-Agent": "SHEIN-Test/1.0",
+    const invoicesSuccess = invoicesTest.ok && !invoicesData.error
+
+    testResults.tests.push({
+      name: "Endpoint de Faturas",
+      status: invoicesSuccess ? "✅ PASS" : "⚠️ WARN",
+      message: "Testando acesso ao endpoint de faturas",
+      details: {
+        status: invoicesTest.status,
+        statusText: invoicesTest.statusText,
+        response: invoicesData,
+      },
+    })
+  } catch (error) {
+    testResults.tests.push({
+      name: "Endpoint de Faturas",
+      status: "⚠️ WARN",
+      message: "Erro no teste de faturas",
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+
+  // Teste 5: Webhook URL
+  if (process.env.TRYPLOPAY_WEBHOOK_URL) {
+    try {
+      const webhookUrl = new URL(process.env.TRYPLOPAY_WEBHOOK_URL)
+      testResults.tests.push({
+        name: "Webhook URL",
+        status: webhookUrl.protocol === "https:" ? "✅ PASS" : "⚠️ WARN",
+        message: "Verificando formato da URL do webhook",
+        details: {
+          url: process.env.TRYPLOPAY_WEBHOOK_URL,
+          protocol: webhookUrl.protocol,
+          host: webhookUrl.host,
         },
-        body: JSON.stringify(testPayload),
       })
-
-      const responseText = await response.text()
-      let parsedResponse
-
-      try {
-        parsedResponse = JSON.parse(responseText)
-      } catch {
-        parsedResponse = { raw: responseText.substring(0, 200) }
-      }
-
-      debugInfo.tests.push({
-        test: "Criação de Fatura (Basic Auth)",
-        status: response.status,
-        success: response.ok,
-        response: parsedResponse,
-        payload: testPayload,
-        auth_method: "Basic Auth",
-      })
-
-      if (response.ok) {
-        debugInfo.warnings.push("✅ Teste de criação de fatura bem-sucedido com Basic Auth!")
-
-        // Verificar se PIX foi gerado
-        const invoiceData = parsedResponse.fatura || parsedResponse.invoice || parsedResponse
-        const pixCode = invoiceData.pix?.payload || invoiceData.pix_code
-
-        if (pixCode) {
-          debugInfo.warnings.push("✅ PIX code gerado com sucesso!")
-        } else {
-          debugInfo.warnings.push("⚠️ Fatura criada mas PIX code não encontrado")
-        }
-      } else {
-        debugInfo.errors.push(
-          `Erro na criação de fatura: ${response.status} - ${parsedResponse.message || parsedResponse.error}`,
-        )
-      }
     } catch (error) {
-      debugInfo.errors.push(`Erro no teste de criação: ${error instanceof Error ? error.message : String(error)}`)
-      debugInfo.tests.push({
-        test: "Criação de Fatura (Basic Auth)",
-        status: 0,
-        success: false,
+      testResults.tests.push({
+        name: "Webhook URL",
+        status: "❌ FAIL",
+        message: "URL do webhook inválida",
         error: error instanceof Error ? error.message : String(error),
       })
     }
+  } else {
+    testResults.tests.push({
+      name: "Webhook URL",
+      status: "⚠️ WARN",
+      message: "Webhook URL não configurada",
+      details: "Configure TRYPLOPAY_WEBHOOK_URL para receber notificações",
+    })
   }
 
-  const isFullyWorking = debugInfo.errors.length === 0
-  const hasPartialIssues = debugInfo.warnings.length > 0
+  // Calcular resumo
+  testResults.summary.total = testResults.tests.length
+  testResults.summary.passed = testResults.tests.filter((t) => t.status.includes("✅")).length
+  testResults.summary.failed = testResults.tests.filter((t) => t.status.includes("❌")).length
 
-  return NextResponse.json({
-    success: isFullyWorking,
-    status: isFullyWorking ? "✅ Totalmente funcional com Basic Auth" : "❌ Problemas encontrados",
-    auth_method: "Basic Auth (Conforme documentação TryploPay)",
-    summary: {
-      total_tests: debugInfo.tests.length,
-      successful_tests: debugInfo.tests.filter((t) => t.success).length,
-      failed_tests: debugInfo.tests.filter((t) => !t.success).length,
-      errors: debugInfo.errors.length,
-      warnings: debugInfo.warnings.length,
-    },
-    errors: debugInfo.errors,
-    warnings: debugInfo.warnings,
-    tests: debugInfo.tests,
-    config: debugInfo.config,
-    basic_auth_example: {
-      format: "Authorization: Basic base64(TOKEN:SECRET_KEY)",
-      your_credentials: `${process.env.TRYPLOPAY_TOKEN}:${process.env.TRYPLOPAY_SECRET_KEY?.substring(0, 10)}...`,
-      base64_preview:
-        Buffer.from(`${process.env.TRYPLOPAY_TOKEN}:${process.env.TRYPLOPAY_SECRET_KEY}`)
-          .toString("base64")
-          .substring(0, 30) + "...",
-    },
-    recommendations: isFullyWorking
-      ? ["✅ Sistema funcionando corretamente com Basic Auth", "✅ Pode usar PIX real em produção"]
-      : [
-          "🔧 Agora usando Basic Auth conforme documentação",
-          "🔑 Verifique se TOKEN e SECRET_KEY estão corretos",
-          "📋 Consulte /api/tryplopay/fix-credentials para ajuda",
-          "📞 Entre em contato com suporte TryploPay se necessário",
-        ],
-    debug: debugInfo,
-  })
+  // Gerar recomendações
+  if (testResults.success) {
+    testResults.recommendations.push("✅ Configuração básica está funcionando")
+    testResults.recommendations.push("Teste a criação de PIX em /checkout")
+    testResults.recommendations.push("Monitore webhooks em /webhook-monitor")
+  } else {
+    testResults.recommendations.push("Verifique se o token e secret key estão corretos")
+    testResults.recommendations.push("Confirme se a API URL está correta")
+    testResults.recommendations.push("Execute /debug-tryplopay para diagnóstico completo")
+  }
+
+  return NextResponse.json(testResults)
 }

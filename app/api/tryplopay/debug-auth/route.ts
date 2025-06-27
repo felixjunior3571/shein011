@@ -1,296 +1,243 @@
 import { NextResponse } from "next/server"
 
+// Função para criar Basic Auth header
+function createBasicAuthHeader(token: string, secretKey: string): string {
+  const credentials = `${token}:${secretKey}`
+  const base64Credentials = Buffer.from(credentials).toString("base64")
+  return `Basic ${base64Credentials}`
+}
+
+// Função para testar diferentes métodos de autenticação
+async function testAuthMethod(
+  method: string,
+  url: string,
+  headers: Record<string, string>,
+): Promise<{ method: string; endpoint: string; status: number; success: boolean; response?: any; error?: string }> {
+  try {
+    console.log(`[DEBUG] Testando ${method} em ${url}`)
+
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "User-Agent": "SHEIN-Debug/1.0",
+        ...headers,
+      },
+    })
+
+    const contentType = response.headers.get("content-type") || ""
+    const isJson = contentType.includes("application/json")
+
+    let responseData
+    try {
+      const responseText = await response.text()
+      responseData = isJson ? JSON.parse(responseText) : { raw: responseText.substring(0, 200) }
+    } catch (parseError) {
+      responseData = { parse_error: "Erro ao fazer parse da resposta" }
+    }
+
+    const success = response.ok && !responseData.error
+
+    console.log(`[DEBUG] ${method}: ${response.status} - ${success ? "✅" : "❌"}`)
+
+    return {
+      method,
+      endpoint: url,
+      status: response.status,
+      success,
+      response: responseData,
+    }
+  } catch (error) {
+    console.log(`[DEBUG] ${method}: Erro de conexão - ❌`)
+    return {
+      method,
+      endpoint: url,
+      status: 0,
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    }
+  }
+}
+
 export async function GET() {
-  const debugInfo = {
-    timestamp: new Date().toISOString(),
-    environment: {
-      NODE_ENV: process.env.NODE_ENV,
-      VERCEL_ENV: process.env.VERCEL_ENV,
+  const debugResult = {
+    success: false,
+    status: "Configuração incompleta",
+    working_methods: [] as string[],
+    recommended_method: "",
+    summary: {
+      total_tests: 0,
+      successful_tests: 0,
+      failed_tests: 0,
+      errors: 0,
+      warnings: 0,
     },
+    errors: [] as string[],
+    warnings: [] as string[],
+    tests: [] as any[],
     config: {
       TRYPLOPAY_TOKEN: {
         exists: !!process.env.TRYPLOPAY_TOKEN,
         length: process.env.TRYPLOPAY_TOKEN?.length || 0,
-        preview: process.env.TRYPLOPAY_TOKEN
-          ? `${process.env.TRYPLOPAY_TOKEN.substring(0, 5)}...${process.env.TRYPLOPAY_TOKEN.substring(-3)}`
-          : "undefined",
-        full_value: process.env.TRYPLOPAY_TOKEN || "undefined",
-      },
-      TRYPLOPAY_API_URL: {
-        exists: !!process.env.TRYPLOPAY_API_URL,
-        value: process.env.TRYPLOPAY_API_URL || "undefined",
+        preview: process.env.TRYPLOPAY_TOKEN ? `${process.env.TRYPLOPAY_TOKEN.substring(0, 10)}...` : "Não configurado",
       },
       TRYPLOPAY_SECRET_KEY: {
         exists: !!process.env.TRYPLOPAY_SECRET_KEY,
         length: process.env.TRYPLOPAY_SECRET_KEY?.length || 0,
         preview: process.env.TRYPLOPAY_SECRET_KEY
-          ? `${process.env.TRYPLOPAY_SECRET_KEY.substring(0, 5)}...${process.env.TRYPLOPAY_SECRET_KEY.substring(-3)}`
-          : "undefined",
-        full_value: process.env.TRYPLOPAY_SECRET_KEY || "undefined",
+          ? `${process.env.TRYPLOPAY_SECRET_KEY.substring(0, 10)}...`
+          : "Não configurado",
       },
-      TRYPLOPAY_WEBHOOK_URL: {
-        exists: !!process.env.TRYPLOPAY_WEBHOOK_URL,
-        value: process.env.TRYPLOPAY_WEBHOOK_URL || "undefined",
-      },
+      TRYPLOPAY_API_URL: process.env.TRYPLOPAY_API_URL || "Não configurado",
+      TRYPLOPAY_WEBHOOK_URL: process.env.TRYPLOPAY_WEBHOOK_URL || "Não configurado",
     },
-    auth_tests: [] as any[],
-    errors: [] as string[],
     recommendations: [] as string[],
   }
 
-  // Verificar se as variáveis existem
+  // Verificar configuração básica
   if (!process.env.TRYPLOPAY_TOKEN) {
-    debugInfo.errors.push("TRYPLOPAY_TOKEN não está definido")
-    debugInfo.recommendations.push("Configure TRYPLOPAY_TOKEN no Vercel")
-  }
-
-  if (!process.env.TRYPLOPAY_API_URL) {
-    debugInfo.errors.push("TRYPLOPAY_API_URL não está definido")
-    debugInfo.recommendations.push("Configure TRYPLOPAY_API_URL=https://api.tryplopay.com")
+    debugResult.errors.push("TRYPLOPAY_TOKEN não configurado")
   }
 
   if (!process.env.TRYPLOPAY_SECRET_KEY) {
-    debugInfo.errors.push("TRYPLOPAY_SECRET_KEY não está definido")
-    debugInfo.recommendations.push("Configure TRYPLOPAY_SECRET_KEY no Vercel")
+    debugResult.errors.push("TRYPLOPAY_SECRET_KEY não configurado")
   }
 
-  // Se variáveis não existem, retornar erro
-  if (debugInfo.errors.length > 0) {
-    return NextResponse.json({
-      success: false,
-      error: "Configuração incompleta",
-      debug: debugInfo,
-    })
+  if (!process.env.TRYPLOPAY_API_URL) {
+    debugResult.errors.push("TRYPLOPAY_API_URL não configurado")
   }
 
-  // Teste 1: Método Bearer Token apenas
-  try {
-    const response = await fetch(`${process.env.TRYPLOPAY_API_URL}/invoices`, {
-      method: "GET",
+  if (debugResult.errors.length > 0) {
+    debugResult.recommendations.push("Configure todas as variáveis de ambiente necessárias")
+    debugResult.recommendations.push("Verifique o arquivo .env.local ou as configurações do Vercel")
+    return NextResponse.json(debugResult)
+  }
+
+  // Preparar diferentes métodos de autenticação para teste
+  const token = process.env.TRYPLOPAY_TOKEN!
+  const secretKey = process.env.TRYPLOPAY_SECRET_KEY!
+  const apiUrl = process.env.TRYPLOPAY_API_URL!
+
+  const authMethods = [
+    {
+      name: "Basic Auth (Recomendado)",
       headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        Authorization: `Bearer ${process.env.TRYPLOPAY_TOKEN}`,
+        Authorization: createBasicAuthHeader(token, secretKey),
       },
-    })
-
-    const responseText = await response.text()
-    let parsedResponse
-
-    try {
-      parsedResponse = JSON.parse(responseText)
-    } catch {
-      parsedResponse = { raw_response: responseText.substring(0, 200) }
-    }
-
-    debugInfo.auth_tests.push({
-      method: "Bearer Token Only",
-      status: response.status,
-      success: response.ok,
-      headers_sent: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        Authorization: `Bearer ${process.env.TRYPLOPAY_TOKEN.substring(0, 10)}...`,
-      },
-      response: parsedResponse,
-      response_headers: Object.fromEntries(response.headers),
-    })
-  } catch (error) {
-    debugInfo.auth_tests.push({
-      method: "Bearer Token Only",
-      status: 0,
-      success: false,
-      error: error instanceof Error ? error.message : String(error),
-    })
-  }
-
-  // Teste 2: Bearer Token + X-Secret-Key
-  try {
-    const response = await fetch(`${process.env.TRYPLOPAY_API_URL}/invoices`, {
-      method: "GET",
+    },
+    {
+      name: "Bearer Token",
       headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        Authorization: `Bearer ${process.env.TRYPLOPAY_TOKEN}`,
-        "X-Secret-Key": process.env.TRYPLOPAY_SECRET_KEY,
+        Authorization: `Bearer ${token}`,
       },
-    })
-
-    const responseText = await response.text()
-    let parsedResponse
-
-    try {
-      parsedResponse = JSON.parse(responseText)
-    } catch {
-      parsedResponse = { raw_response: responseText.substring(0, 200) }
-    }
-
-    debugInfo.auth_tests.push({
-      method: "Bearer Token + X-Secret-Key",
-      status: response.status,
-      success: response.ok,
-      headers_sent: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        Authorization: `Bearer ${process.env.TRYPLOPAY_TOKEN.substring(0, 10)}...`,
-        "X-Secret-Key": `${process.env.TRYPLOPAY_SECRET_KEY.substring(0, 10)}...`,
-      },
-      response: parsedResponse,
-      response_headers: Object.fromEntries(response.headers),
-    })
-  } catch (error) {
-    debugInfo.auth_tests.push({
-      method: "Bearer Token + X-Secret-Key",
-      status: 0,
-      success: false,
-      error: error instanceof Error ? error.message : String(error),
-    })
-  }
-
-  // Teste 3: Basic Auth
-  try {
-    const basicAuth = Buffer.from(`${process.env.TRYPLOPAY_TOKEN}:${process.env.TRYPLOPAY_SECRET_KEY}`).toString(
-      "base64",
-    )
-    const response = await fetch(`${process.env.TRYPLOPAY_API_URL}/invoices`, {
-      method: "GET",
+    },
+    {
+      name: "Token Header",
       headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        Authorization: `Basic ${basicAuth}`,
+        Token: token,
       },
-    })
-
-    const responseText = await response.text()
-    let parsedResponse
-
-    try {
-      parsedResponse = JSON.parse(responseText)
-    } catch {
-      parsedResponse = { raw_response: responseText.substring(0, 200) }
-    }
-
-    debugInfo.auth_tests.push({
-      method: "Basic Auth (Token:SecretKey)",
-      status: response.status,
-      success: response.ok,
-      headers_sent: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        Authorization: `Basic ${basicAuth.substring(0, 20)}...`,
-      },
-      response: parsedResponse,
-      response_headers: Object.fromEntries(response.headers),
-    })
-  } catch (error) {
-    debugInfo.auth_tests.push({
-      method: "Basic Auth (Token:SecretKey)",
-      status: 0,
-      success: false,
-      error: error instanceof Error ? error.message : String(error),
-    })
-  }
-
-  // Teste 4: API Key no header
-  try {
-    const response = await fetch(`${process.env.TRYPLOPAY_API_URL}/invoices`, {
-      method: "GET",
+    },
+    {
+      name: "API Key Header",
       headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        "X-API-Key": process.env.TRYPLOPAY_TOKEN,
-        "X-Secret-Key": process.env.TRYPLOPAY_SECRET_KEY,
+        "X-API-Key": token,
       },
-    })
+    },
+  ]
 
-    const responseText = await response.text()
-    let parsedResponse
+  // Endpoints para testar
+  const endpoints = [
+    { name: "Auth", path: "/auth" },
+    { name: "Invoices", path: "/invoices" },
+    { name: "Customers", path: "/costumers" },
+    { name: "Root", path: "" },
+  ]
 
-    try {
-      parsedResponse = JSON.parse(responseText)
-    } catch {
-      parsedResponse = { raw_response: responseText.substring(0, 200) }
+  // Executar testes
+  for (const authMethod of authMethods) {
+    for (const endpoint of endpoints) {
+      const testUrl = `${apiUrl}${endpoint.path}`
+      const result = await testAuthMethod(`${authMethod.name} - ${endpoint.name}`, testUrl, authMethod.headers)
+
+      debugResult.tests.push(result)
+      debugResult.summary.total_tests++
+
+      if (result.success) {
+        debugResult.summary.successful_tests++
+        if (!debugResult.working_methods.includes(authMethod.name)) {
+          debugResult.working_methods.push(authMethod.name)
+        }
+      } else {
+        debugResult.summary.failed_tests++
+      }
     }
-
-    debugInfo.auth_tests.push({
-      method: "X-API-Key + X-Secret-Key",
-      status: response.status,
-      success: response.ok,
-      headers_sent: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        "X-API-Key": `${process.env.TRYPLOPAY_TOKEN.substring(0, 10)}...`,
-        "X-Secret-Key": `${process.env.TRYPLOPAY_SECRET_KEY.substring(0, 10)}...`,
-      },
-      response: parsedResponse,
-      response_headers: Object.fromEntries(response.headers),
-    })
-  } catch (error) {
-    debugInfo.auth_tests.push({
-      method: "X-API-Key + X-Secret-Key",
-      status: 0,
-      success: false,
-      error: error instanceof Error ? error.message : String(error),
-    })
   }
 
-  // Analisar resultados
-  const workingMethods = debugInfo.auth_tests.filter((test) => test.success)
-  const unauthorizedMethods = debugInfo.auth_tests.filter((test) => test.status === 401)
-
-  if (workingMethods.length === 0) {
-    debugInfo.errors.push("Nenhum método de autenticação funcionou")
-
-    if (unauthorizedMethods.length === debugInfo.auth_tests.length) {
-      debugInfo.errors.push("Todos os métodos retornaram 401 - Token ou Secret Key inválidos")
-      debugInfo.recommendations.push("🔑 Verifique se o TRYPLOPAY_TOKEN está correto")
-      debugInfo.recommendations.push("🔐 Verifique se o TRYPLOPAY_SECRET_KEY está correto")
-      debugInfo.recommendations.push("📅 Verifique se o token não expirou")
-      debugInfo.recommendations.push("🌐 Confirme se está usando a URL correta da API")
-      debugInfo.recommendations.push("📞 Entre em contato com o suporte da TryploPay")
-    }
+  // Determinar método recomendado
+  if (debugResult.working_methods.length > 0) {
+    debugResult.success = true
+    debugResult.recommended_method = debugResult.working_methods[0]
+    debugResult.status = `${debugResult.working_methods.length} método(s) funcionando`
   } else {
-    debugInfo.recommendations.push(`✅ ${workingMethods.length} método(s) de autenticação funcionando`)
-    workingMethods.forEach((method) => {
-      debugInfo.recommendations.push(`✓ Use: ${method.method}`)
-    })
+    debugResult.status = "Nenhum método de autenticação funcionando"
+    debugResult.errors.push("Nenhum método de autenticação foi bem-sucedido")
   }
 
-  return NextResponse.json({
-    success: workingMethods.length > 0,
-    working_methods: workingMethods.length,
-    total_methods_tested: debugInfo.auth_tests.length,
-    status: workingMethods.length > 0 ? "✅ Autenticação funcionando" : "❌ Falha na autenticação",
-    debug: debugInfo,
+  // Gerar recomendações
+  if (debugResult.working_methods.includes("Basic Auth (Recomendado)")) {
+    debugResult.recommendations.push("✅ Basic Auth está funcionando - método recomendado pela TryploPay")
+  } else if (debugResult.working_methods.length > 0) {
+    debugResult.recommendations.push(`Use o método: ${debugResult.recommended_method}`)
+    debugResult.warnings.push("Basic Auth não está funcionando, mas outros métodos sim")
+  } else {
+    debugResult.recommendations.push("Verifique se o token e secret key estão corretos")
+    debugResult.recommendations.push("Confirme se a API URL está correta")
+    debugResult.recommendations.push("Teste manualmente no Postman ou similar")
+    debugResult.recommendations.push("Entre em contato com o suporte da TryploPay")
+  }
+
+  // Contar erros e avisos
+  debugResult.summary.errors = debugResult.errors.length
+  debugResult.summary.warnings = debugResult.warnings.length
+
+  console.log("[DEBUG] Resultado final:", {
+    success: debugResult.success,
+    working_methods: debugResult.working_methods,
+    total_tests: debugResult.summary.total_tests,
+    successful_tests: debugResult.summary.successful_tests,
   })
+
+  return NextResponse.json(debugResult)
 }
 
+// Endpoint POST para testar criação de fatura
 export async function POST() {
-  // Teste de criação de fatura com método que funciona
-  const token = process.env.TRYPLOPAY_TOKEN
-  const apiUrl = process.env.TRYPLOPAY_API_URL
-  const secretKey = process.env.TRYPLOPAY_SECRET_KEY
-
-  if (!token || !apiUrl || !secretKey) {
-    return NextResponse.json({
-      success: false,
-      error: "Configuração incompleta",
-      missing: {
-        token: !token,
-        apiUrl: !apiUrl,
-        secretKey: !secretKey,
-      },
-    })
+  const testResult = {
+    success: false,
+    successful_method: "",
+    results: [] as any[],
+    recommendation: "",
   }
 
+  if (!process.env.TRYPLOPAY_TOKEN || !process.env.TRYPLOPAY_SECRET_KEY || !process.env.TRYPLOPAY_API_URL) {
+    testResult.recommendation = "Configure as variáveis de ambiente primeiro"
+    return NextResponse.json(testResult)
+  }
+
+  const token = process.env.TRYPLOPAY_TOKEN
+  const secretKey = process.env.TRYPLOPAY_SECRET_KEY
+  const apiUrl = process.env.TRYPLOPAY_API_URL
+
+  // Payload de teste simples
   const testPayload = {
     client: {
-      name: "Cliente Teste Debug",
+      name: "Teste Debug",
       document: "12345678901",
-      email: "debug@teste.com",
+      email: "teste@debug.com",
       phone: "11999999999",
       address: {
-        street: "Rua Debug",
+        street: "Rua Teste",
         number: "123",
         district: "Centro",
         city: "São Paulo",
@@ -305,15 +252,15 @@ export async function POST() {
       external_id: `DEBUG_${Date.now()}`,
       type: 1,
       due_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0],
-      referer: `DEBUG_${Date.now()}`,
+      referer: "debug_test",
       installments: 1,
       webhook: process.env.TRYPLOPAY_WEBHOOK_URL,
       products: [
         {
           id: "1",
-          title: "Teste Debug - PIX",
+          title: "Teste Debug",
           qnt: 1,
-          amount: 1.0,
+          amount: 10.0,
         },
       ],
     },
@@ -322,70 +269,58 @@ export async function POST() {
     },
   }
 
+  // Testar diferentes métodos
   const authMethods = [
-    {
-      name: "Bearer Token + X-Secret-Key",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        Authorization: `Bearer ${token}`,
-        "X-Secret-Key": secretKey,
-      },
-    },
-    {
-      name: "Bearer Token Only",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-    },
     {
       name: "Basic Auth",
       headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        Authorization: `Basic ${Buffer.from(`${token}:${secretKey}`).toString("base64")}`,
+        Authorization: createBasicAuthHeader(token, secretKey),
+      },
+    },
+    {
+      name: "Bearer Token",
+      headers: {
+        Authorization: `Bearer ${token}`,
       },
     },
   ]
-
-  const results = []
 
   for (const method of authMethods) {
     try {
       const response = await fetch(`${apiUrl}/invoices`, {
         method: "POST",
-        headers: method.headers,
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          "User-Agent": "SHEIN-Debug-Create/1.0",
+          ...method.headers,
+        },
         body: JSON.stringify(testPayload),
       })
 
       const responseText = await response.text()
-      let parsedResponse
-
+      let responseData
       try {
-        parsedResponse = JSON.parse(responseText)
+        responseData = JSON.parse(responseText)
       } catch {
-        parsedResponse = { raw_response: responseText.substring(0, 300) }
+        responseData = { raw: responseText.substring(0, 200) }
       }
 
-      results.push({
+      const success = response.ok && !responseData.error
+
+      testResult.results.push({
         method: method.name,
         status: response.status,
-        success: response.ok,
-        response: parsedResponse,
-        headers_sent: {
-          ...method.headers,
-          Authorization: method.headers.Authorization.substring(0, 20) + "...",
-        },
+        success,
+        response: responseData,
       })
 
-      // Se funcionou, parar aqui
-      if (response.ok) {
-        break
+      if (success && !testResult.successful_method) {
+        testResult.success = true
+        testResult.successful_method = method.name
       }
     } catch (error) {
-      results.push({
+      testResult.results.push({
         method: method.name,
         status: 0,
         success: false,
@@ -394,15 +329,11 @@ export async function POST() {
     }
   }
 
-  const successfulMethod = results.find((r) => r.success)
+  if (testResult.success) {
+    testResult.recommendation = `Criação de fatura funcionando com ${testResult.successful_method}`
+  } else {
+    testResult.recommendation = "Nenhum método conseguiu criar fatura. Verifique as credenciais."
+  }
 
-  return NextResponse.json({
-    success: !!successfulMethod,
-    successful_method: successfulMethod?.method || null,
-    test_payload: testPayload,
-    results,
-    recommendation: successfulMethod
-      ? `Use o método: ${successfulMethod.method}`
-      : "Nenhum método de autenticação funcionou - verifique as credenciais",
-  })
+  return NextResponse.json(testResult)
 }

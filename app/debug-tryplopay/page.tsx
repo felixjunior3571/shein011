@@ -6,57 +6,62 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge"
 import { Loader2, CheckCircle, XCircle, AlertCircle, RefreshCw } from "lucide-react"
 
-interface AuthTest {
-  method: string
-  status: number
+interface DebugResult {
   success: boolean
-  response?: any
-  error?: string
-  headers_sent?: any
-}
-
-interface DebugResponse {
-  success: boolean
-  working_methods: number
-  total_methods_tested: number
   status: string
-  debug: {
-    config: any
-    auth_tests: AuthTest[]
-    errors: string[]
-    recommendations: string[]
+  working_methods: string[]
+  recommended_method: string
+  summary: {
+    total_tests: number
+    successful_tests: number
+    failed_tests: number
+    errors: number
+    warnings: number
   }
+  errors: string[]
+  warnings: string[]
+  tests: Array<{
+    method: string
+    endpoint: string
+    status: number
+    success: boolean
+    response?: any
+    error?: string
+  }>
+  config: {
+    TRYPLOPAY_TOKEN: {
+      exists: boolean
+      length: number
+      preview: string
+    }
+    TRYPLOPAY_SECRET_KEY: {
+      exists: boolean
+      length: number
+      preview: string
+    }
+    TRYPLOPAY_API_URL: string
+    TRYPLOPAY_WEBHOOK_URL: string
+  }
+  recommendations: string[]
 }
 
 export default function DebugTryploPayPage() {
-  const [debugData, setDebugData] = useState<DebugResponse | null>(null)
+  const [debugResult, setDebugResult] = useState<DebugResult | null>(null)
   const [loading, setLoading] = useState(false)
-  const [testingCreation, setTestingCreation] = useState(false)
-  const [creationResult, setCreationResult] = useState<any>(null)
+  const [error, setError] = useState<string | null>(null)
 
   const runDebug = async () => {
     setLoading(true)
+    setError(null)
+
     try {
       const response = await fetch("/api/tryplopay/debug-auth")
       const data = await response.json()
-      setDebugData(data)
-    } catch (error) {
-      console.error("Erro ao executar debug:", error)
+      setDebugResult(data)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro desconhecido")
     } finally {
       setLoading(false)
-    }
-  }
-
-  const testCreation = async () => {
-    setTestingCreation(true)
-    try {
-      const response = await fetch("/api/tryplopay/debug-auth", { method: "POST" })
-      const data = await response.json()
-      setCreationResult(data)
-    } catch (error) {
-      console.error("Erro ao testar criação:", error)
-    } finally {
-      setTestingCreation(false)
     }
   }
 
@@ -72,9 +77,9 @@ export default function DebugTryploPayPage() {
         </Badge>
       )
     } else if (status === 401) {
-      return <Badge variant="destructive">🔑 {status} Unauthorized</Badge>
-    } else if (status === 0) {
-      return <Badge variant="secondary">❌ Connection Error</Badge>
+      return <Badge variant="destructive">🔑 {status}</Badge>
+    } else if (status === 404) {
+      return <Badge variant="secondary">🔍 {status}</Badge>
     } else {
       return <Badge variant="destructive">❌ {status}</Badge>
     }
@@ -83,225 +88,281 @@ export default function DebugTryploPayPage() {
   return (
     <div className="min-h-screen bg-gray-50 p-4">
       <div className="max-w-6xl mx-auto space-y-6">
-        <div className="text-center">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">🔧 Debug TryploPay</h1>
-          <p className="text-gray-600">Diagnóstico completo da integração TryploPay</p>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Configuração Atual */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <AlertCircle className="h-5 w-5" />
-                Configuração Atual
-              </CardTitle>
-              <CardDescription>Status das variáveis de ambiente</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {debugData ? (
-                <div className="space-y-3">
-                  <div className="flex justify-between items-center">
-                    <span className="font-medium">TRYPLOPAY_TOKEN:</span>
-                    <div className="flex items-center gap-2">
-                      {getStatusIcon(debugData.debug.config.TRYPLOPAY_TOKEN.exists)}
-                      <span className="text-sm">
-                        {debugData.debug.config.TRYPLOPAY_TOKEN.exists
-                          ? `${debugData.debug.config.TRYPLOPAY_TOKEN.length} chars`
-                          : "Não configurado"}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="font-medium">TRYPLOPAY_SECRET_KEY:</span>
-                    <div className="flex items-center gap-2">
-                      {getStatusIcon(debugData.debug.config.TRYPLOPAY_SECRET_KEY.exists)}
-                      <span className="text-sm">
-                        {debugData.debug.config.TRYPLOPAY_SECRET_KEY.exists
-                          ? `${debugData.debug.config.TRYPLOPAY_SECRET_KEY.length} chars`
-                          : "Não configurado"}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="font-medium">TRYPLOPAY_API_URL:</span>
-                    <div className="flex items-center gap-2">
-                      {getStatusIcon(debugData.debug.config.TRYPLOPAY_API_URL.exists)}
-                      <span className="text-sm">{debugData.debug.config.TRYPLOPAY_API_URL.value}</span>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <p className="text-gray-500">Execute o debug para ver a configuração</p>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Ações */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Ações de Debug</CardTitle>
-              <CardDescription>Execute testes de conectividade e autenticação</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <Button onClick={runDebug} disabled={loading} className="w-full">
-                {loading ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Executando Debug...
-                  </>
-                ) : (
-                  <>
-                    <RefreshCw className="mr-2 h-4 w-4" />
-                    Executar Debug Completo
-                  </>
-                )}
+        {/* Header */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">🔍 Debug TryploPay - Sistema de Pagamento</CardTitle>
+            <CardDescription>Diagnóstico completo da integração com TryploPay</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex gap-4">
+              <Button onClick={runDebug} disabled={loading} className="flex items-center gap-2">
+                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                {loading ? "Executando Debug..." : "Executar Debug Completo"}
               </Button>
 
-              {debugData && debugData.working_methods > 0 && (
-                <Button
-                  onClick={testCreation}
-                  disabled={testingCreation}
-                  variant="outline"
-                  className="w-full bg-transparent"
-                >
-                  {testingCreation ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Testando Criação...
-                    </>
-                  ) : (
-                    "Testar Criação de Fatura"
-                  )}
-                </Button>
-              )}
-
-              <Button
-                onClick={() => window.open("/api/tryplopay/fix-credentials", "_blank")}
-                variant="secondary"
-                className="w-full"
-              >
+              <Button variant="outline" onClick={() => window.open("/api/tryplopay/fix-credentials", "_blank")}>
                 📋 Guia de Correção
               </Button>
-            </CardContent>
-          </Card>
-        </div>
+            </div>
+          </CardContent>
+        </Card>
 
-        {/* Resultados dos Testes */}
-        {debugData && (
-          <Card>
+        {/* Error Display */}
+        {error && (
+          <Card className="border-red-200 bg-red-50">
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                {getStatusIcon(debugData.success)}
-                Resultados dos Testes de Autenticação
+              <CardTitle className="text-red-700 flex items-center gap-2">
+                <XCircle className="h-5 w-5" />
+                Erro no Debug
               </CardTitle>
-              <CardDescription>
-                {debugData.working_methods} de {debugData.total_methods_tested} métodos funcionando
-              </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
-                {debugData.debug.auth_tests.map((test, index) => (
-                  <div key={index} className="border rounded-lg p-4">
-                    <div className="flex justify-between items-center mb-2">
-                      <h4 className="font-medium">{test.method}</h4>
-                      {getStatusBadge(test.status, test.success)}
-                    </div>
-
-                    {test.response && (
-                      <div className="bg-gray-50 rounded p-3 mt-2">
-                        <p className="text-sm font-medium mb-1">Resposta:</p>
-                        <pre className="text-xs overflow-x-auto">{JSON.stringify(test.response, null, 2)}</pre>
-                      </div>
-                    )}
-
-                    {test.error && (
-                      <div className="bg-red-50 rounded p-3 mt-2">
-                        <p className="text-sm font-medium text-red-700 mb-1">Erro:</p>
-                        <p className="text-xs text-red-600">{test.error}</p>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-
-              {/* Recomendações */}
-              {debugData.debug.recommendations.length > 0 && (
-                <div className="mt-6 p-4 bg-blue-50 rounded-lg">
-                  <h4 className="font-medium text-blue-900 mb-2">📋 Recomendações:</h4>
-                  <ul className="space-y-1">
-                    {debugData.debug.recommendations.map((rec, index) => (
-                      <li key={index} className="text-sm text-blue-800">
-                        • {rec}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {/* Erros */}
-              {debugData.debug.errors.length > 0 && (
-                <div className="mt-4 p-4 bg-red-50 rounded-lg">
-                  <h4 className="font-medium text-red-900 mb-2">❌ Erros Encontrados:</h4>
-                  <ul className="space-y-1">
-                    {debugData.debug.errors.map((error, index) => (
-                      <li key={index} className="text-sm text-red-800">
-                        • {error}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+              <p className="text-red-600">{error}</p>
             </CardContent>
           </Card>
         )}
 
-        {/* Resultado do Teste de Criação */}
-        {creationResult && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                {getStatusIcon(creationResult.success)}
-                Teste de Criação de Fatura
-              </CardTitle>
-              <CardDescription>
-                {creationResult.success ? "✅ Criação funcionando" : "❌ Falha na criação"}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {creationResult.successful_method && (
-                <div className="mb-4 p-3 bg-green-50 rounded-lg">
-                  <p className="text-sm font-medium text-green-900">
-                    ✅ Método funcionando: {creationResult.successful_method}
-                  </p>
+        {/* Results */}
+        {debugResult && (
+          <>
+            {/* Status Overview */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  {getStatusIcon(debugResult.success)}
+                  Status Geral
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-blue-600">{debugResult.summary.total_tests}</div>
+                    <div className="text-sm text-gray-600">Total de Testes</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-green-600">{debugResult.summary.successful_tests}</div>
+                    <div className="text-sm text-gray-600">Sucessos</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-red-600">{debugResult.summary.failed_tests}</div>
+                    <div className="text-sm text-gray-600">Falhas</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-orange-600">{debugResult.summary.warnings}</div>
+                    <div className="text-sm text-gray-600">Avisos</div>
+                  </div>
                 </div>
-              )}
 
-              <div className="space-y-4">
-                {creationResult.results.map((result: any, index: number) => (
-                  <div key={index} className="border rounded-lg p-4">
-                    <div className="flex justify-between items-center mb-2">
-                      <h4 className="font-medium">{result.method}</h4>
-                      {getStatusBadge(result.status, result.success)}
+                <div className="mt-4 p-4 bg-gray-100 rounded-lg">
+                  <h4 className="font-semibold mb-2">Status:</h4>
+                  <p className="text-lg">{debugResult.status}</p>
+
+                  {debugResult.working_methods.length > 0 && (
+                    <div className="mt-2">
+                      <span className="font-semibold">Métodos Funcionando: </span>
+                      {debugResult.working_methods.map((method, index) => (
+                        <Badge key={index} variant="default" className="ml-1">
+                          {method}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+
+                  {debugResult.recommended_method && (
+                    <div className="mt-2">
+                      <span className="font-semibold">Método Recomendado: </span>
+                      <Badge variant="default" className="bg-green-500">
+                        {debugResult.recommended_method}
+                      </Badge>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Configuration */}
+            <Card>
+              <CardHeader>
+                <CardTitle>⚙️ Configuração Atual</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium">TRYPLOPAY_TOKEN:</span>
+                      <div className="flex items-center gap-2">
+                        {debugResult.config.TRYPLOPAY_TOKEN.exists ? (
+                          <CheckCircle className="h-4 w-4 text-green-500" />
+                        ) : (
+                          <XCircle className="h-4 w-4 text-red-500" />
+                        )}
+                        <span className="text-sm text-gray-600">{debugResult.config.TRYPLOPAY_TOKEN.preview}</span>
+                      </div>
                     </div>
 
-                    {result.response && (
-                      <div className="bg-gray-50 rounded p-3 mt-2">
-                        <p className="text-sm font-medium mb-1">Resposta:</p>
-                        <pre className="text-xs overflow-x-auto max-h-40">
-                          {JSON.stringify(result.response, null, 2)}
-                        </pre>
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium">TRYPLOPAY_SECRET_KEY:</span>
+                      <div className="flex items-center gap-2">
+                        {debugResult.config.TRYPLOPAY_SECRET_KEY.exists ? (
+                          <CheckCircle className="h-4 w-4 text-green-500" />
+                        ) : (
+                          <XCircle className="h-4 w-4 text-red-500" />
+                        )}
+                        <span className="text-sm text-gray-600">{debugResult.config.TRYPLOPAY_SECRET_KEY.preview}</span>
                       </div>
-                    )}
+                    </div>
                   </div>
-                ))}
-              </div>
 
-              <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-                <p className="text-sm font-medium text-blue-900">💡 {creationResult.recommendation}</p>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium">API URL:</span>
+                      <span className="text-sm text-gray-600">{debugResult.config.TRYPLOPAY_API_URL}</span>
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium">Webhook URL:</span>
+                      <span className="text-sm text-gray-600 truncate max-w-48">
+                        {debugResult.config.TRYPLOPAY_WEBHOOK_URL}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Test Results */}
+            <Card>
+              <CardHeader>
+                <CardTitle>🧪 Resultados dos Testes</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {debugResult.tests.map((test, index) => (
+                    <div key={index} className="border rounded-lg p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          {getStatusIcon(test.success)}
+                          <span className="font-medium">{test.method}</span>
+                          <span className="text-sm text-gray-500">{test.endpoint}</span>
+                        </div>
+                        {getStatusBadge(test.status, test.success)}
+                      </div>
+
+                      {test.error && (
+                        <div className="mt-2 p-2 bg-red-50 rounded text-red-700 text-sm">
+                          <strong>Erro:</strong> {test.error}
+                        </div>
+                      )}
+
+                      {test.response && (
+                        <details className="mt-2">
+                          <summary className="cursor-pointer text-sm text-gray-600 hover:text-gray-800">
+                            Ver Resposta
+                          </summary>
+                          <pre className="mt-2 p-2 bg-gray-100 rounded text-xs overflow-auto max-h-40">
+                            {JSON.stringify(test.response, null, 2)}
+                          </pre>
+                        </details>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Errors and Warnings */}
+            {(debugResult.errors.length > 0 || debugResult.warnings.length > 0) && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {debugResult.errors.length > 0 && (
+                  <Card className="border-red-200">
+                    <CardHeader>
+                      <CardTitle className="text-red-700 flex items-center gap-2">
+                        <XCircle className="h-5 w-5" />
+                        Erros ({debugResult.errors.length})
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <ul className="space-y-1">
+                        {debugResult.errors.map((error, index) => (
+                          <li key={index} className="text-red-600 text-sm">
+                            • {error}
+                          </li>
+                        ))}
+                      </ul>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {debugResult.warnings.length > 0 && (
+                  <Card className="border-orange-200">
+                    <CardHeader>
+                      <CardTitle className="text-orange-700 flex items-center gap-2">
+                        <AlertCircle className="h-5 w-5" />
+                        Avisos ({debugResult.warnings.length})
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <ul className="space-y-1">
+                        {debugResult.warnings.map((warning, index) => (
+                          <li key={index} className="text-orange-600 text-sm">
+                            • {warning}
+                          </li>
+                        ))}
+                      </ul>
+                    </CardContent>
+                  </Card>
+                )}
               </div>
-            </CardContent>
-          </Card>
+            )}
+
+            {/* Recommendations */}
+            <Card>
+              <CardHeader>
+                <CardTitle>💡 Recomendações</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ul className="space-y-2">
+                  {debugResult.recommendations.map((rec, index) => (
+                    <li key={index} className="flex items-start gap-2">
+                      <span className="text-blue-500 mt-1">•</span>
+                      <span>{rec}</span>
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Card>
+
+            {/* Quick Actions */}
+            <Card>
+              <CardHeader>
+                <CardTitle>🚀 Ações Rápidas</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="outline" onClick={() => window.open("/api/tryplopay/test-connection", "_blank")}>
+                    🧪 Teste de Conexão
+                  </Button>
+
+                  <Button
+                    variant="outline"
+                    onClick={() => window.open("/checkout", "_blank")}
+                    disabled={!debugResult.success}
+                  >
+                    💳 Testar Checkout
+                  </Button>
+
+                  <Button variant="outline" onClick={() => window.open("/webhook-monitor", "_blank")}>
+                    📡 Monitor de Webhooks
+                  </Button>
+
+                  <Button variant="outline" onClick={() => window.open("/api/tryplopay/fix-credentials", "_blank")}>
+                    🔧 Guia de Correção
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </>
         )}
       </div>
     </div>
