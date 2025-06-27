@@ -5,7 +5,19 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Copy, CheckCircle, Clock, AlertCircle, Loader2, RefreshCw, Bug, Eye, EyeOff } from "lucide-react"
+import {
+  Copy,
+  CheckCircle,
+  Clock,
+  AlertCircle,
+  Loader2,
+  RefreshCw,
+  Bug,
+  Eye,
+  EyeOff,
+  Settings,
+  TestTube,
+} from "lucide-react"
 
 interface PixData {
   success: boolean
@@ -43,21 +55,25 @@ export default function CheckoutPage() {
   const [pixData, setPixData] = useState<PixData | null>(null)
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus | null>(null)
   const [loading, setLoading] = useState(true)
-  const [timeLeft, setTimeLeft] = useState(300) // 5 minutos
+  const [timeLeft, setTimeLeft] = useState(600) // 10 minutos
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [sseConnected, setSseConnected] = useState(false)
   const [sseError, setSseError] = useState<string | null>(null)
   const [showDebug, setShowDebug] = useState(false)
   const [debugData, setDebugData] = useState<any>(null)
+  const [testResults, setTestResults] = useState<any>(null)
+  const [showTests, setShowTests] = useState(false)
 
   // Parâmetros da URL
-  const amount = Number.parseFloat(searchParams.get("amount") || "29.90")
-  const shippingMethod = searchParams.get("shipping") || "standard"
+  const amount = Number.parseFloat(searchParams.get("amount") || "34.90")
+  const shippingMethod = searchParams.get("shipping") || "sedex"
+
+  // Recuperar dados do localStorage com fallback
   const customerData = {
-    name: searchParams.get("name") || localStorage.getItem("cardholderName") || "Cliente Shein",
-    cpf: searchParams.get("cpf") || localStorage.getItem("userCpf") || "",
-    email: searchParams.get("email") || localStorage.getItem("userEmail") || "cliente@shein.com.br",
+    name: searchParams.get("name") || localStorage.getItem("cardholderName") || "HENRIQUE RODRIGUES LEROY",
+    cpf: searchParams.get("cpf") || localStorage.getItem("userCpf") || "055.512.466-55",
+    email: searchParams.get("email") || localStorage.getItem("userEmail") || "cidaaamesteves@emailrecebimento.com",
     phone: searchParams.get("phone") || localStorage.getItem("userPhone") || "",
     address: {
       street: searchParams.get("street") || localStorage.getItem("userStreet") || "",
@@ -68,6 +84,26 @@ export default function CheckoutPage() {
       zipcode: searchParams.get("zipcode") || localStorage.getItem("userZipcode") || "",
     },
   }
+
+  // Testar conexão com TryploPay
+  const testConnection = useCallback(async () => {
+    try {
+      setShowTests(true)
+      console.log("[CHECKOUT] 🧪 Testando conexão com TryploPay...")
+
+      const response = await fetch("/api/tryplopay/test-connection")
+      const data = await response.json()
+
+      setTestResults(data)
+      console.log("[CHECKOUT] 📊 Resultados dos testes:", data)
+    } catch (error) {
+      console.error("[CHECKOUT] ❌ Erro ao testar conexão:", error)
+      setTestResults({
+        error: error instanceof Error ? error.message : "Erro desconhecido",
+        tests: [],
+      })
+    }
+  }, [])
 
   // Gerar PIX automaticamente
   const generatePix = useCallback(async () => {
@@ -121,6 +157,11 @@ export default function CheckoutPage() {
         setPixData(data)
         console.log(`[CHECKOUT] ✅ PIX gerado com sucesso: ${data.type}`)
         console.log("[CHECKOUT] PIX data:", data)
+
+        // Se for PIX simulado, mostrar aviso
+        if (data.type === "simulated") {
+          console.log("[CHECKOUT] ⚠️ PIX simulado gerado:", data.fallback_reason)
+        }
       } else {
         console.error("[CHECKOUT] ❌ Erro na geração do PIX:", data)
         throw new Error(data.error || "Erro desconhecido na geração do PIX")
@@ -220,7 +261,6 @@ export default function CheckoutPage() {
       setTimeout(() => {
         if (eventSource.readyState === EventSource.CLOSED) {
           console.log("[CHECKOUT] 🔄 SSE: Tentando reconectar...")
-          // A reconexão será feita automaticamente pelo useEffect
         }
       }, 5000)
     }
@@ -350,14 +390,48 @@ export default function CheckoutPage() {
           </CardHeader>
 
           <CardContent className="space-y-6">
-            {/* Botão de Debug */}
-            <div className="flex justify-center">
+            {/* Botões de Debug e Teste */}
+            <div className="flex justify-center gap-2">
               <Button onClick={() => setShowDebug(!showDebug)} variant="outline" size="sm" className="text-xs">
                 <Bug className="w-4 h-4 mr-2" />
                 {showDebug ? <EyeOff className="w-4 h-4 ml-2" /> : <Eye className="w-4 h-4 ml-2" />}
-                {showDebug ? "Ocultar" : "Mostrar"} Debug
+                Debug
+              </Button>
+              <Button onClick={testConnection} variant="outline" size="sm" className="text-xs bg-transparent">
+                <TestTube className="w-4 h-4 mr-2" />
+                Testar API
               </Button>
             </div>
+
+            {/* Resultados dos Testes */}
+            {showTests && testResults && (
+              <div className="bg-gray-900 text-green-400 rounded-lg p-4 text-xs font-mono max-h-96 overflow-auto">
+                <h3 className="text-yellow-400 font-bold mb-2">🧪 TESTES DE CONECTIVIDADE</h3>
+
+                <div className="mb-3">
+                  <h4 className="text-blue-400 font-bold">🔧 Configuração:</h4>
+                  <div className="ml-2">
+                    <div>Token: {testResults.tryplopay_config?.TRYPLOPAY_TOKEN?.exists ? "✅" : "❌"}</div>
+                    <div>API URL: {testResults.tryplopay_config?.TRYPLOPAY_API_URL?.exists ? "✅" : "❌"}</div>
+                    <div>Webhook: {testResults.tryplopay_config?.TRYPLOPAY_WEBHOOK_URL?.exists ? "✅" : "❌"}</div>
+                  </div>
+                </div>
+
+                {testResults.tests?.map((test: any, i: number) => (
+                  <div key={i} className="mb-2">
+                    <div className="font-bold">
+                      {test.status} {test.name}
+                    </div>
+                    <div className="ml-2 text-gray-300">{test.message}</div>
+                    {test.error && <div className="ml-2 text-red-400">Erro: {test.error}</div>}
+                  </div>
+                ))}
+
+                <Button onClick={() => setShowTests(false)} variant="outline" size="sm" className="mt-2">
+                  Fechar Testes
+                </Button>
+              </div>
+            )}
 
             {/* Debug Panel */}
             {showDebug && (
@@ -432,6 +506,9 @@ export default function CheckoutPage() {
                         <div>Amount: R$ {pixData.amount}</div>
                         <div>PIX Code Length: {pixData.pixCode?.length || 0}</div>
                         <div>QR Code URL: {pixData.qrCode ? "✅" : "❌"}</div>
+                        {pixData.fallback_reason && (
+                          <div className="text-yellow-300">Fallback: {pixData.fallback_reason}</div>
+                        )}
                       </div>
                     </div>
                   )}
@@ -465,7 +542,7 @@ export default function CheckoutPage() {
             {loading && (
               <div className="text-center py-8">
                 <Loader2 className="w-8 h-8 animate-spin mx-auto mb-4" />
-                <p className="text-gray-600">Gerando PIX real...</p>
+                <p className="text-gray-600">Gerando PIX...</p>
                 <p className="text-gray-500 text-sm mt-1">Conectando com TryploPay</p>
                 <div className="mt-4 text-xs text-gray-400">
                   <div>Validando dados...</div>
@@ -495,10 +572,15 @@ export default function CheckoutPage() {
                   </div>
                 )}
 
-                <Button onClick={generatePix} className="mt-3 w-full bg-transparent" variant="outline">
-                  <RefreshCw className="w-4 h-4 mr-2" />
-                  Tentar Novamente
-                </Button>
+                <div className="flex gap-2 mt-3">
+                  <Button onClick={generatePix} className="flex-1 bg-transparent" variant="outline">
+                    <RefreshCw className="w-4 h-4 mr-2" />
+                    Tentar Novamente
+                  </Button>
+                  <Button onClick={testConnection} variant="outline" size="sm">
+                    <Settings className="w-4 h-4" />
+                  </Button>
+                </div>
               </div>
             )}
 
@@ -535,6 +617,9 @@ export default function CheckoutPage() {
                       <span className="font-medium">Modo Simulado</span>
                     </div>
                     <p className="text-yellow-700 text-sm mt-1">{pixData.fallback_reason}</p>
+                    <p className="text-yellow-600 text-xs mt-2">
+                      💡 Configure as variáveis TRYPLOPAY_TOKEN e TRYPLOPAY_API_URL para usar PIX real
+                    </p>
                   </div>
                 )}
 
