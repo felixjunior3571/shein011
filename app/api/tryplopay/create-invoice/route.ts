@@ -309,7 +309,7 @@ export async function POST(request: NextRequest) {
       client: clientData,
       payment: {
         product_type: 1, // Produto físico
-        external_id: externalId, // Usar external_id ao invés de id
+        external_id: externalId, // ID único da transação
         type: 1, // PIX
         due_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0], // Formato YYYY-MM-DD
         referer: externalId,
@@ -335,14 +335,17 @@ export async function POST(request: NextRequest) {
 
     debugInfo.step = "preparing_request"
 
-    // Headers conforme documentação TryploPay atualizada
+    // Headers conforme documentação TryploPay
     const headers = {
       "Content-Type": "application/json",
       Accept: "application/json",
       Authorization: `Bearer ${process.env.TRYPLOPAY_TOKEN}`,
       "User-Agent": "SHEIN-Checkout/1.0",
-      // Remover X-Secret-Key se não for necessário
-      // "X-Secret-Key": process.env.TRYPLOPAY_SECRET_KEY || "",
+    }
+
+    // Adicionar X-Secret-Key apenas se estiver configurado
+    if (process.env.TRYPLOPAY_SECRET_KEY) {
+      headers["X-Secret-Key"] = process.env.TRYPLOPAY_SECRET_KEY
     }
 
     const requestUrl = `${process.env.TRYPLOPAY_API_URL}/invoices`
