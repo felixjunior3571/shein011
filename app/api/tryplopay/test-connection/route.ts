@@ -1,254 +1,337 @@
-import { type NextRequest, NextResponse } from "next/server"
+import { NextResponse } from "next/server"
 
-export async function GET(request: NextRequest) {
-  const testResults = {
+export async function GET() {
+  // Estrutura básica de resposta
+  const response = {
     timestamp: new Date().toISOString(),
-    environment: {
-      NODE_ENV: process.env.NODE_ENV,
-      VERCEL_ENV: process.env.VERCEL_ENV,
-    },
-    tryplopay_config: {
+    status: "starting",
+    environment: {},
+    config: {},
+    tests: [],
+    errors: [],
+    warnings: [],
+    debug: {},
+  }
+
+  try {
+    // Passo 1: Verificar ambiente
+    response.status = "checking_environment"
+    response.environment = {
+      NODE_ENV: process.env.NODE_ENV || "unknown",
+      VERCEL_ENV: process.env.VERCEL_ENV || "unknown",
+      runtime: typeof window === "undefined" ? "server" : "client",
+    }
+
+    // Passo 2: Verificar configuração
+    response.status = "checking_config"
+    response.config = {
       TRYPLOPAY_TOKEN: {
         exists: !!process.env.TRYPLOPAY_TOKEN,
         length: process.env.TRYPLOPAY_TOKEN?.length || 0,
-        preview: process.env.TRYPLOPAY_TOKEN ? `${process.env.TRYPLOPAY_TOKEN.substring(0, 10)}...` : "❌ NÃO DEFINIDO",
-        value: process.env.TRYPLOPAY_TOKEN || "❌ NÃO DEFINIDO",
+        value: process.env.TRYPLOPAY_TOKEN || "undefined",
       },
       TRYPLOPAY_API_URL: {
         exists: !!process.env.TRYPLOPAY_API_URL,
-        value: process.env.TRYPLOPAY_API_URL || "❌ NÃO DEFINIDO",
+        value: process.env.TRYPLOPAY_API_URL || "undefined",
       },
       TRYPLOPAY_SECRET_KEY: {
         exists: !!process.env.TRYPLOPAY_SECRET_KEY,
         length: process.env.TRYPLOPAY_SECRET_KEY?.length || 0,
-        preview: process.env.TRYPLOPAY_SECRET_KEY
-          ? `${process.env.TRYPLOPAY_SECRET_KEY.substring(0, 10)}...`
-          : "❌ NÃO DEFINIDO",
-        value: process.env.TRYPLOPAY_SECRET_KEY || "❌ NÃO DEFINIDO",
+        value: process.env.TRYPLOPAY_SECRET_KEY || "undefined",
       },
       TRYPLOPAY_WEBHOOK_URL: {
         exists: !!process.env.TRYPLOPAY_WEBHOOK_URL,
-        value: process.env.TRYPLOPAY_WEBHOOK_URL || "❌ NÃO DEFINIDO",
+        value: process.env.TRYPLOPAY_WEBHOOK_URL || "undefined",
       },
-    },
-    tests: [],
-  }
-
-  // Teste 1: Verificar se as variáveis estão definidas
-  if (!process.env.TRYPLOPAY_TOKEN || !process.env.TRYPLOPAY_API_URL) {
-    testResults.tests.push({
-      name: "Variáveis de Ambiente",
-      status: "❌ FALHOU",
-      message: "TRYPLOPAY_TOKEN ou TRYPLOPAY_API_URL não estão definidos",
-      required_vars: {
-        TRYPLOPAY_TOKEN: !!process.env.TRYPLOPAY_TOKEN,
-        TRYPLOPAY_API_URL: !!process.env.TRYPLOPAY_API_URL,
-        TRYPLOPAY_SECRET_KEY: !!process.env.TRYPLOPAY_SECRET_KEY,
-        TRYPLOPAY_WEBHOOK_URL: !!process.env.TRYPLOPAY_WEBHOOK_URL,
-      },
-      current_values: {
-        TRYPLOPAY_TOKEN: process.env.TRYPLOPAY_TOKEN || "undefined",
-        TRYPLOPAY_API_URL: process.env.TRYPLOPAY_API_URL || "undefined",
-        TRYPLOPAY_SECRET_KEY: process.env.TRYPLOPAY_SECRET_KEY || "undefined",
-        TRYPLOPAY_WEBHOOK_URL: process.env.TRYPLOPAY_WEBHOOK_URL || "undefined",
-      },
-    })
-
-    return NextResponse.json(testResults, { status: 200 })
-  }
-
-  // Teste 2: Testar conectividade com a API
-  try {
-    const testUrl = `${process.env.TRYPLOPAY_API_URL}/invoices`
-
-    const response = await fetch(testUrl, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        Authorization: `Bearer ${process.env.TRYPLOPAY_TOKEN}`,
-        "X-Secret-Key": process.env.TRYPLOPAY_SECRET_KEY || "",
-      },
-      signal: AbortSignal.timeout(10000), // 10 segundos
-    })
-
-    testResults.tests.push({
-      name: "Conectividade API",
-      status: response.ok ? "✅ SUCESSO" : "⚠️ AVISO",
-      message: `HTTP ${response.status} - ${response.statusText}`,
-      details: {
-        url: testUrl,
-        status: response.status,
-        headers: Object.fromEntries(response.headers),
-      },
-    })
-
-    // Teste 3: Verificar estrutura da resposta
-    if (response.ok) {
-      try {
-        const responseText = await response.text()
-        const data = JSON.parse(responseText)
-
-        testResults.tests.push({
-          name: "Estrutura da Resposta",
-          status: "✅ SUCESSO",
-          message: "API retornou JSON válido",
-          details: {
-            response_keys: Object.keys(data),
-            response_preview: JSON.stringify(data).substring(0, 200) + "...",
-          },
-        })
-      } catch (parseError) {
-        testResults.tests.push({
-          name: "Estrutura da Resposta",
-          status: "❌ FALHOU",
-          message: "API não retornou JSON válido",
-          error: parseError instanceof Error ? parseError.message : "Erro desconhecido",
-        })
-      }
     }
-  } catch (fetchError) {
-    testResults.tests.push({
-      name: "Conectividade API",
-      status: "❌ FALHOU",
-      message: "Erro de conexão com a API TryploPay",
-      error: fetchError instanceof Error ? fetchError.message : "Erro desconhecido",
-    })
-  }
 
-  // Teste 4: Verificar webhook URL
-  if (process.env.TRYPLOPAY_WEBHOOK_URL) {
+    // Teste 1: Variáveis de ambiente
+    response.status = "testing_env_vars"
+    if (!process.env.TRYPLOPAY_TOKEN) {
+      response.tests.push({
+        name: "TRYPLOPAY_TOKEN",
+        status: "❌ MISSING",
+        message: "Token não configurado",
+      })
+      response.errors.push("TRYPLOPAY_TOKEN não está definido")
+    } else {
+      response.tests.push({
+        name: "TRYPLOPAY_TOKEN",
+        status: "✅ OK",
+        message: `Token configurado (${process.env.TRYPLOPAY_TOKEN.length} chars)`,
+      })
+    }
+
+    if (!process.env.TRYPLOPAY_API_URL) {
+      response.tests.push({
+        name: "TRYPLOPAY_API_URL",
+        status: "❌ MISSING",
+        message: "URL da API não configurada",
+      })
+      response.errors.push("TRYPLOPAY_API_URL não está definido")
+    } else {
+      response.tests.push({
+        name: "TRYPLOPAY_API_URL",
+        status: "✅ OK",
+        message: `URL configurada: ${process.env.TRYPLOPAY_API_URL}`,
+      })
+    }
+
+    // Se variáveis críticas não existem, parar aqui
+    if (!process.env.TRYPLOPAY_TOKEN || !process.env.TRYPLOPAY_API_URL) {
+      response.status = "missing_critical_vars"
+      response.summary = {
+        overall: "❌ CONFIGURAÇÃO INCOMPLETA",
+        message: "Configure TRYPLOPAY_TOKEN e TRYPLOPAY_API_URL",
+        next_steps: [
+          "1. Acesse o Vercel Dashboard",
+          "2. Vá em Settings > Environment Variables",
+          "3. Adicione TRYPLOPAY_TOKEN=WmCVLneePWrUMgJ",
+          "4. Adicione TRYPLOPAY_API_URL=https://api.tryplopay.com",
+          "5. Faça um novo deploy",
+        ],
+      }
+      return NextResponse.json(response, { status: 200 })
+    }
+
+    // Teste 2: Validar URL
+    response.status = "validating_url"
     try {
-      const webhookUrl = new URL(process.env.TRYPLOPAY_WEBHOOK_URL)
-      testResults.tests.push({
-        name: "Webhook URL",
-        status: "✅ SUCESSO",
-        message: "URL do webhook é válida",
+      const apiUrl = new URL(process.env.TRYPLOPAY_API_URL)
+      response.tests.push({
+        name: "URL_VALIDATION",
+        status: "✅ OK",
+        message: `URL válida: ${apiUrl.protocol}//${apiUrl.host}`,
         details: {
-          protocol: webhookUrl.protocol,
-          host: webhookUrl.host,
-          pathname: webhookUrl.pathname,
+          protocol: apiUrl.protocol,
+          host: apiUrl.host,
+          pathname: apiUrl.pathname,
         },
       })
     } catch (urlError) {
-      testResults.tests.push({
-        name: "Webhook URL",
-        status: "❌ FALHOU",
-        message: "URL do webhook é inválida",
-        error: urlError instanceof Error ? urlError.message : "Erro desconhecido",
+      response.tests.push({
+        name: "URL_VALIDATION",
+        status: "❌ INVALID",
+        message: "URL da API é inválida",
+        error: urlError instanceof Error ? urlError.message : String(urlError),
       })
-    }
-  }
-
-  return NextResponse.json(testResults, { status: 200 })
-}
-
-export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json()
-    const { amount = 29.9, customerData } = body
-
-    if (!process.env.TRYPLOPAY_TOKEN || !process.env.TRYPLOPAY_API_URL) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Variáveis de ambiente não configuradas",
-          missing_vars: {
-            TRYPLOPAY_TOKEN: !process.env.TRYPLOPAY_TOKEN,
-            TRYPLOPAY_API_URL: !process.env.TRYPLOPAY_API_URL,
-          },
-        },
-        { status: 500 },
-      )
+      response.errors.push(`URL inválida: ${urlError}`)
     }
 
-    // Teste de criação de fatura real
-    const externalId = `TEST_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-
-    const payload = {
-      client: {
-        name: customerData?.name || "Cliente Teste",
-        document: "12345678901",
-        email: customerData?.email || "teste@shein.com.br",
-        phone: "11999999999",
-        address: {
-          street: "Rua Teste",
-          number: "123",
-          district: "Centro",
-          city: "São Paulo",
-          state: "SP",
-          zipcode: "01000000",
-          country: "BRA",
-        },
-        ip: request.headers.get("x-forwarded-for") || "127.0.0.1",
-      },
-      payment: {
-        product_type: 1,
-        id: externalId,
-        type: 1, // PIX
-        due_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0],
-        referer: externalId,
-        installments: "1",
-        webhook: process.env.TRYPLOPAY_WEBHOOK_URL,
-        products: [
-          {
-            id: "1",
-            title: "Teste - Cartão SHEIN",
-            qnt: 1,
-            amount: amount.toFixed(2),
-          },
-        ],
-      },
-      shipping: {
-        amount: 0,
-      },
-    }
-
-    const response = await fetch(`${process.env.TRYPLOPAY_API_URL}/invoices`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        Authorization: `Bearer ${process.env.TRYPLOPAY_TOKEN}`,
-        "X-Secret-Key": process.env.TRYPLOPAY_SECRET_KEY || "",
-      },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(15000),
-    })
-
-    const responseText = await response.text()
-    let responseData
+    // Teste 3: Conectividade básica
+    response.status = "testing_connectivity"
+    const testUrl = `${process.env.TRYPLOPAY_API_URL}/invoices`
 
     try {
-      responseData = JSON.parse(responseText)
-    } catch (parseError) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Resposta da API não é JSON válido",
-          response_preview: responseText.substring(0, 500),
-          status: response.status,
+      // Criar AbortController para timeout
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => {
+        controller.abort()
+      }, 8000) // 8 segundos
+
+      const fetchResponse = await fetch(testUrl, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          Authorization: `Bearer ${process.env.TRYPLOPAY_TOKEN}`,
+          "User-Agent": "SHEIN-Test/1.0",
         },
-        { status: 500 },
-      )
+        signal: controller.signal,
+      })
+
+      clearTimeout(timeoutId)
+
+      // Informações da resposta
+      const responseInfo = {
+        status: fetchResponse.status,
+        statusText: fetchResponse.statusText,
+        ok: fetchResponse.ok,
+        headers: {},
+        url: testUrl,
+      }
+
+      // Capturar headers importantes
+      const importantHeaders = ["content-type", "server", "date", "content-length"]
+      importantHeaders.forEach((header) => {
+        const value = fetchResponse.headers.get(header)
+        if (value) {
+          responseInfo.headers[header] = value
+        }
+      })
+
+      response.debug.fetch_response = responseInfo
+
+      // Determinar status do teste
+      let testStatus = "❌ FAILED"
+      let testMessage = `HTTP ${fetchResponse.status}`
+
+      if (fetchResponse.ok) {
+        testStatus = "✅ SUCCESS"
+        testMessage = `Conectado com sucesso (${fetchResponse.status})`
+      } else if (fetchResponse.status === 401) {
+        testStatus = "🔑 AUTH_ERROR"
+        testMessage = "Erro de autenticação - verifique o token"
+      } else if (fetchResponse.status === 404) {
+        testStatus = "🔍 NOT_FOUND"
+        testMessage = "Endpoint não encontrado - verifique a URL"
+      } else if (fetchResponse.status >= 500) {
+        testStatus = "🔥 SERVER_ERROR"
+        testMessage = "Erro do servidor TryploPay"
+      }
+
+      response.tests.push({
+        name: "API_CONNECTIVITY",
+        status: testStatus,
+        message: testMessage,
+        details: responseInfo,
+      })
+
+      // Teste 4: Verificar conteúdo da resposta
+      response.status = "checking_response_content"
+      try {
+        const responseText = await fetchResponse.text()
+        response.debug.response_preview = responseText.substring(0, 300)
+
+        if (responseText.includes("<!DOCTYPE") || responseText.includes("<html")) {
+          response.tests.push({
+            name: "RESPONSE_FORMAT",
+            status: "❌ HTML_ERROR",
+            message: "API retornou HTML (possível erro 404/500)",
+            details: {
+              content_type: fetchResponse.headers.get("content-type"),
+              preview: responseText.substring(0, 100),
+            },
+          })
+          response.errors.push("API retornou HTML ao invés de JSON")
+        } else if (responseText.trim() === "") {
+          response.tests.push({
+            name: "RESPONSE_FORMAT",
+            status: "⚠️ EMPTY",
+            message: "Resposta vazia",
+          })
+          response.warnings.push("Resposta vazia da API")
+        } else {
+          try {
+            const jsonData = JSON.parse(responseText)
+            response.tests.push({
+              name: "RESPONSE_FORMAT",
+              status: "✅ JSON_OK",
+              message: "Resposta JSON válida",
+              details: {
+                type: typeof jsonData,
+                keys: Array.isArray(jsonData) ? "array" : Object.keys(jsonData || {}),
+              },
+            })
+          } catch (parseError) {
+            response.tests.push({
+              name: "RESPONSE_FORMAT",
+              status: "⚠️ INVALID_JSON",
+              message: "Resposta não é JSON válido",
+              details: {
+                parse_error: parseError instanceof Error ? parseError.message : String(parseError),
+                preview: responseText.substring(0, 100),
+              },
+            })
+            response.warnings.push("Resposta não é JSON válido")
+          }
+        }
+      } catch (textError) {
+        response.tests.push({
+          name: "RESPONSE_READING",
+          status: "❌ READ_ERROR",
+          message: "Erro ao ler resposta",
+          error: textError instanceof Error ? textError.message : String(textError),
+        })
+        response.errors.push(`Erro ao ler resposta: ${textError}`)
+      }
+    } catch (fetchError) {
+      let errorType = "UNKNOWN_ERROR"
+      let errorMessage = "Erro desconhecido"
+
+      if (fetchError instanceof Error) {
+        if (fetchError.name === "AbortError") {
+          errorType = "TIMEOUT"
+          errorMessage = "Timeout na conexão (8 segundos)"
+        } else if (fetchError.message.includes("ENOTFOUND")) {
+          errorType = "DNS_ERROR"
+          errorMessage = "Erro de DNS - domínio não encontrado"
+        } else if (fetchError.message.includes("ECONNREFUSED")) {
+          errorType = "CONNECTION_REFUSED"
+          errorMessage = "Conexão recusada"
+        } else if (fetchError.message.includes("certificate")) {
+          errorType = "SSL_ERROR"
+          errorMessage = "Erro de certificado SSL"
+        } else {
+          errorMessage = fetchError.message
+        }
+      }
+
+      response.tests.push({
+        name: "API_CONNECTIVITY",
+        status: "❌ CONNECTION_FAILED",
+        message: errorMessage,
+        error_type: errorType,
+        details: {
+          url: testUrl,
+          error: fetchError instanceof Error ? fetchError.message : String(fetchError),
+        },
+      })
+      response.errors.push(`Erro de conectividade: ${errorMessage}`)
     }
 
+    // Resumo final
+    response.status = "completed"
+    const successTests = response.tests.filter((t) => t.status.includes("✅")).length
+    const failedTests = response.tests.filter((t) => t.status.includes("❌")).length
+    const warningTests = response.tests.filter((t) => t.status.includes("⚠️")).length
+
+    response.summary = {
+      total_tests: response.tests.length,
+      success: successTests,
+      failed: failedTests,
+      warnings: warningTests,
+      overall:
+        failedTests === 0
+          ? warningTests === 0
+            ? "✅ TODOS OS TESTES PASSARAM"
+            : "⚠️ ALGUNS AVISOS"
+          : "❌ ALGUNS TESTES FALHARAM",
+      ready_for_production: failedTests === 0 && response.errors.length === 0,
+    }
+
+    return NextResponse.json(response, { status: 200 })
+  } catch (globalError) {
+    // Capturar qualquer erro não tratado
+    response.status = "global_error"
+    response.global_error = {
+      message: globalError instanceof Error ? globalError.message : String(globalError),
+      name: globalError instanceof Error ? globalError.name : "UnknownError",
+      stack: globalError instanceof Error ? globalError.stack : undefined,
+    }
+    response.errors.push(`Erro global: ${response.global_error.message}`)
+
+    return NextResponse.json(response, { status: 500 })
+  }
+}
+
+export async function POST() {
+  try {
     return NextResponse.json(
       {
-        success: response.ok,
-        test_type: "create_invoice",
-        status: response.status,
-        external_id: externalId,
-        response_data: responseData,
-        payload_sent: payload,
+        message: "Endpoint POST para testes de criação de fatura",
+        status: "not_implemented",
+        timestamp: new Date().toISOString(),
+        note: "Use GET para testes de conectividade",
       },
       { status: 200 },
     )
   } catch (error) {
     return NextResponse.json(
       {
-        success: false,
-        error: error instanceof Error ? error.message : "Erro desconhecido",
+        error: "Erro no endpoint POST",
+        message: error instanceof Error ? error.message : String(error),
+        timestamp: new Date().toISOString(),
       },
       { status: 500 },
     )
