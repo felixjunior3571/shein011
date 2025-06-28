@@ -42,24 +42,14 @@ export default function RootLayout({
         <script
           dangerouslySetInnerHTML={{
             __html: `
-      window.pixelId = "6836abf356b3052677c77248";
-      var a = document.createElement("script");
-      a.setAttribute("async", "");
-      a.setAttribute("defer", "");
-      a.setAttribute("src", "https://cdn.utmify.com.br/scripts/pixel/pixel.js");
-      document.head.appendChild(a);
-    `,
+              window.pixelId = "6836abf356b3052677c77248";
+              var a = document.createElement("script");
+              a.setAttribute("async", "");
+              a.setAttribute("defer", "");
+              a.setAttribute("src", "https://cdn.utmify.com.br/scripts/pixel/pixel.js");
+              document.head.appendChild(a);
+            `,
           }}
-        />
-
-        {/* Script UTMify externo (opcional) */}
-        <script
-          src="https://cdn.utmify.com.br/scripts/utms/latest.js"
-          data-utmify-prevent-xcod-sck="true"
-          data-utmify-prevent-subids="true"
-          async
-          defer
-          onError={() => console.warn("Erro ao carregar script UTMify externo")}
         />
       </head>
       <body className={inter.className}>
