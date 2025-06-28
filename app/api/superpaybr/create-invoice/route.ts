@@ -2,71 +2,65 @@ import { type NextRequest, NextResponse } from "next/server"
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("=== CRIANDO FATURA SUPERPAYBR ===")
-
     const body = await request.json()
-    const { amount, shipping, method } = body
+    console.log("=== CRIANDO FATURA SUPERPAYBR ===")
+    console.log("Dados recebidos:", JSON.stringify(body, null, 2))
 
-    // Obter dados dos headers
-    const cpfData = JSON.parse(request.headers.get("x-cpf-data") || "{}")
-    const userEmail = request.headers.get("x-user-email") || ""
-    const userWhatsApp = request.headers.get("x-user-whatsapp") || ""
-    const deliveryAddress = JSON.parse(request.headers.get("x-delivery-address") || "{}")
-
-    console.log("📋 Dados da fatura:", {
-      amount,
-      shipping,
-      method,
-      cliente: cpfData.nome,
-      email: userEmail,
-    })
-
-    // Primeiro, fazer autenticação
+    // Obter token de autenticação
     const authResponse = await fetch(`${request.nextUrl.origin}/api/superpaybr/auth`)
     const authResult = await authResponse.json()
 
     if (!authResult.success) {
-      throw new Error("Falha na autenticação SuperPayBR")
+      console.log("❌ Erro na autenticação:", authResult.error)
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Erro na autenticação SuperPayBR",
+          details: authResult.error,
+        },
+        { status: 401 },
+      )
     }
 
     const accessToken = authResult.data.access_token
+    console.log("✅ Token de acesso obtido")
 
-    // Preparar dados da fatura SuperPayBR
-    const invoiceData = {
+    // Preparar payload para SuperPayBR
+    const superPayPayload = {
       client: {
-        name: cpfData.nome || "Cliente SHEIN",
-        document: cpfData.cpf?.replace(/\D/g, "") || "00000000000",
-        email: userEmail || "cliente@shein.com",
-        phone: userWhatsApp?.replace(/\D/g, "") || "11999999999",
+        name: body.customer?.name || "Cliente",
+        document: body.customer?.document || "00000000000",
+        email: body.customer?.email || "cliente@exemplo.com",
+        phone: body.customer?.phone || "11999999999",
         address: {
-          street: deliveryAddress.street || "Rua Principal",
-          number: deliveryAddress.number || "123",
-          district: deliveryAddress.neighborhood || "Centro",
-          city: deliveryAddress.city || "São Paulo",
-          state: deliveryAddress.state || "SP",
-          zipcode: deliveryAddress.zipcode?.replace(/\D/g, "") || "01000000",
+          street: body.customer?.address?.street || "Rua Exemplo",
+          number: body.customer?.address?.number || "123",
+          district: body.customer?.address?.district || "Centro",
+          city: body.customer?.address?.city || "São Paulo",
+          state: body.customer?.address?.state || "SP",
+          zipcode: body.customer?.address?.zipcode || "01000000",
           country: "BR",
         },
-        ip: request.headers.get("x-forwarded-for") || "127.0.0.1",
+        ip: body.customer?.ip || "127.0.0.1",
       },
       payment: {
-        id: `SHEIN_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        id: body.external_id || `INVOICE_${Date.now()}`,
         type: "3", // PIX
-        due_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0],
-        referer: `SHEIN_FRETE_${method}`,
+        due_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0], // +1 dia
+        referer: body.external_id || `REF_${Date.now()}`,
         installment: "1",
-        order_url: `${request.nextUrl.origin}/checkout`,
+        order_url: body.return_url || `${request.nextUrl.origin}/checkout`,
         store_url: request.nextUrl.origin,
         webhook: `${request.nextUrl.origin}/api/superpaybr/webhook`,
         discount: 0,
         products: [
           {
             id: "1",
-            image: `${request.nextUrl.origin}/shein-card-logo-new.png`,
-            title: `Frete ${method} - Cartão SHEIN`,
+            image: "https://exemplo.com/produto.png",
+            title: body.description || "Produto",
             qnt: "1",
             discount: 0,
-            amount: Number.parseFloat(amount),
+            amount: body.amount || 1000, // em centavos
           },
         ],
       },
@@ -75,68 +69,61 @@ export async function POST(request: NextRequest) {
       },
     }
 
-    console.log("🚀 Enviando para SuperPayBR...")
+    console.log("📤 Enviando para SuperPayBR:", JSON.stringify(superPayPayload, null, 2))
 
-    const createResponse = await fetch("https://api.superpaybr.com/v4/invoices", {
+    // Criar fatura na SuperPayBR
+    const invoiceResponse = await fetch("https://api.superpaybr.com/v4/invoices", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${accessToken}`,
       },
-      body: JSON.stringify(invoiceData),
+      body: JSON.stringify(superPayPayload),
     })
 
     console.log("📥 Resposta SuperPayBR:", {
-      status: createResponse.status,
-      statusText: createResponse.statusText,
-      ok: createResponse.ok,
+      status: invoiceResponse.status,
+      statusText: invoiceResponse.statusText,
+      ok: invoiceResponse.ok,
     })
 
-    if (createResponse.ok) {
-      const invoiceResult = await createResponse.json()
+    if (invoiceResponse.ok) {
+      const invoiceData = await invoiceResponse.json()
       console.log("✅ Fatura SuperPayBR criada com sucesso!")
 
-      // Mapear resposta para formato esperado
-      const mappedInvoice = {
-        id: invoiceResult.fatura.id,
-        invoice_id: invoiceResult.fatura.invoice_id,
-        external_id: invoiceData.payment.id,
-        pix: {
-          payload: invoiceResult.fatura.pix.payload,
-          image: invoiceResult.fatura.pix.image,
-          qr_code: invoiceResult.fatura.pix.image,
+      // Mapear resposta para formato padrão
+      const mappedResponse = {
+        success: true,
+        data: {
+          id: invoiceData.fatura?.id,
+          invoice_id: invoiceData.fatura?.invoice_id,
+          external_id: superPayPayload.payment.id,
+          amount: invoiceData.fatura?.valores?.liquido || body.amount,
+          status: "pending",
+          pix: {
+            qr_code: invoiceData.fatura?.pix?.image,
+            qr_code_text: invoiceData.fatura?.pix?.payload,
+            expires_at: superPayPayload.payment.due_at,
+          },
+          payment_url: invoiceData.fatura?.externo?.url,
+          created_at: new Date().toISOString(),
         },
-        status: {
-          code: invoiceResult.fatura.status.code,
-          title: invoiceResult.fatura.status.title,
-          text: invoiceResult.fatura.status.text || "pending",
-        },
-        valores: {
-          bruto: invoiceResult.fatura.valores.bruto,
-          liquido: invoiceResult.fatura.valores.liquido,
-        },
-        vencimento: {
-          dia: invoiceResult.fatura.vencimento.dia,
-        },
-        type: "real",
+        raw_response: invoiceData,
       }
 
-      return NextResponse.json({
-        success: true,
-        data: mappedInvoice,
-        raw_response: invoiceResult,
-      })
+      console.log("📋 Resposta mapeada:", JSON.stringify(mappedResponse, null, 2))
+      return NextResponse.json(mappedResponse)
     } else {
-      const errorText = await createResponse.text()
-      console.log("❌ Erro ao criar fatura SuperPayBR:", createResponse.status, errorText)
+      const errorText = await invoiceResponse.text()
+      console.log("❌ Erro ao criar fatura SuperPayBR:", errorText)
 
       return NextResponse.json(
         {
           success: false,
-          error: `Erro SuperPayBR: ${createResponse.status} - ${errorText}`,
-          fallback: true,
+          error: `Erro ao criar fatura SuperPayBR: ${invoiceResponse.status}`,
+          details: errorText,
         },
-        { status: createResponse.status },
+        { status: invoiceResponse.status },
       )
     }
   } catch (error) {
@@ -145,7 +132,6 @@ export async function POST(request: NextRequest) {
       {
         success: false,
         error: "Erro interno ao criar fatura SuperPayBR",
-        fallback: true,
       },
       { status: 500 },
     )
