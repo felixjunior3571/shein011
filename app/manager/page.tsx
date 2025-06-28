@@ -2,16 +2,17 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import Image from "next/image"
+import { Trophy } from "lucide-react"
 
 export default function ManagerPage() {
-  const router = useRouter()
   const [whatsapp, setWhatsapp] = useState("")
   const [isValid, setIsValid] = useState(false)
+  const router = useRouter()
 
-  // Função para formatar WhatsApp
+  // Formatação do WhatsApp
   const formatWhatsApp = (value: string) => {
     // Remove tudo que não é número
     const numbers = value.replace(/\D/g, "")
@@ -19,7 +20,7 @@ export default function ManagerPage() {
     // Limita a 11 dígitos
     const limited = numbers.slice(0, 11)
 
-    // Aplica a máscara (XX) XXXXX-XXXX
+    // Aplica a formatação (XX) XXXXX-XXXX
     if (limited.length <= 2) {
       return limited
     } else if (limited.length <= 7) {
@@ -29,16 +30,15 @@ export default function ManagerPage() {
     }
   }
 
-  // Função para validar WhatsApp (11 dígitos)
-  const validateWhatsApp = (value: string) => {
-    const numbers = value.replace(/\D/g, "")
-    return numbers.length === 11
-  }
+  // Validação do WhatsApp
+  useEffect(() => {
+    const numbers = whatsapp.replace(/\D/g, "")
+    setIsValid(numbers.length === 11)
+  }, [whatsapp])
 
   const handleWhatsAppChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const formatted = formatWhatsApp(e.target.value)
     setWhatsapp(formatted)
-    setIsValid(validateWhatsApp(formatted))
   }
 
   const handleContinue = () => {
@@ -62,7 +62,7 @@ export default function ManagerPage() {
             Conheça sua Gerente, ela irá auxiliar na ativação do seu cartão e esclarecer todas as suas dúvidas!
           </p>
 
-          {/* Manager Card */}
+          {/* Card da Gerente */}
           <div className="bg-[#fff7db] border border-[#ffbf00] rounded-xl p-5 pb-3 mb-5">
             <div className="flex justify-center mb-3">
               <Image
@@ -80,31 +80,13 @@ export default function ManagerPage() {
 
             <div className="flex justify-center mt-0">
               <div className="bg-[#ffbf00] text-white px-3 py-1 rounded-full text-xs font-bold flex items-center">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="24"
-                  height="24"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="w-3 h-3 mr-1"
-                >
-                  <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"></path>
-                  <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"></path>
-                  <path d="M4 22h16"></path>
-                  <path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"></path>
-                  <path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"></path>
-                  <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"></path>
-                </svg>
+                <Trophy className="w-3 h-3 mr-1" />
                 Melhor gerente 2021-2024
               </div>
             </div>
           </div>
 
-          {/* WhatsApp Input */}
+          {/* Campo WhatsApp */}
           <div className="flex items-center justify-center mb-2">
             <Image src="/whatsapp-icon.png" alt="WhatsApp" width={20} height={20} className="mr-3" />
             <input
@@ -112,6 +94,8 @@ export default function ManagerPage() {
               className="flex h-10 w-full px-3 py-2 border-0 border-b border-gray-300 rounded-none bg-transparent text-base font-sans focus:border-gray-400 focus:ring-0 flex-1 focus:outline-none"
               placeholder="Digite seu WhatsApp aqui"
               maxLength={15}
+              value={whatsapp}
+              onChange={handleWhatsAppChange}
               style={{
                 boxShadow: "none",
                 borderTop: "none",
@@ -119,17 +103,17 @@ export default function ManagerPage() {
                 borderRight: "none",
                 borderRadius: "0",
               }}
-              value={whatsapp}
-              onChange={handleWhatsAppChange}
             />
           </div>
 
-          {/* Continue Button */}
+          {/* Botão Continuar */}
           <button
             onClick={handleContinue}
             disabled={!isValid}
             className={`w-full font-bold py-4 px-6 rounded-lg text-base transition-colors ${
-              isValid ? "bg-black text-white hover:bg-gray-800" : "bg-gray-300 text-gray-500 cursor-not-allowed"
+              isValid
+                ? "bg-black text-white hover:bg-black/90 cursor-pointer"
+                : "bg-gray-300 text-gray-500 cursor-not-allowed"
             }`}
           >
             Continuar
