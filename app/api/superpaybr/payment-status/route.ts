@@ -3,21 +3,19 @@ import { type NextRequest, NextResponse } from "next/server"
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
-    const invoiceId = searchParams.get("invoiceId")
     const externalId = searchParams.get("externalId")
 
-    if (!invoiceId && !externalId) {
+    if (!externalId) {
       return NextResponse.json(
         {
           success: false,
-          error: "Invoice ID ou External ID deve ser fornecido",
+          error: "External ID não fornecido",
         },
         { status: 400 },
       )
     }
 
     console.log("=== CONSULTANDO STATUS SUPERPAYBR ===")
-    console.log("Invoice ID:", invoiceId)
     console.log("External ID:", externalId)
 
     // Primeiro, fazer autenticação
@@ -30,11 +28,8 @@ export async function GET(request: NextRequest) {
 
     const accessToken = authResult.data.access_token
 
-    // Consultar status da fatura
-    const statusUrl = `https://api.superpaybr.com/v4/invoices/${invoiceId || externalId}`
-    console.log("🔗 URL consulta SuperPayBR:", statusUrl)
-
-    const statusResponse = await fetch(statusUrl, {
+    // Consultar fatura por ID (usando o endpoint de listagem)
+    const statusResponse = await fetch(`https://api.superpaybr.com/invoices?id=${externalId}`, {
       method: "GET",
       headers: {
         "Content-Type": "application/json",
@@ -42,7 +37,7 @@ export async function GET(request: NextRequest) {
       },
     })
 
-    console.log("📥 Resposta status SuperPayBR:", {
+    console.log("📥 Resposta Status SuperPayBR:", {
       status: statusResponse.status,
       statusText: statusResponse.statusText,
       ok: statusResponse.ok,
@@ -52,24 +47,36 @@ export async function GET(request: NextRequest) {
       const statusData = await statusResponse.json()
       console.log("✅ Status SuperPayBR obtido com sucesso!")
 
-      // Mapear status para nosso formato
-      const mappedStatus = {
-        isPaid: statusData.fatura?.status?.code === 5,
-        isDenied: statusData.fatura?.status?.code === 4,
-        isRefunded: statusData.fatura?.status?.code === 8,
-        isExpired: statusData.fatura?.status?.code === 7,
-        isCanceled: statusData.fatura?.status?.code === 6,
-        statusCode: statusData.fatura?.status?.code || 0,
-        statusName: statusData.fatura?.status?.title || "Unknown",
-        amount: statusData.fatura?.valores?.bruto / 100 || 0,
-        paymentDate: statusData.fatura?.paid_at || null,
-      }
+      // Mapear status
+      const invoice = statusData.invoices?.[0]
+      if (invoice) {
+        const isPaid = invoice.status.code === 5
+        const isDenied = invoice.status.code === 12
+        const isExpired = invoice.status.code === 15
 
-      return NextResponse.json({
-        success: true,
-        data: statusData,
-        mapped_status: mappedStatus,
-      })
+        return NextResponse.json({
+          success: true,
+          data: {
+            external_id: externalId,
+            status_code: invoice.status.code,
+            status_title: invoice.status.title,
+            is_paid: isPaid,
+            is_denied: isDenied,
+            is_expired: isExpired,
+            amount: invoice.prices.total,
+            payment_date: invoice.payment.date,
+          },
+          raw_response: statusData,
+        })
+      } else {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "Fatura não encontrada",
+          },
+          { status: 404 },
+        )
+      }
     } else {
       const errorText = await statusResponse.text()
       console.log("❌ Erro ao consultar status SuperPayBR:", statusResponse.status, errorText)
@@ -77,7 +84,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(
         {
           success: false,
-          error: `Erro ao consultar status: ${statusResponse.status} - ${errorText}`,
+          error: `Erro SuperPayBR: ${statusResponse.status} - ${errorText}`,
         },
         { status: statusResponse.status },
       )

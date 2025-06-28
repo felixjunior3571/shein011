@@ -1,6 +1,6 @@
-import { NextResponse } from "next/server"
+import { type NextRequest, NextResponse } from "next/server"
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     console.log("=== AUTENTICAÇÃO SUPERPAYBR ===")
 
@@ -19,19 +19,22 @@ export async function GET() {
     }
 
     console.log("🔑 Fazendo autenticação SuperPayBR...")
+    console.log("Token:", token.substring(0, 10) + "...")
+    console.log("Secret:", secretKey.substring(0, 20) + "...")
 
-    const authResponse = await fetch("https://api.superpaybr.com/v4/auth", {
-      method: "POST",
+    // Criar Basic Auth header
+    const credentials = Buffer.from(`${token}:${secretKey}`).toString("base64")
+
+    const authResponse = await fetch("https://api.superpaybr.com/auth", {
+      method: "GET",
       headers: {
         "Content-Type": "application/json",
+        Authorization: `Basic ${credentials}`,
+        scope: "invoice.write, customer.write, webhook.write",
       },
-      body: JSON.stringify({
-        token: token,
-        secret_key: secretKey,
-      }),
     })
 
-    console.log("📥 Resposta autenticação SuperPayBR:", {
+    console.log("📥 Resposta SuperPayBR Auth:", {
       status: authResponse.status,
       statusText: authResponse.statusText,
       ok: authResponse.ok,
@@ -39,7 +42,10 @@ export async function GET() {
 
     if (authResponse.ok) {
       const authData = await authResponse.json()
-      console.log("✅ Autenticação SuperPayBR realizada com sucesso!")
+      console.log("✅ Autenticação SuperPayBR bem-sucedida!")
+      console.log("Account ID:", authData.account)
+      console.log("Working:", authData.working)
+      console.log("Expires:", new Date(authData.expires_in * 1000).toLocaleString())
 
       return NextResponse.json({
         success: true,
