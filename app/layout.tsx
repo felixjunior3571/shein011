@@ -1,79 +1,159 @@
 import type React from "react"
 import type { Metadata } from "next"
 import { Inter } from "next/font/google"
-import Image from "next/image"
-import Script from "next/script"
 import "./globals.css"
-import { SocialNotifications } from "@/components/social-notifications"
+import { OptimizedSocialNotifications } from "@/components/optimized-social-notifications"
 
 const inter = Inter({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "Cartão SHEIN - Solicite em menos de 5 minutos",
+  title: "SHEIN Card - Cartão de Crédito com Benefícios Exclusivos",
   description:
-    "Solicite seu cartão SHEIN em menos de 5 minutos, sem consulta ao SPC/Serasa. Aprovação garantida e benefícios exclusivos.",
+    "Solicite seu Cartão SHEIN com cashback, parcelamento sem juros e benefícios exclusivos. Aprovação rápida e uso imediato.",
+  keywords: "cartão de crédito, SHEIN, cashback, parcelamento sem juros, cartão virtual",
+  authors: [{ name: "SHEIN Card" }],
+  openGraph: {
+    title: "SHEIN Card - Cartão de Crédito com Benefícios Exclusivos",
+    description: "Solicite seu Cartão SHEIN com cashback, parcelamento sem juros e benefícios exclusivos.",
+    type: "website",
+    locale: "pt_BR",
+  },
+  robots: {
+    index: true,
+    follow: true,
+  },
     generator: 'v0.dev'
 }
 
 export default function RootLayout({
   children,
-}: Readonly<{
+}: {
   children: React.ReactNode
-}>) {
+}) {
   return (
     <html lang="pt-BR">
       <head>
-        {/* Scripts da Utmify */}
-        <Script
-          src="https://cdn.utmify.com.br/scripts/utms/latest.js"
-          data-utmify-prevent-xcod-sck=""
-          data-utmify-prevent-subids=""
-          strategy="afterInteractive"
+        {/* Preconnect to external domains */}
+        <link rel="preconnect" href="https://www.googletagmanager.com" />
+        <link rel="preconnect" href="https://www.google-analytics.com" />
+        <link rel="preconnect" href="https://utmify.com.br" />
+
+        {/* Google Analytics */}
+        <script async src="https://www.googletagmanager.com/gtag/js?id=G-XXXXXXXXXX" />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              window.dataLayer = window.dataLayer || [];
+              function gtag(){dataLayer.push(arguments);}
+              gtag('js', new Date());
+              gtag('config', 'G-XXXXXXXXXX', {
+                page_title: document.title,
+                page_location: window.location.href,
+                send_page_view: false // We'll send manually with optimization
+              });
+            `,
+          }}
         />
-        <Script id="utmify-pixel" strategy="afterInteractive">
-          {`
-            try {
-              window.pixelId = "6836abf356b3052677c77248";
-              var a = document.createElement("script");
-              a.setAttribute("async", "");
-              a.setAttribute("defer", "");
-              a.setAttribute("src", "https://cdn.utmify.com.br/scripts/pixel/pixel.js");
-              document.head.appendChild(a);
-            } catch (error) {
-              console.warn("Erro ao inicializar Utmify:", error);
-            }
-          `}
-        </Script>
+
+        {/* UTMify Script - Optimized */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function() {
+                // Check if UTMify is already initialized
+                if (window.utmifyInitialized) {
+                  console.log('🔄 UTMify already initialized, skipping...');
+                  return;
+                }
+
+                try {
+                  console.log('🚀 Initializing UTMify...');
+                  
+                  // Mark as initialized
+                  window.utmifyInitialized = true;
+                  
+                  // UTMify configuration
+                  window.utmify = window.utmify || {};
+                  window.utmify.config = {
+                    domain: window.location.hostname,
+                    debug: ${process.env.NODE_ENV === "development"},
+                    batchEvents: true,
+                    batchSize: 5,
+                    batchTimeout: 2000,
+                    respectDoNotTrack: true,
+                  };
+
+                  // Load UTMify script
+                  var script = document.createElement('script');
+                  script.async = true;
+                  script.src = 'https://utmify.com.br/scripts/utmify.js';
+                  script.onload = function() {
+                    console.log('✅ UTMify loaded successfully');
+                    
+                    // Initialize with optimized settings
+                    if (window.utmify && window.utmify.init) {
+                      window.utmify.init({
+                        trackPageViews: false, // We'll handle manually
+                        trackClicks: true,
+                        trackForms: true,
+                        respectPrivacy: true,
+                      });
+                    }
+                  };
+                  script.onerror = function() {
+                    console.error('❌ Failed to load UTMify script');
+                    window.utmifyInitialized = false;
+                  };
+                  
+                  document.head.appendChild(script);
+                  
+                } catch (error) {
+                  console.error('❌ UTMify initialization error:', error);
+                  window.utmifyInitialized = false;
+                }
+              })();
+            `,
+          }}
+        />
+
+        {/* Meta Pixel - Optimized */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function() {
+                if (window.fbqInitialized) return;
+                
+                try {
+                  !function(f,b,e,v,n,t,s)
+                  {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+                  n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+                  if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+                  n.queue=[];t=b.createElement(e);t.async=!0;
+                  t.src=v;s=b.getElementsByTagName(e)[0];
+                  s.parentNode.insertBefore(t,s)}(window, document,'script',
+                  'https://connect.facebook.net/en_US/fbevents.js');
+
+                  fbq('init', 'YOUR_PIXEL_ID');
+                  fbq('track', 'PageView');
+                  
+                  window.fbqInitialized = true;
+                  console.log('✅ Meta Pixel initialized');
+                } catch (error) {
+                  console.error('❌ Meta Pixel error:', error);
+                }
+              })();
+            `,
+          }}
+        />
       </head>
-      <body className={`${inter.className} flex flex-col min-h-screen`}>
-        {/* Header fixo no topo com logo */}
-        <header className="fixed top-0 left-0 right-0 z-50 bg-white py-4 border-b shadow-sm">
-          <div className="flex justify-center">
-            <div className="relative w-[140px] h-[45px] sm:w-[160px] sm:h-[50px] md:w-[180px] md:h-[55px]">
-              <Image
-                src="/shein-header-logo.png"
-                alt="SHEIN"
-                fill
-                style={{ objectFit: "contain" }}
-                priority
-                quality={100}
-                sizes="(max-width: 640px) 140px, (max-width: 768px) 160px, 180px"
-                className="select-none"
-              />
-            </div>
-          </div>
-        </header>
-
-        {/* Conteúdo principal com espaçamento para header e footer */}
-        <main className="flex-1 pt-20 pb-16">{children}</main>
-
-        {/* Footer fixo na parte inferior */}
-        <footer className="fixed bottom-0 left-0 right-0 z-50 bg-gray-100 py-3 text-center text-gray-600 text-sm border-t">
-          <div className="container mx-auto px-4">Copyright © 2025 Shein. Todos os direitos reservados.</div>
-        </footer>
-
-        {/* Notificações sociais */}
-        <SocialNotifications />
+      <body className={inter.className}>
+        {children}
+        <OptimizedSocialNotifications
+          maxNotifications={8}
+          displayDuration={4000}
+          intervalRange={[20000, 35000]}
+          enableDebug={process.env.NODE_ENV === "development"}
+        />
       </body>
     </html>
   )

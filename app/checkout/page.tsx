@@ -3,7 +3,9 @@
 import { useState, useEffect, useRef } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import Image from "next/image"
-import { Copy, CheckCircle, Clock, AlertCircle, RefreshCw } from "lucide-react"
+import { Copy, CheckCircle, Clock, AlertCircle } from "lucide-react"
+import { useWebhookPaymentMonitor } from "@/hooks/use-webhook-payment-monitor"
+import { useOptimizedTracking } from "@/hooks/use-optimized-tracking"
 
 interface InvoiceData {
   id: string
@@ -29,17 +31,16 @@ interface InvoiceData {
   external_id?: string
 }
 
-export default function CheckoutPage() {
+export default function WebhookOptimizedCheckoutPage() {
   const [loading, setLoading] = useState(true)
   const [invoice, setInvoice] = useState<InvoiceData | null>(null)
   const [timeLeft, setTimeLeft] = useState(300) // 5 minutos
   const [copied, setCopied] = useState(false)
-  const [checking, setChecking] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [externalId, setExternalId] = useState<string | null>(null)
 
   const router = useRouter()
   const searchParams = useSearchParams()
-  const checkIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const timerRef = useRef<NodeJS.Timeout | null>(null)
 
   // Obter parâmetros da URL
@@ -47,45 +48,80 @@ export default function CheckoutPage() {
   const shipping = searchParams.get("shipping") || "sedex"
   const method = searchParams.get("method") || "SEDEX"
 
-  // Adicionar estados para monitoramento
-  const [paymentStatus, setPaymentStatus] = useState<
-    "pending" | "confirmed" | "denied" | "expired" | "canceled" | "refunded"
-  >("pending")
-  const [externalId, setExternalId] = useState<string | null>(null)
-  const [statusMessage, setStatusMessage] = useState("⏳ Aguardando Pagamento...")
+  // Optimized tracking
+  const { track, trackPageView, trackConversion } = useOptimizedTracking({
+    enableDebug: process.env.NODE_ENV === "development",
+  })
 
-  // Carregar dados do usuário e criar fatura
+  // Webhook-based payment monitoring (NO POLLING!)
+  const {
+    status: paymentStatus,
+    isWaitingForWebhook,
+    error: webhookError,
+    lastWebhookCheck,
+    fallbackCheckCount,
+    maxFallbackChecks,
+  } = useWebhookPaymentMonitor({
+    externalId,
+    fallbackCheckInterval: 30000, // 30 seconds fallback only
+    maxFallbackChecks: 10, // Maximum 10 fallback checks
+    enableDebug: process.env.NODE_ENV === "development",
+    onPaymentConfirmed: (data) => {
+      console.log("🎉 PAGAMENTO CONFIRMADO VIA WEBHOOK!")
+
+      // Track conversion
+      trackConversion("payment_confirmed", data.amount)
+
+      // Salvar confirmação
+      localStorage.setItem("paymentConfirmed", "true")
+      localStorage.setItem("paymentAmount", data.amount.toFixed(2))
+      localStorage.setItem("paymentDate", data.paymentDate || new Date().toISOString())
+
+      // Redirecionar após 2 segundos
+      setTimeout(() => {
+        console.log("🚀 Redirecionando para página de ativação...")
+        window.location.href = "/upp/001"
+      }, 2000)
+    },
+    onPaymentDenied: (data) => {
+      console.log("❌ PAGAMENTO NEGADO VIA WEBHOOK!")
+      track("payment_denied", { amount: data.amount, reason: data.statusName })
+    },
+    onPaymentExpired: (data) => {
+      console.log("⏰ PAGAMENTO VENCIDO VIA WEBHOOK!")
+      track("payment_expired", { amount: data.amount })
+    },
+  })
+
+  // Track page view on mount
   useEffect(() => {
-    createInvoice()
-  }, [])
+    trackPageView("/checkout")
+    track("checkout_page_loaded", {
+      amount: Number.parseFloat(amount),
+      shipping_method: method,
+    })
+  }, [trackPageView, track, amount, method])
 
   // Timer countdown
   useEffect(() => {
-    if (timeLeft > 0 && invoice) {
+    if (timeLeft > 0 && invoice && !paymentStatus?.isPaid) {
       timerRef.current = setTimeout(() => {
         setTimeLeft(timeLeft - 1)
       }, 1000)
     } else if (timeLeft === 0) {
       setError("Tempo expirado. Gere um novo PIX.")
+      track("payment_timeout", { amount: Number.parseFloat(amount) })
     }
 
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current)
     }
-  }, [timeLeft, invoice])
+  }, [timeLeft, invoice, paymentStatus?.isPaid, track, amount])
 
-  // Verificação automática de pagamento
+  // Carregar dados do usuário e criar fatura
   useEffect(() => {
-    if (invoice && timeLeft > 0) {
-      checkIntervalRef.current = setInterval(() => {
-        checkPayment()
-      }, 10000) // A cada 10 segundos
-    }
-
-    return () => {
-      if (checkIntervalRef.current) clearInterval(checkIntervalRef.current)
-    }
-  }, [invoice, timeLeft])
+    createInvoice()
+  }, [])
 
   // Carregar external_id quando a fatura for criada
   useEffect(() => {
@@ -94,108 +130,30 @@ export default function CheckoutPage() {
 
       let capturedExternalId = null
 
-      // Tentar múltiplas fontes para o external_id
       if (invoice.external_id) {
         capturedExternalId = invoice.external_id
         console.log("✅ External ID encontrado na fatura:", capturedExternalId)
       } else {
-        // Fallback: usar o ID da fatura como external_id
         capturedExternalId = invoice.id
         console.log("⚠️ External ID não encontrado, usando invoice.id:", capturedExternalId)
       }
 
-      // Salvar no localStorage e no estado
       if (capturedExternalId) {
         localStorage.setItem("currentExternalId", capturedExternalId)
         setExternalId(capturedExternalId)
         console.log("💾 External ID salvo:", capturedExternalId)
+
+        // Track PIX generation
+        track("pix_generated", {
+          external_id: capturedExternalId,
+          amount: Number.parseFloat(amount),
+          type: invoice.type,
+        })
       } else {
         console.error("❌ Não foi possível obter external_id!")
       }
     }
-  }, [invoice])
-
-  // Sistema de verificação automática via webhook
-  useEffect(() => {
-    if (!externalId || paymentStatus === "confirmed") {
-      console.log("🚫 Monitoramento não iniciado:", { externalId, paymentStatus })
-      return
-    }
-
-    console.log("🔄 Iniciando monitoramento automático para:", externalId)
-
-    const checkWebhookConfirmation = async () => {
-      try {
-        console.log("🔍 Verificando status via webhook para:", externalId)
-
-        const response = await fetch(`/api/tryplopay/payment-status?externalId=${externalId}`)
-        const result = await response.json()
-
-        console.log("📋 Resultado da verificação:", result)
-
-        if (result.success && result.found) {
-          const { data } = result
-
-          console.log("✅ Status encontrado:", {
-            isPaid: data.isPaid,
-            isDenied: data.isDenied,
-            isRefunded: data.isRefunded,
-            isExpired: data.isExpired,
-            isCanceled: data.isCanceled,
-            statusName: data.statusName,
-          })
-
-          if (data.isPaid) {
-            console.log("🎉 PAGAMENTO CONFIRMADO VIA WEBHOOK!")
-            setPaymentStatus("confirmed")
-            setStatusMessage("✅ Pagamento Confirmado!")
-
-            // Salvar confirmação
-            localStorage.setItem("paymentConfirmed", "true")
-            localStorage.setItem("paymentAmount", data.amount.toFixed(2))
-            localStorage.setItem("paymentDate", data.paymentDate || new Date().toISOString())
-
-            // Redirecionar após 2 segundos para a página de ativação
-            setTimeout(() => {
-              console.log("🚀 Redirecionando para página de ativação...")
-              window.location.href = "/upp/001"
-            }, 2000)
-          } else if (data.isDenied) {
-            console.log("❌ PAGAMENTO NEGADO VIA WEBHOOK!")
-            setPaymentStatus("denied")
-            setStatusMessage("❌ Pagamento Negado")
-          } else if (data.isRefunded) {
-            console.log("🔄 PAGAMENTO ESTORNADO VIA WEBHOOK!")
-            setPaymentStatus("refunded")
-            setStatusMessage("🔄 Pagamento Estornado")
-          } else if (data.isExpired) {
-            console.log("⏰ PAGAMENTO VENCIDO VIA WEBHOOK!")
-            setPaymentStatus("expired")
-            setStatusMessage("⏰ Pagamento Vencido")
-          } else if (data.isCanceled) {
-            console.log("🚫 PAGAMENTO CANCELADO VIA WEBHOOK!")
-            setPaymentStatus("canceled")
-            setStatusMessage("🚫 Pagamento Cancelado")
-          }
-        } else {
-          console.log("⏳ Ainda aguardando confirmação para:", externalId)
-        }
-      } catch (error) {
-        console.log("❌ Erro na verificação:", error)
-      }
-    }
-
-    // Verificar imediatamente
-    checkWebhookConfirmation()
-
-    // Verificar a cada 3 segundos
-    const interval = setInterval(checkWebhookConfirmation, 3000)
-
-    return () => {
-      console.log("🛑 Parando monitoramento automático para:", externalId)
-      clearInterval(interval)
-    }
-  }, [externalId, paymentStatus])
+  }, [invoice, track, amount])
 
   const createInvoice = async () => {
     try {
@@ -204,6 +162,12 @@ export default function CheckoutPage() {
 
       console.log("🔄 Criando fatura PIX...")
       console.log("Parâmetros:", { amount: Number.parseFloat(amount), shipping, method })
+
+      // Track invoice creation start
+      track("invoice_creation_started", {
+        amount: Number.parseFloat(amount),
+        shipping_method: method,
+      })
 
       // Carregar dados do usuário do localStorage
       const cpfData = JSON.parse(localStorage.getItem("cpfConsultaData") || "{}")
@@ -240,8 +204,17 @@ export default function CheckoutPage() {
         setInvoice(data.data)
         localStorage.setItem("tryploPayInvoice", JSON.stringify(data.data))
         localStorage.setItem("currentExternalId", data.data.external_id)
+
         console.log(`✅ Fatura criada: ${data.data.type} - Valor: R$ ${(data.data.valores.bruto / 100).toFixed(2)}`)
         console.log(`👤 Cliente: ${cpfData.nome || "N/A"}`)
+
+        // Track successful invoice creation
+        track("invoice_created", {
+          external_id: data.data.external_id,
+          amount: data.data.valores.bruto / 100,
+          type: data.data.type,
+          customer_name: cpfData.nome,
+        })
       } else {
         throw new Error(data.error || "Erro ao criar fatura")
       }
@@ -249,7 +222,12 @@ export default function CheckoutPage() {
       console.log("❌ Erro ao criar fatura:", error)
       setError("Erro ao gerar PIX. Tente novamente.")
 
-      // Fallback de emergência
+      // Track error
+      track("invoice_creation_error", {
+        error: error instanceof Error ? error.message : "Unknown error",
+        amount: Number.parseFloat(amount),
+      })
+
       createEmergencyPix()
     } finally {
       setLoading(false)
@@ -288,36 +266,12 @@ export default function CheckoutPage() {
     setInvoice(emergencyInvoice)
     setError(null)
     console.log(`✅ PIX de emergência criado - Valor: R$ ${totalAmount.toFixed(2)}`)
-  }
 
-  const checkPayment = async () => {
-    if (!invoice || checking) return
-
-    try {
-      setChecking(true)
-
-      const response = await fetch(`/api/tryplopay/check-payment?invoiceId=${invoice.id}&token=${invoice.invoice_id}`)
-      const data = await response.json()
-
-      if (data.success && data.data.isPaid) {
-        console.log("🎉 Pagamento confirmado!")
-
-        // Limpar intervalos
-        if (checkIntervalRef.current) clearInterval(checkIntervalRef.current)
-        if (timerRef.current) clearTimeout(timerRef.current)
-
-        // Salvar confirmação
-        localStorage.setItem("paymentConfirmed", "true")
-        localStorage.setItem("paymentAmount", (invoice.valores.bruto / 100).toFixed(2))
-
-        // Redirecionar para página de ativação
-        router.push("/upp/001")
-      }
-    } catch (error) {
-      console.log("❌ Erro ao verificar pagamento:", error)
-    } finally {
-      setChecking(false)
-    }
+    // Track emergency PIX creation
+    track("emergency_pix_created", {
+      amount: totalAmount,
+      invoice_id: emergencyInvoice.id,
+    })
   }
 
   const copyPixCode = async () => {
@@ -327,6 +281,12 @@ export default function CheckoutPage() {
       await navigator.clipboard.writeText(invoice.pix.payload)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
+
+      // Track PIX code copy
+      track("pix_code_copied", {
+        external_id: externalId,
+        amount: Number.parseFloat(amount),
+      })
     } catch (error) {
       console.log("❌ Erro ao copiar:", error)
     }
@@ -336,25 +296,6 @@ export default function CheckoutPage() {
     const mins = Math.floor(seconds / 60)
     const secs = seconds % 60
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
-  }
-
-  // Adicionar indicador visual de status
-  const getStatusColor = () => {
-    const colors = {
-      confirmed: "bg-green-100 text-green-800 border-green-300",
-      denied: "bg-red-100 text-red-800 border-red-300",
-      expired: "bg-yellow-100 text-yellow-800 border-yellow-300",
-      canceled: "bg-gray-100 text-gray-800 border-gray-300",
-      refunded: "bg-orange-100 text-orange-800 border-orange-300",
-      pending: "bg-blue-100 text-blue-800 border-blue-300",
-    }
-    return colors[paymentStatus] || colors.pending
-  }
-
-  const getStatusText = () => {
-    if (invoice?.type === "real") return "PIX Real"
-    if (invoice?.type === "simulated") return "PIX Simulado"
-    return "PIX Emergência"
   }
 
   // Função para simular pagamento (apenas para testes)
@@ -382,7 +323,7 @@ export default function CheckoutPage() {
 
       if (result.success) {
         console.log("✅ Pagamento simulado com sucesso!")
-        // A verificação automática vai detectar o pagamento
+        track("payment_simulated", { external_id: externalId, amount: Number.parseFloat(amount) })
       } else {
         console.error("❌ Erro ao simular pagamento:", result.error)
       }
@@ -470,15 +411,41 @@ export default function CheckoutPage() {
             </div>
           </div>
 
-          {/* Status em Tempo Real */}
-          <div className={`border-2 rounded-lg p-4 mb-6 ${getStatusColor()}`}>
+          {/* Status em Tempo Real - WEBHOOK BASED */}
+          <div
+            className={`border-2 rounded-lg p-4 mb-6 ${
+              paymentStatus?.isPaid
+                ? "bg-green-100 text-green-800 border-green-300"
+                : paymentStatus?.isDenied
+                  ? "bg-red-100 text-red-800 border-red-300"
+                  : "bg-blue-100 text-blue-800 border-blue-300"
+            }`}
+          >
             <div className="flex items-center justify-center space-x-2">
               <div
-                className={`w-3 h-3 rounded-full ${paymentStatus === "pending" ? "animate-pulse bg-blue-500" : paymentStatus === "confirmed" ? "bg-green-500" : "bg-red-500"}`}
+                className={`w-3 h-3 rounded-full ${
+                  paymentStatus?.isPaid
+                    ? "bg-green-500"
+                    : isWaitingForWebhook
+                      ? "animate-pulse bg-blue-500"
+                      : "bg-gray-400"
+                }`}
               ></div>
-              <span className="font-bold">{statusMessage}</span>
+              <span className="font-bold">
+                {paymentStatus?.isPaid
+                  ? "✅ Pagamento Confirmado!"
+                  : paymentStatus?.isDenied
+                    ? "❌ Pagamento Negado"
+                    : "⏳ Aguardando Webhook..."}
+              </span>
             </div>
             {externalId && <p className="text-xs mt-2 text-center opacity-75">ID: {externalId}</p>}
+            {lastWebhookCheck && (
+              <p className="text-xs mt-1 text-center opacity-60">
+                Última verificação: {lastWebhookCheck.toLocaleTimeString()}
+                {fallbackCheckCount > 0 && ` (fallback ${fallbackCheckCount}/${maxFallbackChecks})`}
+              </p>
+            )}
           </div>
 
           {/* Valor */}
@@ -524,13 +491,20 @@ export default function CheckoutPage() {
             {copied && <p className="text-green-600 text-sm mt-2">✅ Código copiado!</p>}
           </div>
 
-          {/* Status */}
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+          {/* Status Webhook-Based */}
+          <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
             <div className="flex items-center space-x-2">
-              <div className="animate-pulse w-3 h-3 bg-blue-500 rounded-full"></div>
-              <span className="text-blue-800 font-medium">Aguardando pagamento...</span>
+              <div
+                className={`w-3 h-3 rounded-full ${isWaitingForWebhook ? "animate-pulse bg-green-500" : "bg-green-400"}`}
+              ></div>
+              <span className="text-green-800 font-medium">
+                {isWaitingForWebhook ? "Aguardando notificação automática..." : "Sistema webhook ativo"}
+              </span>
             </div>
-            <p className="text-blue-700 text-sm mt-1">Verificamos automaticamente a cada 10 segundos</p>
+            <p className="text-green-700 text-sm mt-1">
+              ✅ Sem polling! Confirmação instantânea via webhook
+              {webhookError && <span className="text-red-600"> - Erro: {webhookError}</span>}
+            </p>
           </div>
 
           {/* Instruções */}
@@ -557,7 +531,7 @@ export default function CheckoutPage() {
               <span className="bg-black text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold mt-0.5">
                 4
               </span>
-              <span>Aguarde a confirmação automática</span>
+              <span>Receba confirmação automática via webhook</span>
             </div>
           </div>
 
@@ -570,22 +544,6 @@ export default function CheckoutPage() {
               🧪 SIMULAR PAGAMENTO APROVADO (TESTE)
             </button>
           )}
-
-          {/* Botão de Verificação Manual */}
-          <button
-            onClick={checkPayment}
-            disabled={checking}
-            className="w-full mt-6 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium py-3 px-4 rounded-lg transition-colors disabled:opacity-50"
-          >
-            {checking ? (
-              <div className="flex items-center justify-center">
-                <RefreshCw className="w-4 h-4 animate-spin mr-2" />
-                Verificando...
-              </div>
-            ) : (
-              "Verificar Pagamento"
-            )}
-          </button>
         </div>
       </div>
     </main>
