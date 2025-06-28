@@ -31,7 +31,7 @@ interface InvoiceData {
   external_id?: string
 }
 
-export default function PureWebhookCheckoutPage() {
+export default function SuperPayBRCheckoutPage() {
   const [loading, setLoading] = useState(true)
   const [invoice, setInvoice] = useState<InvoiceData | null>(null)
   const [timeLeft, setTimeLeft] = useState(300) // 5 minutos
@@ -58,12 +58,12 @@ export default function PureWebhookCheckoutPage() {
     status: paymentStatus,
     isWaitingForWebhook,
     error: webhookError,
-    lastWebhookCheck,
+    lastCheck: lastWebhookCheck,
   } = usePureWebhookMonitor({
     externalId,
     enableDebug: process.env.NODE_ENV === "development",
     onPaymentConfirmed: (data) => {
-      console.log("🎉 PAGAMENTO CONFIRMADO VIA WEBHOOK PURO!")
+      console.log("🎉 PAGAMENTO CONFIRMADO VIA WEBHOOK SUPERPAYBR!")
 
       // Track conversion
       trackConversion("payment_confirmed", data.amount)
@@ -80,11 +80,11 @@ export default function PureWebhookCheckoutPage() {
       }, 2000)
     },
     onPaymentDenied: (data) => {
-      console.log("❌ PAGAMENTO NEGADO VIA WEBHOOK PURO!")
+      console.log("❌ PAGAMENTO NEGADO VIA WEBHOOK SUPERPAYBR!")
       track("payment_denied", { amount: data.amount, reason: data.statusName })
     },
     onPaymentExpired: (data) => {
-      console.log("⏰ PAGAMENTO VENCIDO VIA WEBHOOK PURO!")
+      console.log("⏰ PAGAMENTO VENCIDO VIA WEBHOOK SUPERPAYBR!")
       track("payment_expired", { amount: data.amount })
     },
   })
@@ -122,13 +122,13 @@ export default function PureWebhookCheckoutPage() {
   // Carregar external_id quando a fatura for criada
   useEffect(() => {
     if (invoice) {
-      console.log("🔍 Dados da fatura recebida:", invoice)
+      console.log("🔍 Dados da fatura SuperPayBR recebida:", invoice)
 
       let capturedExternalId = null
 
       if (invoice.external_id) {
         capturedExternalId = invoice.external_id
-        console.log("✅ External ID encontrado na fatura:", capturedExternalId)
+        console.log("✅ External ID encontrado na fatura SuperPayBR:", capturedExternalId)
       } else {
         capturedExternalId = invoice.id
         console.log("⚠️ External ID não encontrado, usando invoice.id:", capturedExternalId)
@@ -137,7 +137,7 @@ export default function PureWebhookCheckoutPage() {
       if (capturedExternalId) {
         localStorage.setItem("currentExternalId", capturedExternalId)
         setExternalId(capturedExternalId)
-        console.log("💾 External ID salvo:", capturedExternalId)
+        console.log("💾 External ID SuperPayBR salvo:", capturedExternalId)
 
         // Track PIX generation
         track("pix_generated", {
@@ -146,7 +146,7 @@ export default function PureWebhookCheckoutPage() {
           type: invoice.type,
         })
       } else {
-        console.error("❌ Não foi possível obter external_id!")
+        console.error("❌ Não foi possível obter external_id SuperPayBR!")
       }
     }
   }, [invoice, track, amount])
@@ -156,7 +156,7 @@ export default function PureWebhookCheckoutPage() {
       setLoading(true)
       setError(null)
 
-      console.log("🔄 Criando fatura PIX...")
+      console.log("🔄 Criando fatura PIX SuperPayBR...")
       console.log("Parâmetros:", { amount: Number.parseFloat(amount), shipping, method })
 
       // Track invoice creation start
@@ -171,14 +171,14 @@ export default function PureWebhookCheckoutPage() {
       const userWhatsApp = localStorage.getItem("userWhatsApp") || ""
       const deliveryAddress = JSON.parse(localStorage.getItem("deliveryAddress") || "{}")
 
-      console.log("📋 Dados do usuário:", {
+      console.log("📋 Dados do usuário SuperPayBR:", {
         nome: cpfData.nome,
         email: userEmail,
         whatsapp: userWhatsApp,
         endereco: deliveryAddress,
       })
 
-      const response = await fetch("/api/tryplopay/create-invoice", {
+      const response = await fetch("/api/superpaybr/create-invoice", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -198,10 +198,12 @@ export default function PureWebhookCheckoutPage() {
 
       if (data.success) {
         setInvoice(data.data)
-        localStorage.setItem("tryploPayInvoice", JSON.stringify(data.data))
+        localStorage.setItem("superPayBRInvoice", JSON.stringify(data.data))
         localStorage.setItem("currentExternalId", data.data.external_id)
 
-        console.log(`✅ Fatura criada: ${data.data.type} - Valor: R$ ${(data.data.valores.bruto / 100).toFixed(2)}`)
+        console.log(
+          `✅ Fatura SuperPayBR criada: ${data.data.type} - Valor: R$ ${(data.data.valores.bruto / 100).toFixed(2)}`,
+        )
         console.log(`👤 Cliente: ${cpfData.nome || "N/A"}`)
 
         // Track successful invoice creation
@@ -212,11 +214,11 @@ export default function PureWebhookCheckoutPage() {
           customer_name: cpfData.nome,
         })
       } else {
-        throw new Error(data.error || "Erro ao criar fatura")
+        throw new Error(data.error || "Erro ao criar fatura SuperPayBR")
       }
     } catch (error) {
-      console.log("❌ Erro ao criar fatura:", error)
-      setError("Erro ao gerar PIX. Tente novamente.")
+      console.log("❌ Erro ao criar fatura SuperPayBR:", error)
+      setError("Erro ao gerar PIX SuperPayBR. Tente novamente.")
 
       // Track error
       track("invoice_creation_error", {
@@ -231,10 +233,10 @@ export default function PureWebhookCheckoutPage() {
   }
 
   const createEmergencyPix = () => {
-    console.log("🚨 Criando PIX de emergência...")
+    console.log("🚨 Criando PIX de emergência SuperPayBR...")
 
     const totalAmount = Number.parseFloat(amount)
-    const emergencyPix = `00020101021226580014br.gov.bcb.pix2536emergency.pix.com/qr/v2/EMERGENCY${Date.now()}520400005303986540${totalAmount.toFixed(2)}5802BR5909SHEIN5011SAO PAULO62070503***6304EMRG`
+    const emergencyPix = `00020101021226580014br.gov.bcb.pix2536emergency.superpaybr.com/qr/v2/EMERGENCY${Date.now()}520400005303986540${totalAmount.toFixed(2)}5802BR5909SHEIN5011SAO PAULO62070503***6304EMRG`
 
     const emergencyInvoice: InvoiceData = {
       id: `EMG_${Date.now()}`,
@@ -261,7 +263,7 @@ export default function PureWebhookCheckoutPage() {
 
     setInvoice(emergencyInvoice)
     setError(null)
-    console.log(`✅ PIX de emergência criado - Valor: R$ ${totalAmount.toFixed(2)}`)
+    console.log(`✅ PIX de emergência SuperPayBR criado - Valor: R$ ${totalAmount.toFixed(2)}`)
 
     // Track emergency PIX creation
     track("emergency_pix_created", {
@@ -302,7 +304,7 @@ export default function PureWebhookCheckoutPage() {
     }
 
     try {
-      console.log("🧪 Simulando pagamento para:", externalId)
+      console.log("🧪 Simulando pagamento SuperPayBR para:", externalId)
 
       // Simular webhook data diretamente no localStorage
       const simulatedWebhookData = {
@@ -311,17 +313,17 @@ export default function PureWebhookCheckoutPage() {
         isRefunded: false,
         isExpired: false,
         isCanceled: false,
-        statusCode: 2,
-        statusName: "paid",
+        statusCode: 5, // SuperPayBR: 5 = Pago
+        statusName: "Pagamento Confirmado!",
         amount: Number.parseFloat(amount),
         paymentDate: new Date().toISOString(),
       }
 
       localStorage.setItem(`webhook_payment_${externalId}`, JSON.stringify(simulatedWebhookData))
-      console.log("✅ Pagamento simulado com sucesso!")
+      console.log("✅ Pagamento SuperPayBR simulado com sucesso!")
       track("payment_simulated", { external_id: externalId, amount: Number.parseFloat(amount) })
     } catch (error) {
-      console.error("❌ Erro na simulação:", error)
+      console.error("❌ Erro na simulação SuperPayBR:", error)
     }
   }
 
@@ -331,7 +333,7 @@ export default function PureWebhookCheckoutPage() {
         <div className="bg-white rounded-lg shadow-md p-8 max-w-md w-full mx-4">
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-black mx-auto mb-4"></div>
-            <h2 className="text-xl font-bold mb-2">Gerando PIX...</h2>
+            <h2 className="text-xl font-bold mb-2">Gerando PIX SuperPayBR...</h2>
             <p className="text-gray-600 mb-2">Aguarde enquanto processamos seu pagamento</p>
             <div className="text-sm text-gray-500">
               <p>Valor: R$ {Number.parseFloat(amount).toFixed(2)}</p>
@@ -482,7 +484,7 @@ export default function PureWebhookCheckoutPage() {
               <span className="bg-black text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold mt-0.5">
                 4
               </span>
-              <span>Receba confirmação automática via webhook</span>
+              <span>Receba confirmação automática via webhook SuperPayBR</span>
             </div>
           </div>
 

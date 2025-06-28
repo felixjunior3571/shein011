@@ -31,7 +31,7 @@ interface InvoiceData {
   external_id?: string
 }
 
-export default function IOFCheckoutPage() {
+export default function IOFSuperPayBRCheckoutPage() {
   const [loading, setLoading] = useState(true)
   const [invoice, setInvoice] = useState<InvoiceData | null>(null)
   const [timeLeft, setTimeLeft] = useState(600) // 10 minutos
@@ -60,7 +60,7 @@ export default function IOFCheckoutPage() {
     externalId,
     enableDebug: process.env.NODE_ENV === "development",
     onPaymentConfirmed: (data) => {
-      console.log("🎉 IOF PAGAMENTO CONFIRMADO VIA WEBHOOK PURO!")
+      console.log("🎉 IOF PAGAMENTO CONFIRMADO VIA WEBHOOK SUPERPAYBR!")
 
       // Track conversion
       trackConversion("iof_payment_confirmed", data.amount)
@@ -77,11 +77,11 @@ export default function IOFCheckoutPage() {
       }, 2000)
     },
     onPaymentDenied: (data) => {
-      console.log("❌ IOF PAGAMENTO NEGADO VIA WEBHOOK PURO!")
+      console.log("❌ IOF PAGAMENTO NEGADO VIA WEBHOOK SUPERPAYBR!")
       track("iof_payment_denied", { amount: data.amount, reason: data.statusName })
     },
     onPaymentExpired: (data) => {
-      console.log("⏰ IOF PAGAMENTO VENCIDO VIA WEBHOOK PURO!")
+      console.log("⏰ IOF PAGAMENTO VENCIDO VIA WEBHOOK SUPERPAYBR!")
       track("iof_payment_expired", { amount: data.amount })
     },
   })
@@ -118,13 +118,13 @@ export default function IOFCheckoutPage() {
   // Carregar external_id quando a fatura for criada
   useEffect(() => {
     if (invoice) {
-      console.log("🔍 Dados da fatura IOF recebida:", invoice)
+      console.log("🔍 Dados da fatura IOF SuperPayBR recebida:", invoice)
 
       let capturedExternalId = null
 
       if (invoice.external_id) {
         capturedExternalId = invoice.external_id
-        console.log("✅ External ID encontrado na fatura IOF:", capturedExternalId)
+        console.log("✅ External ID encontrado na fatura IOF SuperPayBR:", capturedExternalId)
       } else {
         capturedExternalId = invoice.id
         console.log("⚠️ External ID não encontrado, usando invoice.id:", capturedExternalId)
@@ -133,7 +133,7 @@ export default function IOFCheckoutPage() {
       if (capturedExternalId) {
         localStorage.setItem("currentIOFExternalId", capturedExternalId)
         setExternalId(capturedExternalId)
-        console.log("💾 IOF External ID salvo:", capturedExternalId)
+        console.log("💾 IOF External ID SuperPayBR salvo:", capturedExternalId)
 
         // Track PIX generation
         track("iof_pix_generated", {
@@ -142,7 +142,7 @@ export default function IOFCheckoutPage() {
           type: invoice.type,
         })
       } else {
-        console.error("❌ Não foi possível obter external_id para IOF!")
+        console.error("❌ Não foi possível obter external_id para IOF SuperPayBR!")
       }
     }
   }, [invoice, track])
@@ -152,7 +152,7 @@ export default function IOFCheckoutPage() {
       setLoading(true)
       setError(null)
 
-      console.log("🔄 Criando fatura IOF PIX REAL...")
+      console.log("🔄 Criando fatura IOF PIX SuperPayBR...")
       console.log("Parâmetros IOF:", { amount: Number.parseFloat(iofAmount) })
 
       // Track invoice creation start
@@ -166,14 +166,14 @@ export default function IOFCheckoutPage() {
       const userWhatsApp = localStorage.getItem("userWhatsApp") || ""
       const deliveryAddress = JSON.parse(localStorage.getItem("deliveryAddress") || "{}")
 
-      console.log("📋 Dados do usuário para IOF:", {
+      console.log("📋 Dados do usuário para IOF SuperPayBR:", {
         nome: cpfData.nome,
         email: userEmail,
         whatsapp: userWhatsApp,
         endereco: deliveryAddress,
       })
 
-      const response = await fetch("/api/tryplopay/create-iof-invoice", {
+      const response = await fetch("/api/superpaybr/create-iof-invoice", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -192,10 +192,12 @@ export default function IOFCheckoutPage() {
 
       if (data.success) {
         setInvoice(data.data)
-        localStorage.setItem("tryploPayIOFInvoice", JSON.stringify(data.data))
+        localStorage.setItem("superPayBRIOFInvoice", JSON.stringify(data.data))
         localStorage.setItem("currentIOFExternalId", data.data.external_id)
 
-        console.log(`✅ Fatura IOF criada: ${data.data.type} - Valor: R$ ${(data.data.valores.bruto / 100).toFixed(2)}`)
+        console.log(
+          `✅ Fatura IOF SuperPayBR criada: ${data.data.type} - Valor: R$ ${(data.data.valores.bruto / 100).toFixed(2)}`,
+        )
         console.log(`👤 Cliente: ${cpfData.nome || "N/A"}`)
 
         // Track successful invoice creation
@@ -209,14 +211,14 @@ export default function IOFCheckoutPage() {
         // Mostrar aviso se for simulado
         if (data.data.type === "simulated" || data.fallback) {
           console.log("⚠️ ATENÇÃO: Fatura IOF criada em modo SIMULADO!")
-          setError("⚠️ PIX em modo teste. Para produção, verifique as configurações da API.")
+          setError("⚠️ PIX em modo teste. Para produção, verifique as configurações da API SuperPayBR.")
         }
       } else {
-        throw new Error(data.error || "Erro ao criar fatura IOF")
+        throw new Error(data.error || "Erro ao criar fatura IOF SuperPayBR")
       }
     } catch (error) {
-      console.log("❌ Erro ao criar fatura IOF, usando fallback:", error)
-      setError("Erro ao gerar PIX IOF. Tente novamente.")
+      console.log("❌ Erro ao criar fatura IOF SuperPayBR, usando fallback:", error)
+      setError("Erro ao gerar PIX IOF SuperPayBR. Tente novamente.")
 
       // Track error
       track("iof_invoice_creation_error", {
@@ -231,10 +233,10 @@ export default function IOFCheckoutPage() {
   }
 
   const createEmergencyIOFPix = () => {
-    console.log("🚨 Criando PIX IOF de emergência...")
+    console.log("🚨 Criando PIX IOF de emergência SuperPayBR...")
 
     const totalAmount = Number.parseFloat(iofAmount)
-    const emergencyPix = `00020101021226580014br.gov.bcb.pix2536emergency.iof.com/qr/v2/IOF${Date.now()}520400005303986540${totalAmount.toFixed(2)}5802BR5909SHEIN IOF5011SAO PAULO62070503***6304IOFG`
+    const emergencyPix = `00020101021226580014br.gov.bcb.pix2536emergency.superpaybr.com/qr/v2/IOF${Date.now()}520400005303986540${totalAmount.toFixed(2)}5802BR5909SHEIN IOF5011SAO PAULO62070503***6304IOFG`
 
     const emergencyInvoice: InvoiceData = {
       id: `IOF_EMG_${Date.now()}`,
@@ -262,7 +264,7 @@ export default function IOFCheckoutPage() {
 
     setInvoice(emergencyInvoice)
     setError(null)
-    console.log(`✅ PIX IOF de emergência criado - Valor: R$ ${totalAmount.toFixed(2)}`)
+    console.log(`✅ PIX IOF de emergência SuperPayBR criado - Valor: R$ ${totalAmount.toFixed(2)}`)
 
     // Track emergency PIX creation
     track("iof_emergency_pix_created", {
@@ -303,7 +305,7 @@ export default function IOFCheckoutPage() {
     }
 
     try {
-      console.log("🧪 Simulando pagamento IOF para:", externalId)
+      console.log("🧪 Simulando pagamento IOF SuperPayBR para:", externalId)
 
       // Simular webhook data diretamente no localStorage
       const simulatedWebhookData = {
@@ -312,17 +314,17 @@ export default function IOFCheckoutPage() {
         isRefunded: false,
         isExpired: false,
         isCanceled: false,
-        statusCode: 5,
-        statusName: "paid",
+        statusCode: 5, // SuperPayBR: 5 = Pago
+        statusName: "Pagamento Confirmado!",
         amount: Number.parseFloat(iofAmount),
         paymentDate: new Date().toISOString(),
       }
 
       localStorage.setItem(`webhook_payment_${externalId}`, JSON.stringify(simulatedWebhookData))
-      console.log("✅ Pagamento IOF simulado com sucesso!")
+      console.log("✅ Pagamento IOF SuperPayBR simulado com sucesso!")
       track("iof_payment_simulated", { external_id: externalId, amount: Number.parseFloat(iofAmount) })
     } catch (error) {
-      console.error("❌ Erro na simulação IOF:", error)
+      console.error("❌ Erro na simulação IOF SuperPayBR:", error)
     }
   }
 
@@ -332,7 +334,7 @@ export default function IOFCheckoutPage() {
         <div className="bg-white rounded-lg shadow-md p-8 max-w-md w-full mx-4">
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-black mx-auto mb-4"></div>
-            <h2 className="text-xl font-bold mb-2">Gerando PIX IOF REAL...</h2>
+            <h2 className="text-xl font-bold mb-2">Gerando PIX IOF SuperPayBR...</h2>
             <p className="text-gray-600 mb-2">Aguarde enquanto processamos seu pagamento IOF</p>
             <div className="text-sm text-gray-500">
               <p>Valor: R$ {Number.parseFloat(iofAmount).toFixed(2)}</p>
@@ -393,12 +395,12 @@ export default function IOFCheckoutPage() {
                 <span
                   className={`text-sm font-medium ${invoice.type === "real" ? "text-green-800" : "text-yellow-800"}`}
                 >
-                  {invoice.type === "real" ? "✅ PIX REAL" : "⚠️ PIX SIMULADO"}
+                  {invoice.type === "real" ? "✅ PIX REAL SUPERPAYBR" : "⚠️ PIX SIMULADO SUPERPAYBR"}
                 </span>
               </div>
               {invoice.type !== "real" && (
                 <p className="text-yellow-700 text-xs mt-1 text-center">
-                  Para produção, verifique as configurações da API TryploPay
+                  Para produção, verifique as configurações da API SuperPayBR
                 </p>
               )}
             </div>
@@ -513,7 +515,7 @@ export default function IOFCheckoutPage() {
               <span className="bg-black text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold mt-0.5">
                 4
               </span>
-              <span>Receba confirmação automática via webhook</span>
+              <span>Receba confirmação automática via webhook SuperPayBR</span>
             </div>
           </div>
 

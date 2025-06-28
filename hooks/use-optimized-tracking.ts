@@ -10,225 +10,166 @@ interface TrackingOptions {
 
 interface TrackingEvent {
   event: string
-  timestamp: number
-  page?: string
-  [key: string]: any
+  data: any
+  timestamp: string
 }
 
-// Declarações globais para TypeScript
-declare global {
-  interface Window {
-    utmify?: {
-      track: (event: string, data?: any) => void
-      pageview: (page?: string) => void
-    }
-    pixelId?: string
-    dataLayer?: any[]
-    trackUTMify?: (event: string, data?: any) => void
-  }
-}
-
-export function useOptimizedTracking(options: TrackingOptions = {}) {
-  const { enableDebug = false, batchSize = 10, flushInterval = 5000 } = options
-
+export function useOptimizedTracking({
+  enableDebug = false,
+  batchSize = 10,
+  flushInterval = 5000,
+}: TrackingOptions = {}) {
   const eventQueue = useRef<TrackingEvent[]>([])
   const flushTimer = useRef<NodeJS.Timeout | null>(null)
 
-  // Função para verificar se UTMify está disponível
-  const isUTMifyAvailable = useCallback(() => {
-    return (
-      typeof window !== "undefined" && typeof window.utmify !== "undefined" && typeof window.utmify.track === "function"
-    )
-  }, [])
+  const log = useCallback(
+    (message: string, data?: any) => {
+      if (enableDebug) {
+        console.log(`[Tracking] ${message}`, data || "")
+      }
+    },
+    [enableDebug],
+  )
 
-  // Função para flush dos eventos em batch
+  // Flush events to UTMify
   const flushEvents = useCallback(() => {
     if (eventQueue.current.length === 0) return
 
     const events = [...eventQueue.current]
     eventQueue.current = []
 
-    if (enableDebug) {
-      console.log(`📊 Flushing ${events.length} tracking events:`, events)
-    }
-
-    // Enviar eventos para UTMify
-    if (isUTMifyAvailable()) {
-      events.forEach((event) => {
-        try {
-          window.utmify!.track(event.event, event)
-          if (enableDebug) {
-            console.log("✅ Evento enviado para UTMify:", event.event, event)
-          }
-        } catch (error) {
-          console.warn("❌ Erro ao enviar evento para UTMify:", error)
+    events.forEach(({ event, data }) => {
+      try {
+        if (typeof window !== "undefined" && window.trackUTMify) {
+          window.trackUTMify(event, data)
+          log(`✅ Tracked: ${event}`, data)
+        } else {
+          log(`⚠️ UTMify not available for: ${event}`, data)
         }
-      })
-    } else {
-      // Usar função helper se disponível
-      if (typeof window !== "undefined" && window.trackUTMify) {
-        events.forEach((event) => {
-          try {
-            window.trackUTMify(event.event, event)
-          } catch (error) {
-            console.warn("❌ Erro ao usar trackUTMify helper:", error)
-          }
-        })
-      } else {
-        console.warn("⚠️ UTMify não disponível, eventos perdidos:", events.length)
+      } catch (error) {
+        log(`❌ Error tracking: ${event}`, error)
       }
-    }
+    })
+  }, [log])
 
-    // Enviar para dataLayer como fallback
-    if (typeof window !== "undefined" && window.dataLayer) {
-      events.forEach((event) => {
-        try {
-          window.dataLayer.push({
-            event: event.event,
-            ...event,
-          })
-        } catch (error) {
-          console.warn("❌ Erro ao enviar evento para dataLayer:", error)
-        }
-      })
-    }
-  }, [enableDebug, isUTMifyAvailable])
-
-  // Função para adicionar evento à fila
+  // Add event to queue
   const queueEvent = useCallback(
-    (event: TrackingEvent) => {
-      eventQueue.current.push(event)
+    (event: string, data: any) => {
+      const trackingEvent: TrackingEvent = {
+        event,
+        data,
+        timestamp: new Date().toISOString(),
+      }
 
-      // Flush imediato se atingir o tamanho do batch
+      eventQueue.current.push(trackingEvent)
+      log(`📝 Queued: ${event}`, data)
+
+      // Flush if batch size reached
       if (eventQueue.current.length >= batchSize) {
         flushEvents()
-      } else {
-        // Agendar flush se não houver timer ativo
-        if (!flushTimer.current) {
-          flushTimer.current = setTimeout(() => {
-            flushEvents()
-            flushTimer.current = null
-          }, flushInterval)
-        }
       }
+
+      // Reset flush timer
+      if (flushTimer.current) {
+        clearTimeout(flushTimer.current)
+      }
+      flushTimer.current = setTimeout(flushEvents, flushInterval)
     },
-    [batchSize, flushInterval, flushEvents],
+    [batchSize, flushEvents, flushInterval, log],
   )
 
-  // Função principal de tracking
+  // Track generic event
   const track = useCallback(
-    (event: string, data: Record<string, any> = {}) => {
-      try {
-        const trackingEvent: TrackingEvent = {
-          event,
-          timestamp: Date.now(),
-          page: typeof window !== "undefined" ? window.location.pathname : "",
-          url: typeof window !== "undefined" ? window.location.href : "",
-          ...data,
-        }
-
-        if (enableDebug) {
-          console.log("📈 Queueing tracking event:", trackingEvent)
-        }
-
-        queueEvent(trackingEvent)
-      } catch (error) {
-        console.warn("❌ Erro no tracking:", error)
-      }
+    (event: string, data: any = {}) => {
+      queueEvent(event, {
+        ...data,
+        page: typeof window !== "undefined" ? window.location.pathname : "",
+        timestamp: new Date().toISOString(),
+      })
     },
-    [enableDebug, queueEvent],
+    [queueEvent],
   )
 
-  // Função para tracking de pageview
+  // Track page view
   const trackPageView = useCallback(
-    (page: string) => {
+    (page: string, additionalData: any = {}) => {
       track("page_view", {
         page,
+        url: typeof window !== "undefined" ? window.location.href : "",
         referrer: typeof document !== "undefined" ? document.referrer : "",
-        timestamp: Date.now(),
+        ...additionalData,
       })
-
-      // Também usar o método nativo do UTMify se disponível
-      if (isUTMifyAvailable() && window.utmify.pageview) {
-        try {
-          window.utmify.pageview(page)
-        } catch (error) {
-          console.warn("❌ Erro no pageview UTMify:", error)
-        }
-      }
     },
-    [track, isUTMifyAvailable],
+    [track],
   )
 
-  // Função para tracking de conversão
+  // Track conversion
   const trackConversion = useCallback(
-    (conversionType: string, value?: number) => {
+    (type: string, value: number, additionalData: any = {}) => {
       track("conversion", {
-        conversion_type: conversionType,
+        type,
         value,
         currency: "BRL",
-        timestamp: Date.now(),
+        ...additionalData,
       })
     },
     [track],
   )
 
-  // Função para tracking de formulário
-  const trackFormSubmit = useCallback(
-    (formName: string, formData?: Record<string, any>) => {
-      track("form_submit", {
-        form_name: formName,
-        form_data: formData,
-        timestamp: Date.now(),
-      })
-    },
-    [track],
-  )
-
-  // Função para tracking de PIX
+  // Track PIX generation
   const trackPixGenerated = useCallback(
-    (amount: number, type: string) => {
+    (amount: number, paymentType: string, additionalData: any = {}) => {
       track("pix_generated", {
         amount,
-        type,
+        payment_type: paymentType,
         currency: "BRL",
-        timestamp: Date.now(),
+        ...additionalData,
       })
     },
     [track],
   )
 
-  // Cleanup no unmount
+  // Track form submission
+  const trackFormSubmit = useCallback(
+    (formName: string, additionalData: any = {}) => {
+      track("form_submit", {
+        form_name: formName,
+        ...additionalData,
+      })
+    },
+    [track],
+  )
+
+  // Track button click
+  const trackButtonClick = useCallback(
+    (buttonName: string, additionalData: any = {}) => {
+      track("button_click", {
+        button_name: buttonName,
+        ...additionalData,
+      })
+    },
+    [track],
+  )
+
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (flushTimer.current) {
         clearTimeout(flushTimer.current)
       }
-      // Flush final dos eventos pendentes
-      flushEvents()
+      flushEvents() // Flush remaining events
     }
   }, [flushEvents])
 
-  // Flush eventos quando a página for fechada
+  // Flush events on page unload
   useEffect(() => {
     const handleBeforeUnload = () => {
       flushEvents()
     }
 
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "hidden") {
-        flushEvents()
-      }
-    }
-
     if (typeof window !== "undefined") {
       window.addEventListener("beforeunload", handleBeforeUnload)
-      document.addEventListener("visibilitychange", handleVisibilityChange)
-
-      return () => {
-        window.removeEventListener("beforeunload", handleBeforeUnload)
-        document.removeEventListener("visibilitychange", handleVisibilityChange)
-      }
+      return () => window.removeEventListener("beforeunload", handleBeforeUnload)
     }
   }, [flushEvents])
 
@@ -236,9 +177,9 @@ export function useOptimizedTracking(options: TrackingOptions = {}) {
     track,
     trackPageView,
     trackConversion,
-    trackFormSubmit,
     trackPixGenerated,
-    isUTMifyAvailable: isUTMifyAvailable(),
+    trackFormSubmit,
+    trackButtonClick,
     flushEvents,
   }
 }
