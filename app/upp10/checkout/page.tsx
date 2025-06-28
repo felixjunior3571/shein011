@@ -152,7 +152,7 @@ export default function IOFCheckoutPage() {
       setLoading(true)
       setError(null)
 
-      console.log("🔄 Criando fatura IOF PIX...")
+      console.log("🔄 Criando fatura IOF PIX REAL...")
       console.log("Parâmetros IOF:", { amount: Number.parseFloat(iofAmount) })
 
       // Track invoice creation start
@@ -205,6 +205,12 @@ export default function IOFCheckoutPage() {
           type: data.data.type,
           customer_name: cpfData.nome,
         })
+
+        // Mostrar aviso se for simulado
+        if (data.data.type === "simulated" || data.fallback) {
+          console.log("⚠️ ATENÇÃO: Fatura IOF criada em modo SIMULADO!")
+          setError("⚠️ PIX em modo teste. Para produção, verifique as configurações da API.")
+        }
       } else {
         throw new Error(data.error || "Erro ao criar fatura IOF")
       }
@@ -326,7 +332,7 @@ export default function IOFCheckoutPage() {
         <div className="bg-white rounded-lg shadow-md p-8 max-w-md w-full mx-4">
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-black mx-auto mb-4"></div>
-            <h2 className="text-xl font-bold mb-2">Gerando PIX IOF...</h2>
+            <h2 className="text-xl font-bold mb-2">Gerando PIX IOF REAL...</h2>
             <p className="text-gray-600 mb-2">Aguarde enquanto processamos seu pagamento IOF</p>
             <div className="text-sm text-gray-500">
               <p>Valor: R$ {Number.parseFloat(iofAmount).toFixed(2)}</p>
@@ -375,6 +381,28 @@ export default function IOFCheckoutPage() {
               Faça o pagamento de <strong>R$ 21,88</strong> referente ao Imposto sobre Operações Financeiras (IOF).
             </p>
           </div>
+
+          {/* Status da Fatura */}
+          {invoice && (
+            <div
+              className={`mb-6 p-4 rounded-lg border ${
+                invoice.type === "real" ? "bg-green-50 border-green-200" : "bg-yellow-50 border-yellow-200"
+              }`}
+            >
+              <div className="flex items-center justify-center space-x-2">
+                <span
+                  className={`text-sm font-medium ${invoice.type === "real" ? "text-green-800" : "text-yellow-800"}`}
+                >
+                  {invoice.type === "real" ? "✅ PIX REAL" : "⚠️ PIX SIMULADO"}
+                </span>
+              </div>
+              {invoice.type !== "real" && (
+                <p className="text-yellow-700 text-xs mt-1 text-center">
+                  Para produção, verifique as configurações da API TryploPay
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Mensagem de Atenção */}
           <div className="bg-yellow-100 border-l-4 border-yellow-500 rounded-lg p-4 mb-6">
