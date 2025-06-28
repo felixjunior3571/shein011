@@ -7,15 +7,9 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const { amount, description } = body
 
-    // Carregar dados do usuário do localStorage via headers
-    const cpfData = JSON.parse(localStorage.getItem("cpfConsultaData") || "{}")
-    const userEmail = localStorage.getItem("userEmail") || ""
-    const userWhatsApp = localStorage.getItem("userWhatsApp") || ""
-
     console.log("📋 Dados da fatura de ativação:", {
       amount,
       description,
-      cliente: cpfData.nome,
     })
 
     // Primeiro, fazer autenticação
@@ -31,10 +25,10 @@ export async function POST(request: NextRequest) {
     // Preparar dados da fatura de ativação SuperPayBR
     const invoiceData = {
       client: {
-        name: cpfData.nome || "Cliente SHEIN",
-        document: cpfData.cpf?.replace(/\D/g, "") || "00000000000",
-        email: userEmail || "cliente@shein.com",
-        phone: userWhatsApp?.replace(/\D/g, "") || "11999999999",
+        name: "Cliente SHEIN",
+        document: "00000000000",
+        email: "cliente@shein.com",
+        phone: "11999999999",
         address: {
           street: "Rua Principal",
           number: "123",
@@ -93,15 +87,21 @@ export async function POST(request: NextRequest) {
       const invoiceResult = await createResponse.json()
       console.log("✅ Fatura de ativação SuperPayBR criada com sucesso!")
 
+      // Gerar QR Code usando QuickChart
+      const pixPayload = invoiceResult.fatura?.pix?.payload
+      const qrCodeUrl = pixPayload
+        ? `https://quickchart.io/qr?text=${encodeURIComponent(pixPayload)}&size=200`
+        : "/placeholder.svg?height=200&width=200"
+
       // Mapear resposta para formato esperado
       const mappedInvoice = {
         id: invoiceResult.fatura.id,
         invoice_id: invoiceResult.fatura.invoice_id,
         external_id: invoiceData.payment.id,
         pix: {
-          payload: invoiceResult.fatura.pix.payload,
-          image: invoiceResult.fatura.pix.image,
-          qr_code: invoiceResult.fatura.pix.image,
+          payload: pixPayload || "",
+          image: invoiceResult.fatura?.pix?.image || qrCodeUrl,
+          qr_code: qrCodeUrl,
         },
         status: {
           code: invoiceResult.fatura.status.code,
@@ -117,6 +117,8 @@ export async function POST(request: NextRequest) {
         },
         type: "real",
       }
+
+      console.log("🎯 QR Code Ativação URL gerada:", qrCodeUrl)
 
       return NextResponse.json({
         success: true,
