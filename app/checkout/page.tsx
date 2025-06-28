@@ -90,26 +90,43 @@ export default function CheckoutPage() {
   // Carregar external_id quando a fatura for criada
   useEffect(() => {
     if (invoice) {
-      const storedExternalId = localStorage.getItem("currentExternalId")
-      if (storedExternalId) {
-        setExternalId(storedExternalId)
-        console.log("🔍 External ID carregado:", storedExternalId)
-      } else if (invoice.external_id) {
-        setExternalId(invoice.external_id)
-        console.log("🔍 External ID da fatura:", invoice.external_id)
+      console.log("🔍 Dados da fatura recebida:", invoice)
+
+      let capturedExternalId = null
+
+      // Tentar múltiplas fontes para o external_id
+      if (invoice.external_id) {
+        capturedExternalId = invoice.external_id
+        console.log("✅ External ID encontrado na fatura:", capturedExternalId)
+      } else {
+        // Fallback: usar o ID da fatura como external_id
+        capturedExternalId = invoice.id
+        console.log("⚠️ External ID não encontrado, usando invoice.id:", capturedExternalId)
+      }
+
+      // Salvar no localStorage e no estado
+      if (capturedExternalId) {
+        localStorage.setItem("currentExternalId", capturedExternalId)
+        setExternalId(capturedExternalId)
+        console.log("💾 External ID salvo:", capturedExternalId)
+      } else {
+        console.error("❌ Não foi possível obter external_id!")
       }
     }
   }, [invoice])
 
   // Sistema de verificação automática via webhook
   useEffect(() => {
-    if (!externalId || paymentStatus === "confirmed") return
+    if (!externalId || paymentStatus === "confirmed") {
+      console.log("🚫 Monitoramento não iniciado:", { externalId, paymentStatus })
+      return
+    }
 
     console.log("🔄 Iniciando monitoramento automático para:", externalId)
 
     const checkWebhookConfirmation = async () => {
       try {
-        console.log("🔍 Verificando status via webhook...")
+        console.log("🔍 Verificando status via webhook para:", externalId)
 
         const response = await fetch(`/api/tryplopay/payment-status?externalId=${externalId}`)
         const result = await response.json()
@@ -161,7 +178,7 @@ export default function CheckoutPage() {
             setStatusMessage("🚫 Pagamento Cancelado")
           }
         } else {
-          console.log("⏳ Ainda aguardando confirmação...")
+          console.log("⏳ Ainda aguardando confirmação para:", externalId)
         }
       } catch (error) {
         console.log("❌ Erro na verificação:", error)
@@ -175,7 +192,7 @@ export default function CheckoutPage() {
     const interval = setInterval(checkWebhookConfirmation, 3000)
 
     return () => {
-      console.log("🛑 Parando monitoramento automático")
+      console.log("🛑 Parando monitoramento automático para:", externalId)
       clearInterval(interval)
     }
   }, [externalId, paymentStatus])
@@ -338,6 +355,40 @@ export default function CheckoutPage() {
     if (invoice?.type === "real") return "PIX Real"
     if (invoice?.type === "simulated") return "PIX Simulado"
     return "PIX Emergência"
+  }
+
+  // Função para simular pagamento (apenas para testes)
+  const simulatePayment = async () => {
+    if (!externalId) {
+      console.log("❌ Não é possível simular: External ID não encontrado")
+      return
+    }
+
+    try {
+      console.log("🧪 Simulando pagamento para:", externalId)
+
+      const response = await fetch("/api/tryplopay/simulate-payment", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          externalId,
+          amount: Number.parseFloat(amount),
+        }),
+      })
+
+      const result = await response.json()
+
+      if (result.success) {
+        console.log("✅ Pagamento simulado com sucesso!")
+        // A verificação automática vai detectar o pagamento
+      } else {
+        console.error("❌ Erro ao simular pagamento:", result.error)
+      }
+    } catch (error) {
+      console.error("❌ Erro na simulação:", error)
+    }
   }
 
   if (loading) {
@@ -509,6 +560,16 @@ export default function CheckoutPage() {
               <span>Aguarde a confirmação automática</span>
             </div>
           </div>
+
+          {/* Botão de Teste (apenas em desenvolvimento) */}
+          {process.env.NODE_ENV === "development" && externalId && (
+            <button
+              onClick={simulatePayment}
+              className="w-full mt-4 bg-green-600 hover:bg-green-700 text-white font-medium py-3 px-4 rounded-lg transition-colors"
+            >
+              🧪 SIMULAR PAGAMENTO APROVADO (TESTE)
+            </button>
+          )}
 
           {/* Botão de Verificação Manual */}
           <button

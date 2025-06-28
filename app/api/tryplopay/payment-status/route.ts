@@ -1,5 +1,10 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { getPaymentConfirmation, getAllConfirmations, getRealtimeEvents } from "@/lib/payment-storage"
+import {
+  getPaymentConfirmation,
+  getAllConfirmations,
+  getRealtimeEvents,
+  paymentConfirmations,
+} from "@/lib/payment-storage"
 
 export async function GET(request: NextRequest) {
   try {
@@ -53,17 +58,31 @@ export async function GET(request: NextRequest) {
     }
 
     console.log(`🔎 Buscando confirmação para: ${identifier}`)
+    console.log(`📊 Total de confirmações em memória: ${paymentConfirmations.size}`)
+
+    // Listar todas as chaves disponíveis para debug
+    const allKeys = Array.from(paymentConfirmations.keys())
+    console.log(`🔑 Chaves disponíveis:`, allKeys)
 
     // Buscar em múltiplas chaves
     const confirmation = getPaymentConfirmation(identifier)
 
     if (!confirmation) {
       console.log(`❌ Confirmação não encontrada para: ${identifier}`)
+      console.log(`🔍 Tentativas de busca:`)
+      console.log(`  - Busca direta: ${paymentConfirmations.has(identifier)}`)
+      console.log(`  - Busca por token: ${paymentConfirmations.has(`token_${identifier}`)}`)
+
       return NextResponse.json({
         success: true,
         found: false,
         searched_for: identifier,
         message: "Nenhuma confirmação encontrada",
+        debug: {
+          total_confirmations: paymentConfirmations.size,
+          available_keys: allKeys,
+          searched_keys: [identifier, `token_${identifier}`],
+        },
       })
     }
 

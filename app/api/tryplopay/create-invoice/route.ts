@@ -310,7 +310,7 @@ export async function POST(request: NextRequest) {
     const simulatedInvoice = {
       id: `SIM_${Date.now()}`,
       invoice_id: `SIMULATED_${Date.now()}`,
-      external_id: externalId, // Adicionar external_id
+      external_id: externalId, // GARANTIR que está sempre presente
       pix: {
         payload: simulatedPixCode,
         image: `/placeholder.svg?height=250&width=250`,
@@ -335,7 +335,7 @@ export async function POST(request: NextRequest) {
       type: "simulated",
     }
 
-    console.log(`✅ Fatura simulada criada - Valor: R$ ${totalAmount.toFixed(2)}`)
+    console.log(`✅ Fatura simulada criada - External ID: ${externalId} - Valor: R$ ${totalAmount.toFixed(2)}`)
 
     return NextResponse.json({
       success: true,
