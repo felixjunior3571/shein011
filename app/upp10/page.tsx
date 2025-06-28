@@ -20,8 +20,8 @@ export default function UppThanksPage() {
   }, [])
 
   const handlePayment = () => {
-    // Lógica de pagamento aqui
-    console.log("Processando pagamento IOF...")
+    // Redirecionar para página de checkout
+    router.push("/upp10/checkout")
   }
 
   return (
