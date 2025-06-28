@@ -5,15 +5,14 @@ import { useEffect, useCallback, useRef } from "react"
 // Tipos para os eventos de rastreamento
 interface TrackingEvent {
   event: string
-  data: Record<string, any>
+  properties: Record<string, any>
   timestamp: number
 }
 
 interface UseOptimizedTrackingOptions {
+  enableDebug?: boolean
   batchSize?: number
   batchInterval?: number
-  maxCacheSize?: number
-  enableDebug?: boolean
 }
 
 // Declaração global para o Utmify
@@ -28,16 +27,14 @@ declare global {
 }
 
 export function useOptimizedTracking({
-  batchSize = 5,
-  batchInterval = 2000, // 2 seconds
-  maxCacheSize = 50,
   enableDebug = false,
+  batchSize = 5,
+  batchInterval = 2000,
 }: UseOptimizedTrackingOptions = {}) {
-  const eventQueue = useRef<TrackingEvent[]>([])
-  const eventCache = useRef<Set<string>>(new Set())
+  const eventQueueRef = useRef<TrackingEvent[]>([])
   const batchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const lastPageViewRef = useRef<number>(0)
   const isActiveRef = useRef<boolean>(true)
+  const sentEventsRef = useRef<Set<string>>(new Set())
 
   // Monitor tab visibility to pause tracking when inactive
   useEffect(() => {
@@ -50,8 +47,8 @@ export function useOptimizedTracking({
         )
       }
 
-      // Flush queue when tab becomes inactive
-      if (document.hidden) {
+      // Flush queue when tab becomes active
+      if (!document.hidden && eventQueueRef.current.length > 0) {
         flushEventQueue()
       }
     }
@@ -60,50 +57,34 @@ export function useOptimizedTracking({
     return () => document.removeEventListener("visibilitychange", handleVisibilityChange)
   }, [enableDebug])
 
-  // Generate cache key for deduplication
-  const generateCacheKey = useCallback((event: string, data: Record<string, any>): string => {
-    return `${event}_${JSON.stringify(data)}_${Math.floor(Date.now() / 5000)}` // 5-second window
-  }, [])
-
   // Flush event queue
   const flushEventQueue = useCallback(() => {
-    if (eventQueue.current.length === 0) return
+    if (eventQueueRef.current.length === 0) return
 
-    const events = [...eventQueue.current]
-    eventQueue.current = []
+    const eventsToSend = [...eventQueueRef.current]
+    eventQueueRef.current = []
 
     if (enableDebug) {
-      console.log(`📊 Flushing ${events.length} tracking events:`, events)
+      console.log(`📊 Flushing ${eventsToSend.length} tracking events:`, eventsToSend)
     }
 
-    // Send events in batch
-    if (typeof window !== "undefined" && window.gtag) {
-      events.forEach(({ event, data }) => {
-        try {
-          window.gtag("event", event, data)
-        } catch (error) {
-          console.error("❌ Error sending tracking event:", error)
-        }
-      })
-    }
+    // Send events (in a real app, this would go to your analytics service)
+    eventsToSend.forEach((event) => {
+      if (enableDebug) {
+        console.log(`📊 Tracking: ${event.event}`, event.properties)
+      }
+    })
 
-    // Send to UTMify if available
-    if (typeof window !== "undefined" && (window as any).utmify) {
-      events.forEach(({ event, data }) => {
-        try {
-          ;(window as any).utmify.track(event, data)
-        } catch (error) {
-          console.error("❌ Error sending UTMify event:", error)
-        }
-      })
+    // Clear batch timeout
+    if (batchTimeoutRef.current) {
+      clearTimeout(batchTimeoutRef.current)
+      batchTimeoutRef.current = null
     }
   }, [enableDebug])
 
   // Schedule batch flush
   const scheduleBatchFlush = useCallback(() => {
-    if (batchTimeoutRef.current) {
-      clearTimeout(batchTimeoutRef.current)
-    }
+    if (batchTimeoutRef.current) return
 
     batchTimeoutRef.current = setTimeout(() => {
       if (isActiveRef.current) {
@@ -112,110 +93,79 @@ export function useOptimizedTracking({
     }, batchInterval)
   }, [batchInterval, flushEventQueue])
 
-  // Track event with optimization
+  // Track event with batching and deduplication
   const track = useCallback(
-    (event: string, data: Record<string, any> = {}) => {
-      // Skip if tab is not active
+    (event: string, properties: Record<string, any> = {}) => {
+      // Don't track if tab is inactive
       if (!isActiveRef.current) {
         if (enableDebug) {
-          console.log("📊 Skipping tracking - tab not active:", event)
+          console.log(`📊 Skipping tracking (tab inactive): ${event}`)
         }
         return
       }
 
-      // Generate cache key for deduplication
-      const cacheKey = generateCacheKey(event, data)
+      // Create unique key for deduplication
+      const eventKey = `${event}_${JSON.stringify(properties)}_${Date.now()}`
 
-      // Skip if event was recently tracked
-      if (eventCache.current.has(cacheKey)) {
+      // Check for recent duplicates (within 5 seconds)
+      const recentDuplicateKey = `${event}_${JSON.stringify(properties)}`
+      if (sentEventsRef.current.has(recentDuplicateKey)) {
         if (enableDebug) {
-          console.log("📊 Skipping duplicate event:", event)
+          console.log(`📊 Skipping duplicate event: ${event}`)
         }
         return
       }
 
-      // Add to cache
-      eventCache.current.add(cacheKey)
+      // Add to deduplication set with expiry
+      sentEventsRef.current.add(recentDuplicateKey)
+      setTimeout(() => {
+        sentEventsRef.current.delete(recentDuplicateKey)
+      }, 5000)
 
-      // Clean cache if it gets too large
-      if (eventCache.current.size > maxCacheSize) {
-        const entries = Array.from(eventCache.current)
-        const toDelete = entries.slice(0, Math.floor(maxCacheSize / 2))
-        toDelete.forEach((key) => eventCache.current.delete(key))
-      }
-
-      // Add event to queue
-      const trackingEvent: TrackingEvent = {
+      // Add to queue
+      eventQueueRef.current.push({
         event,
-        data: {
-          ...data,
+        properties: {
+          ...properties,
           timestamp: Date.now(),
-          page_url: window.location.href,
-          page_title: document.title,
+          url: window.location.href,
+          user_agent: navigator.userAgent,
         },
         timestamp: Date.now(),
-      }
-
-      eventQueue.current.push(trackingEvent)
+      })
 
       if (enableDebug) {
-        console.log("📊 Event queued:", trackingEvent)
+        console.log(`📊 Queued event: ${event} (queue size: ${eventQueueRef.current.length})`)
       }
 
       // Flush immediately if batch size reached
-      if (eventQueue.current.length >= batchSize) {
+      if (eventQueueRef.current.length >= batchSize) {
         flushEventQueue()
       } else {
         scheduleBatchFlush()
       }
     },
-    [batchSize, generateCacheKey, maxCacheSize, enableDebug, flushEventQueue, scheduleBatchFlush],
+    [batchSize, enableDebug, flushEventQueue, scheduleBatchFlush],
   )
 
-  // Track page view with throttling
+  // Track page view
   const trackPageView = useCallback(
-    (path?: string) => {
-      const now = Date.now()
-
-      // Throttle page views to max 1 per 3 seconds
-      if (now - lastPageViewRef.current < 3000) {
-        if (enableDebug) {
-          console.log("📊 Page view throttled")
-        }
-        return
-      }
-
-      lastPageViewRef.current = now
-
+    (page: string, properties: Record<string, any> = {}) => {
       track("page_view", {
-        page_path: path || window.location.pathname,
-        page_search: window.location.search,
-        page_hash: window.location.hash,
-      })
-    },
-    [track, enableDebug],
-  )
-
-  // Track conversion with enhanced data
-  const trackConversion = useCallback(
-    (conversionType: string, value?: number, currency = "BRL") => {
-      track("conversion", {
-        conversion_type: conversionType,
-        value: value || 0,
-        currency,
-        conversion_id: `${conversionType}_${Date.now()}`,
+        page,
+        ...properties,
       })
     },
     [track],
   )
 
-  // Track form interaction
-  const trackFormInteraction = useCallback(
-    (formName: string, action: "start" | "complete" | "error", step?: string) => {
-      track("form_interaction", {
-        form_name: formName,
-        form_action: action,
-        form_step: step,
+  // Track conversion
+  const trackConversion = useCallback(
+    (conversionType: string, value: number, properties: Record<string, any> = {}) => {
+      track("conversion", {
+        conversion_type: conversionType,
+        value,
+        ...properties,
       })
     },
     [track],
@@ -237,8 +187,6 @@ export function useOptimizedTracking({
     track,
     trackPageView,
     trackConversion,
-    trackFormInteraction,
-    flushEvents: flushEventQueue,
-    queueSize: eventQueue.current.length,
+    flushEventQueue,
   }
 }

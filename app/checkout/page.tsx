@@ -304,25 +304,22 @@ export default function PureWebhookCheckoutPage() {
     try {
       console.log("🧪 Simulando pagamento para:", externalId)
 
-      const response = await fetch("/api/tryplopay/simulate-payment", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          externalId,
-          amount: Number.parseFloat(amount),
-        }),
-      })
-
-      const result = await response.json()
-
-      if (result.success) {
-        console.log("✅ Pagamento simulado com sucesso!")
-        track("payment_simulated", { external_id: externalId, amount: Number.parseFloat(amount) })
-      } else {
-        console.error("❌ Erro ao simular pagamento:", result.error)
+      // Simular webhook data diretamente no localStorage
+      const simulatedWebhookData = {
+        isPaid: true,
+        isDenied: false,
+        isRefunded: false,
+        isExpired: false,
+        isCanceled: false,
+        statusCode: 2,
+        statusName: "paid",
+        amount: Number.parseFloat(amount),
+        paymentDate: new Date().toISOString(),
       }
+
+      localStorage.setItem(`webhook_payment_${externalId}`, JSON.stringify(simulatedWebhookData))
+      console.log("✅ Pagamento simulado com sucesso!")
+      track("payment_simulated", { external_id: externalId, amount: Number.parseFloat(amount) })
     } catch (error) {
       console.error("❌ Erro na simulação:", error)
     }

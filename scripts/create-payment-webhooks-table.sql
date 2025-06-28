@@ -1,7 +1,7 @@
 -- Criar tabela para armazenar webhooks de pagamento
 CREATE TABLE IF NOT EXISTS payment_webhooks (
   id SERIAL PRIMARY KEY,
-  external_id VARCHAR(255) NOT NULL,
+  external_id VARCHAR(255) UNIQUE NOT NULL,
   invoice_id VARCHAR(255),
   token VARCHAR(255),
   status_code INTEGER,
@@ -20,13 +20,13 @@ CREATE TABLE IF NOT EXISTS payment_webhooks (
   updated_at TIMESTAMP DEFAULT NOW()
 );
 
--- Criar índices para performance
+-- Criar índices para melhor performance
 CREATE INDEX IF NOT EXISTS idx_payment_webhooks_external_id ON payment_webhooks(external_id);
-CREATE INDEX IF NOT EXISTS idx_payment_webhooks_invoice_id ON payment_webhooks(invoice_id);
+CREATE INDEX IF NOT EXISTS idx_payment_webhooks_status ON payment_webhooks(status_code);
+CREATE INDEX IF NOT EXISTS idx_payment_webhooks_paid ON payment_webhooks(is_paid);
 CREATE INDEX IF NOT EXISTS idx_payment_webhooks_received_at ON payment_webhooks(received_at);
-CREATE INDEX IF NOT EXISTS idx_payment_webhooks_status ON payment_webhooks(is_paid, is_denied, is_expired);
 
--- Comentários
+-- Comentários para documentação
 COMMENT ON TABLE payment_webhooks IS 'Armazena todos os webhooks recebidos do TryploPay';
-COMMENT ON COLUMN payment_webhooks.external_id IS 'ID externo único do pagamento';
-COMMENT ON COLUMN payment_webhooks.webhook_data IS 'Dados completos do webhook em JSON';
+COMMENT ON COLUMN payment_webhooks.external_id IS 'ID único do pagamento no sistema';
+COMMENT ON COLUMN payment_webhooks.webhook_data IS 'Dados completos do webhook em formato JSON';

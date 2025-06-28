@@ -42,7 +42,7 @@ export function usePureWebhookMonitor({
   const isActiveRef = useRef<boolean>(true)
   const storageCheckIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
-  // Monitor tab visibility
+  // Monitor tab visibility to pause when inactive
   useEffect(() => {
     const handleVisibilityChange = () => {
       isActiveRef.current = !document.hidden

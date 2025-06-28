@@ -38,9 +38,9 @@ function isRateLimited(ip: string, limit: number, windowMs: number): boolean {
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  // NEVER rate limit webhook endpoint
+  // NEVER rate limit webhook endpoint - CRITICAL!
   if (pathname === "/api/tryplopay/webhook") {
-    console.log("🔔 Webhook endpoint - NO rate limiting")
+    console.log("🔔 Webhook endpoint - NO rate limiting applied")
     return NextResponse.next()
   }
 
@@ -54,9 +54,9 @@ export function middleware(request: NextRequest) {
 
     // VERY strict limits for TryploPay APIs (except webhook)
     if (pathname.includes("/tryplopay/") && !pathname.includes("/webhook")) {
-      limit = 5 // Only 5 requests per minute for TryploPay APIs
+      limit = 3 // Only 3 requests per minute for TryploPay APIs
       windowMs = 60 * 1000
-      console.log(`🔒 Applying strict rate limit to TryploPay API: ${pathname}`)
+      console.log(`🔒 Applying STRICT rate limit (${limit}/min) to TryploPay API: ${pathname}`)
     }
 
     if (isRateLimited(ip, limit, windowMs)) {
