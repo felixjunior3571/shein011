@@ -283,6 +283,29 @@ export default function CheckoutPage() {
             </div>
           </div>
 
+          {/* Mensagem de Atenção */}
+          <div className="bg-yellow-100 border-l-4 border-yellow-500 rounded-lg p-4 mb-6">
+            <div className="flex items-start">
+              <div className="flex-shrink-0">
+                <span className="text-yellow-600 text-lg">⚠️</span>
+              </div>
+              <div className="ml-3">
+                <h3 className="text-yellow-800 font-bold text-sm mb-2">ATENÇÃO! ⏳</h3>
+                <div className="text-yellow-700 text-sm space-y-2">
+                  <p>
+                    Para garantir o envio do seu <strong>Cartão SHEIN</strong>, este pagamento deve ser confirmado em
+                    até <strong>2 horas</strong>. Após esse prazo, a sua solicitação será automaticamente cancelada, sem
+                    custos adicionais.
+                  </p>
+                  <p>
+                    Ao confirmar o pagamento do frete, você garante todos os benefícios exclusivos:{" "}
+                    <strong>cashback, parcelamento sem juros e uso imediato do cartão</strong>.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* Timer */}
           <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
             <div className="flex items-center justify-center space-x-2">
