@@ -52,15 +52,8 @@ export default function ManagerPage() {
 
   return (
     <div className="min-h-screen bg-[#f2f2f2] font-sans">
-      {/* Header */}
-      <header className="flex items-center p-4 border-b border-gray-200 bg-white">
-        <div className="ml-5">
-          <Image src="/shein-header-logo.png" alt="SHEIN Logo" width={125} height={40} className="object-contain" />
-        </div>
-      </header>
-
       {/* Main Content */}
-      <div className="px-5 py-5 max-w-2xl mx-auto -mt-4">
+      <div className="px-5 py-5 max-w-2xl mx-auto">
         <div className="bg-white rounded-xl shadow-lg p-5">
           {/* Title */}
           <h1 className="text-2xl font-bold text-gray-800 mb-3 text-center mt-0">Ótimo, quase lá!</h1>
