@@ -12,10 +12,9 @@ interface PaymentData {
   isExpired: boolean
   isCanceled: boolean
   isRefunded: boolean
-  provider: string
 }
 
-interface PureWebhookMonitorOptions {
+interface WebhookMonitorOptions {
   externalId: string | null
   onPaymentConfirmed?: (data: PaymentData) => void
   onPaymentDenied?: (data: PaymentData) => void
@@ -34,20 +33,11 @@ export function usePureWebhookMonitor({
   onPaymentCanceled,
   onPaymentRefunded,
   enableDebug = false,
-  checkInterval = 2000, // 2 segundos
-}: PureWebhookMonitorOptions) {
-  const [status, setStatus] = useState<{
-    isPaid: boolean
-    isDenied: boolean
-    isExpired: boolean
-    isCanceled: boolean
-    isRefunded: boolean
-    statusCode?: number
-    statusName?: string
-    amount?: number
-    paymentDate?: string
-  } | null>(null)
-
+  checkInterval = 2000,
+}: WebhookMonitorOptions) {
+  const [status, setStatus] = useState<
+    "idle" | "monitoring" | "confirmed" | "denied" | "expired" | "canceled" | "refunded"
+  >("idle")
   const [isWaitingForWebhook, setIsWaitingForWebhook] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [lastCheck, setLastCheck] = useState<Date | null>(null)
@@ -57,13 +47,13 @@ export function usePureWebhookMonitor({
 
   const log = (message: string, data?: any) => {
     if (enableDebug) {
-      console.log(`[PureWebhookMonitor] ${message}`, data || "")
+      console.log(`[WebhookMonitor] ${message}`, data || "")
     }
   }
 
-  // Função PURA - apenas verifica localStorage (ZERO API CALLS!)
+  // Função para verificar localStorage (SEM API CALLS)
   const checkLocalStorageForPayment = () => {
-    if (!externalId || typeof window === "undefined") return null
+    if (!externalId) return null
 
     try {
       // Verificar se já foi processado
@@ -72,11 +62,11 @@ export function usePureWebhookMonitor({
       }
 
       // Verificar localStorage para dados do webhook
-      const webhookKey = `webhook_payment_${externalId}`
-      const storedData = localStorage.getItem(webhookKey)
+      const webhookDataKey = `webhook_payment_${externalId}`
+      const webhookData = localStorage.getItem(webhookDataKey)
 
-      if (storedData) {
-        const paymentData = JSON.parse(storedData)
+      if (webhookData) {
+        const paymentData = JSON.parse(webhookData)
         log("💾 Dados encontrados no localStorage:", paymentData)
 
         // Marcar como processado
@@ -92,21 +82,22 @@ export function usePureWebhookMonitor({
     }
   }
 
-  // Monitoramento PURO - apenas localStorage
+  // Monitoramento principal
   useEffect(() => {
     if (
       !externalId ||
-      status?.isPaid ||
-      status?.isDenied ||
-      status?.isExpired ||
-      status?.isCanceled ||
-      status?.isRefunded
+      status === "confirmed" ||
+      status === "denied" ||
+      status === "expired" ||
+      status === "canceled" ||
+      status === "refunded"
     ) {
       log("🚫 Monitoramento não iniciado:", { externalId, status })
       return
     }
 
-    log("🔄 Iniciando monitoramento PURO para:", externalId)
+    log("🔄 Iniciando monitoramento puro para:", externalId)
+    setStatus("monitoring")
     setIsWaitingForWebhook(true)
 
     const checkPaymentStatus = () => {
@@ -115,26 +106,30 @@ export function usePureWebhookMonitor({
 
       if (paymentData) {
         log("📋 Dados de pagamento encontrados:", paymentData)
-        setStatus(paymentData)
 
         if (paymentData.isPaid) {
           log("🎉 PAGAMENTO CONFIRMADO!")
+          setStatus("confirmed")
           setIsWaitingForWebhook(false)
           onPaymentConfirmed?.(paymentData)
         } else if (paymentData.isDenied) {
           log("❌ PAGAMENTO NEGADO!")
+          setStatus("denied")
           setIsWaitingForWebhook(false)
           onPaymentDenied?.(paymentData)
         } else if (paymentData.isExpired) {
           log("⏰ PAGAMENTO VENCIDO!")
+          setStatus("expired")
           setIsWaitingForWebhook(false)
           onPaymentExpired?.(paymentData)
         } else if (paymentData.isCanceled) {
           log("🚫 PAGAMENTO CANCELADO!")
+          setStatus("canceled")
           setIsWaitingForWebhook(false)
           onPaymentCanceled?.(paymentData)
         } else if (paymentData.isRefunded) {
           log("💰 PAGAMENTO REEMBOLSADO!")
+          setStatus("refunded")
           setIsWaitingForWebhook(false)
           onPaymentRefunded?.(paymentData)
         }
@@ -146,13 +141,13 @@ export function usePureWebhookMonitor({
     // Verificar imediatamente
     checkPaymentStatus()
 
-    // Verificar a cada intervalo definido (APENAS localStorage!)
+    // Verificar a cada intervalo definido
     intervalRef.current = setInterval(checkPaymentStatus, checkInterval)
 
     return () => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current)
-        log("🛑 Parando monitoramento PURO para:", externalId)
+        log("🛑 Parando monitoramento para:", externalId)
       }
     }
   }, [externalId, status, checkInterval])
