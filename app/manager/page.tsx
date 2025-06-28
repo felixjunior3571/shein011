@@ -2,17 +2,21 @@
 
 import type React from "react"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { useRouter } from "next/navigation"
-import Image from "next/image"
 import { Trophy } from "lucide-react"
+import Image from "next/image"
+import { usePageTracking } from "@/hooks/use-tracking"
 
 export default function ManagerPage() {
+  const router = useRouter()
   const [whatsapp, setWhatsapp] = useState("")
   const [isValid, setIsValid] = useState(false)
-  const router = useRouter()
 
-  // Formatação do WhatsApp
+  // Rastreia a página do gerente
+  usePageTracking("manager")
+
+  // Função para formatar o WhatsApp
   const formatWhatsApp = (value: string) => {
     // Remove tudo que não é número
     const numbers = value.replace(/\D/g, "")
@@ -30,26 +34,31 @@ export default function ManagerPage() {
     }
   }
 
-  // Validação do WhatsApp
-  useEffect(() => {
-    const numbers = whatsapp.replace(/\D/g, "")
-    setIsValid(numbers.length === 11)
-  }, [whatsapp])
+  // Função para validar WhatsApp (11 dígitos)
+  const validateWhatsApp = (value: string) => {
+    const numbers = value.replace(/\D/g, "")
+    return numbers.length === 11
+  }
 
+  // Handler para mudança no input
   const handleWhatsAppChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const formatted = formatWhatsApp(e.target.value)
     setWhatsapp(formatted)
+    setIsValid(validateWhatsApp(formatted))
   }
 
+  // Handler para continuar
   const handleContinue = () => {
-    if (isValid) {
-      // Salvar WhatsApp no localStorage
-      const numbers = whatsapp.replace(/\D/g, "")
-      localStorage.setItem("managerWhatsApp", numbers)
+    if (!isValid) return
 
-      // Redirecionar para delivery-method
-      router.push("/delivery-method")
-    }
+    // Salva o WhatsApp no localStorage
+    const numbersOnly = whatsapp.replace(/\D/g, "")
+    localStorage.setItem("userWhatsApp", numbersOnly)
+
+    console.log("WhatsApp salvo:", numbersOnly)
+
+    // Redireciona para a próxima página
+    router.push("/delivery-method")
   }
 
   return (
@@ -91,7 +100,7 @@ export default function ManagerPage() {
             <Image src="/whatsapp-icon.png" alt="WhatsApp" width={20} height={20} className="mr-3" />
             <input
               type="tel"
-              className="flex h-10 w-full px-3 py-2 border-0 border-b border-gray-300 rounded-none bg-transparent text-base font-sans focus:border-gray-400 focus:ring-0 flex-1 focus:outline-none"
+              className="flex h-10 w-full px-3 py-2 border-0 border-b border-gray-300 rounded-none bg-transparent text-base font-sans focus:border-gray-400 focus:ring-0 focus:outline-none flex-1"
               placeholder="Digite seu WhatsApp aqui"
               maxLength={15}
               value={whatsapp}
@@ -111,9 +120,7 @@ export default function ManagerPage() {
             onClick={handleContinue}
             disabled={!isValid}
             className={`w-full font-bold py-4 px-6 rounded-lg text-base transition-colors ${
-              isValid
-                ? "bg-black text-white hover:bg-black/90 cursor-pointer"
-                : "bg-gray-300 text-gray-500 cursor-not-allowed"
+              isValid ? "bg-black text-white hover:bg-gray-800" : "bg-gray-300 text-gray-500 cursor-not-allowed"
             }`}
           >
             Continuar
@@ -124,7 +131,7 @@ export default function ManagerPage() {
       {/* Footer */}
       <footer className="bg-[#f9f9f9] border-t border-[#eaeaea] px-4 py-6 text-center mt-12">
         <div className="max-w-2xl mx-auto">
-          <p className="text-gray-600 text-xs mb-1 leading-tight">SHEIN Brasil LTDA | CNPJ: 12.345.678/0001-99</p>
+          <p className="text-gray-600 text-xs mb-1 leading-tight">SHEIN Brasil LTDA | CNPJ: 12.345.678/0001-90</p>
           <p className="text-gray-600 text-xs mb-2 leading-tight">
             Av. Paulista, 1000 - Bela Vista, São Paulo - SP, 01310-100
           </p>
