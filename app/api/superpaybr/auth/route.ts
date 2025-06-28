@@ -2,91 +2,75 @@ import { type NextRequest, NextResponse } from "next/server"
 
 export async function GET(request: NextRequest) {
   try {
-    console.log("🔐 [SuperPayBR Auth] Iniciando autenticação...")
+    console.log("=== AUTENTICAÇÃO SUPERPAYBR ===")
 
-    // Verificar variáveis de ambiente
     const token = process.env.SUPERPAYBR_TOKEN
     const secretKey = process.env.SUPERPAYBR_SECRET_KEY
 
-    console.log("🔧 [SuperPayBR Auth] Verificando credenciais:", {
-      token: token ? "✅ Configurado" : "❌ Não configurado",
-      secretKey: secretKey ? "✅ Configurado" : "❌ Não configurado",
-    })
-
     if (!token || !secretKey) {
-      console.log("❌ [SuperPayBR Auth] Credenciais não configuradas")
-      return NextResponse.json({
-        success: false,
-        error: "Credenciais SuperPayBR não configuradas",
-        fallback: true,
-      })
+      console.log("❌ Credenciais SuperPayBR não encontradas")
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Credenciais SuperPayBR não configuradas",
+        },
+        { status: 500 },
+      )
     }
 
-    // Fazer requisição para SuperPayBR
-    const authUrl = "https://api.superpaybr.com/auth"
+    console.log("🔑 Fazendo autenticação SuperPayBR...")
+    console.log("Token:", token.substring(0, 10) + "...")
+    console.log("Secret:", secretKey.substring(0, 20) + "...")
 
-    console.log("📤 [SuperPayBR Auth] Fazendo requisição para:", authUrl)
+    // Criar Basic Auth header
+    const credentials = Buffer.from(`${token}:${secretKey}`).toString("base64")
 
-    const response = await fetch(authUrl, {
+    const authResponse = await fetch("https://api.superpaybr.com/auth", {
       method: "GET",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Basic ${Buffer.from(`${token}:${secretKey}`).toString("base64")}`,
+        Authorization: `Basic ${credentials}`,
         scope: "invoice.write, customer.write, webhook.write",
       },
     })
 
-    console.log("📥 [SuperPayBR Auth] Resposta recebida:", {
-      status: response.status,
-      statusText: response.statusText,
-      ok: response.ok,
+    console.log("📥 Resposta SuperPayBR Auth:", {
+      status: authResponse.status,
+      statusText: authResponse.statusText,
+      ok: authResponse.ok,
     })
 
-    if (response.ok) {
-      const data = await response.json()
-
-      console.log("✅ [SuperPayBR Auth] Autenticação bem-sucedida!")
-      console.log("📋 [SuperPayBR Auth] Dados:", {
-        account: data.account,
-        working: data.working,
-        expires_in: data.expires_in,
-        hasToken: !!data.access_token,
-      })
+    if (authResponse.ok) {
+      const authData = await authResponse.json()
+      console.log("✅ Autenticação SuperPayBR bem-sucedida!")
+      console.log("Account ID:", authData.account)
+      console.log("Working:", authData.working)
+      console.log("Expires:", new Date(authData.expires_in * 1000).toLocaleString())
 
       return NextResponse.json({
         success: true,
-        data: {
-          access_token: data.access_token,
-          account: data.account,
-          working: data.working,
-          expires_in: data.expires_in,
-          token_type: data.token_type,
-          scope: data.scope,
-          companie: data.companie,
-          details: data.details,
-        },
-        fallback: false,
+        data: authData,
       })
     } else {
-      const errorText = await response.text()
-      console.log("❌ [SuperPayBR Auth] Erro na autenticação:", {
-        status: response.status,
-        error: errorText,
-      })
+      const errorText = await authResponse.text()
+      console.log("❌ Erro na autenticação SuperPayBR:", authResponse.status, errorText)
 
-      return NextResponse.json({
-        success: false,
-        error: `Erro na autenticação SuperPayBR: ${response.status}`,
-        fallback: true,
-      })
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Erro na autenticação: ${authResponse.status} - ${errorText}`,
+        },
+        { status: authResponse.status },
+      )
     }
   } catch (error) {
-    console.error("❌ [SuperPayBR Auth] Erro geral:", error)
-
-    return NextResponse.json({
-      success: false,
-      error: "Erro interno na autenticação",
-      fallback: true,
-    })
+    console.log("❌ Erro na autenticação SuperPayBR:", error)
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Erro interno na autenticação",
+      },
+      { status: 500 },
+    )
   }
 }

@@ -6,78 +6,95 @@ export async function GET(request: NextRequest) {
     const externalId = searchParams.get("externalId")
 
     if (!externalId) {
-      return NextResponse.json({ success: false, error: "External ID is required" }, { status: 400 })
+      return NextResponse.json(
+        {
+          success: false,
+          error: "External ID não fornecido",
+        },
+        { status: 400 },
+      )
     }
 
-    console.log("🔍 Consultando status SuperPayBR para:", externalId)
+    console.log("=== CONSULTANDO STATUS SUPERPAYBR ===")
+    console.log("External ID:", externalId)
 
-    // Buscar no Supabase (dados do webhook)
-    try {
-      const { createClient } = await import("@supabase/supabase-js")
-      const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+    // Primeiro, fazer autenticação
+    const authResponse = await fetch(`${request.nextUrl.origin}/api/superpaybr/auth`)
+    const authResult = await authResponse.json()
 
-      const { data, error } = await supabase
-        .from("payment_webhooks")
-        .select("*")
-        .eq("external_id", externalId)
-        .order("received_at", { ascending: false })
-        .limit(1)
-        .single()
+    if (!authResult.success) {
+      throw new Error("Falha na autenticação SuperPayBR")
+    }
 
-      if (error && error.code !== "PGRST116") {
-        console.error("❌ Erro ao consultar Supabase SuperPayBR:", error)
-        throw error
-      }
+    const accessToken = authResult.data.access_token
 
-      if (data) {
-        console.log("✅ Status SuperPayBR encontrado no webhook:", data)
+    // Consultar fatura por ID (usando o endpoint de listagem)
+    const statusResponse = await fetch(`https://api.superpaybr.com/invoices?id=${externalId}`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+    })
 
-        const paymentStatus = {
-          isPaid: data.is_paid,
-          isDenied: data.is_denied,
-          isRefunded: data.is_refunded,
-          isExpired: data.is_expired,
-          isCanceled: data.is_canceled,
-          statusCode: data.status_code,
-          statusName: data.status_name,
-          amount: data.amount,
-          paymentDate: data.payment_date,
-        }
+    console.log("📥 Resposta Status SuperPayBR:", {
+      status: statusResponse.status,
+      statusText: statusResponse.statusText,
+      ok: statusResponse.ok,
+    })
+
+    if (statusResponse.ok) {
+      const statusData = await statusResponse.json()
+      console.log("✅ Status SuperPayBR obtido com sucesso!")
+
+      // Mapear status
+      const invoice = statusData.invoices?.[0]
+      if (invoice) {
+        const isPaid = invoice.status.code === 5
+        const isDenied = invoice.status.code === 12
+        const isExpired = invoice.status.code === 15
 
         return NextResponse.json({
           success: true,
-          found: true,
-          data: paymentStatus,
-          source: "webhook",
-          receivedAt: data.received_at,
+          data: {
+            external_id: externalId,
+            status_code: invoice.status.code,
+            status_title: invoice.status.title,
+            is_paid: isPaid,
+            is_denied: isDenied,
+            is_expired: isExpired,
+            amount: invoice.prices.total,
+            payment_date: invoice.payment.date,
+          },
+          raw_response: statusData,
         })
       } else {
-        console.log("⏳ Nenhum webhook SuperPayBR recebido ainda para:", externalId)
-
-        return NextResponse.json({
-          success: true,
-          found: false,
-          message: "No webhook received yet",
-          externalId,
-        })
+        return NextResponse.json(
+          {
+            success: false,
+            error: "Fatura não encontrada",
+          },
+          { status: 404 },
+        )
       }
-    } catch (dbError) {
-      console.error("❌ Erro na consulta ao banco SuperPayBR:", dbError)
+    } else {
+      const errorText = await statusResponse.text()
+      console.log("❌ Erro ao consultar status SuperPayBR:", statusResponse.status, errorText)
 
-      return NextResponse.json({
-        success: false,
-        error: "Database error",
-        message: "Unable to check payment status",
-      })
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Erro SuperPayBR: ${statusResponse.status} - ${errorText}`,
+        },
+        { status: statusResponse.status },
+      )
     }
   } catch (error) {
-    console.error("❌ Erro geral na consulta de status SuperPayBR:", error)
-
+    console.log("❌ Erro ao consultar status SuperPayBR:", error)
     return NextResponse.json(
       {
         success: false,
-        error: "Internal server error",
-        message: error instanceof Error ? error.message : "Unknown error",
+        error: "Erro interno ao consultar status",
       },
       { status: 500 },
     )
