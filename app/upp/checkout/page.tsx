@@ -112,9 +112,9 @@ export default function ActivationCheckoutPage() {
       localStorage.setItem("activationAmount", "25.00")
       localStorage.setItem("activationDate", data.paymentDate || new Date().toISOString())
 
-      // Redirecionar após 3 segundos
+      // Redirecionar para /upp10 após 3 segundos
       setTimeout(() => {
-        window.location.href = "/upp/success"
+        window.location.href = "/upp10"
       }, 3000)
     },
     onPaymentDenied: (data) => {
