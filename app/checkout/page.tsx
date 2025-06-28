@@ -86,12 +86,28 @@ export default function CheckoutPage() {
 
       console.log("🔄 Criando fatura PIX...")
       console.log("Parâmetros:", { amount: Number.parseFloat(amount), shipping, method })
-      console.log("Valor formatado:", `R$ ${Number.parseFloat(amount).toFixed(2)}`)
+
+      // Carregar dados do usuário do localStorage
+      const cpfData = JSON.parse(localStorage.getItem("cpfConsultaData") || "{}")
+      const userEmail = localStorage.getItem("userEmail") || ""
+      const userWhatsApp = localStorage.getItem("userWhatsApp") || ""
+      const deliveryAddress = JSON.parse(localStorage.getItem("deliveryAddress") || "{}")
+
+      console.log("📋 Dados do usuário:", {
+        nome: cpfData.nome,
+        email: userEmail,
+        whatsapp: userWhatsApp,
+        endereco: deliveryAddress,
+      })
 
       const response = await fetch("/api/tryplopay/create-invoice", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "x-cpf-data": JSON.stringify(cpfData),
+          "x-user-email": userEmail,
+          "x-user-whatsapp": userWhatsApp,
+          "x-delivery-address": JSON.stringify(deliveryAddress),
         },
         body: JSON.stringify({
           amount: Number.parseFloat(amount),
@@ -106,6 +122,7 @@ export default function CheckoutPage() {
         setInvoice(data.data)
         localStorage.setItem("tryploPayInvoice", JSON.stringify(data.data))
         console.log(`✅ Fatura criada: ${data.data.type} - Valor: R$ ${(data.data.valores.bruto / 100).toFixed(2)}`)
+        console.log(`👤 Cliente: ${cpfData.nome || "N/A"}`)
       } else {
         throw new Error(data.error || "Erro ao criar fatura")
       }
