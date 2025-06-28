@@ -125,10 +125,9 @@ export default function FormSuccessPage() {
             </div>
           </div>
 
-          {/* Status da consulta */}
+          {/* Status da consulta - REMOVIDA A PARTE "Iniciando cadastro de..." */}
           <div className="border border-green-200 bg-green-50 rounded-md p-4 mb-6">
-            <p className="text-green-700 font-medium text-center mb-2">Dados cadastrados com sucesso!</p>
-            <p className="text-sm text-green-600 text-center">Iniciando cadastro de {cpfData.nome}</p>
+            <p className="text-green-700 font-medium text-center">Dados cadastrados com sucesso!</p>
           </div>
 
           {/* Continue Button */}

@@ -2,28 +2,30 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { Copy, CheckCircle, Clock, RefreshCw } from "lucide-react"
-import Image from "next/image"
+import { Copy, RefreshCw, Clock, CheckCircle } from "lucide-react"
 
 export default function CheckoutPage() {
+  const router = useRouter()
   const [timeLeft, setTimeLeft] = useState(120) // 2 minutos em segundos
   const [pixCode, setPixCode] = useState("")
   const [qrCodeUrl, setQrCodeUrl] = useState("")
+  const [amount, setAmount] = useState("0,00")
   const [copied, setCopied] = useState(false)
   const [checking, setChecking] = useState(false)
   const [paymentCompleted, setPaymentCompleted] = useState(false)
-  const [amount, setAmount] = useState("19.90")
-  const router = useRouter()
 
   useEffect(() => {
-    // Recupera o método de entrega selecionado
+    // Carregar valor do método de entrega selecionado
     const selectedMethod = localStorage.getItem("selectedShippingMethod")
-    if (selectedMethod) {
-      const method = JSON.parse(selectedMethod)
-      setAmount(method.price)
+    const selectedPrice = localStorage.getItem("selectedShippingPrice")
+
+    if (selectedPrice) {
+      setAmount(selectedPrice)
+    } else {
+      setAmount("9,90") // Valor padrão
     }
 
-    // Gera código PIX simulado
+    // Gerar código PIX simulado
     const generatePixCode = () => {
       const randomCode = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15)
       return `00020126580014BR.GOV.BCB.PIX0136${randomCode}5204000053039865802BR5925SHEIN BRASIL LTDA6009SAO PAULO62070503***6304${Math.random().toString(36).substring(2, 6).toUpperCase()}`
@@ -32,18 +34,16 @@ export default function CheckoutPage() {
     const code = generatePixCode()
     setPixCode(code)
 
-    // Gera QR Code usando QuickChart
+    // Gerar QR Code usando QuickChart
     const qrUrl = `https://quickchart.io/qr?text=${encodeURIComponent(code)}&size=200`
     setQrCodeUrl(qrUrl)
-  }, [])
 
-  useEffect(() => {
     // Timer countdown
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
         if (prev <= 1) {
           clearInterval(timer)
-          // Simula pagamento aprovado após o tempo
+          // Simular pagamento aprovado após 2 minutos
           setPaymentCompleted(true)
           setTimeout(() => {
             router.push("/success")
@@ -54,29 +54,19 @@ export default function CheckoutPage() {
       })
     }, 1000)
 
-    return () => clearInterval(timer)
-  }, [router])
-
-  useEffect(() => {
-    // Verificação automática de pagamento (simulada)
+    // Verificação periódica do pagamento (simulada)
     const checkPayment = setInterval(() => {
-      if (!paymentCompleted && timeLeft > 0) {
-        setChecking(true)
-        setTimeout(() => {
-          setChecking(false)
-          // 10% de chance de "aprovar" o pagamento a cada verificação
-          if (Math.random() < 0.1) {
-            setPaymentCompleted(true)
-            setTimeout(() => {
-              router.push("/success")
-            }, 2000)
-          }
-        }, 1000)
-      }
+      setChecking(true)
+      setTimeout(() => {
+        setChecking(false)
+      }, 1000)
     }, 10000) // Verifica a cada 10 segundos
 
-    return () => clearInterval(checkPayment)
-  }, [paymentCompleted, timeLeft, router])
+    return () => {
+      clearInterval(timer)
+      clearInterval(checkPayment)
+    }
+  }, [router])
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60)
@@ -84,7 +74,7 @@ export default function CheckoutPage() {
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
   }
 
-  const copyToClipboard = async () => {
+  const copyPixCode = async () => {
     try {
       await navigator.clipboard.writeText(pixCode)
       setCopied(true)
@@ -96,84 +86,90 @@ export default function CheckoutPage() {
 
   if (paymentCompleted) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="bg-white rounded-lg shadow-lg p-8 text-center max-w-md mx-4">
-          <CheckCircle className="w-16 h-16 text-green-500 mx-auto mb-4" />
-          <h1 className="text-2xl font-bold text-gray-800 mb-2">Pagamento Aprovado!</h1>
-          <p className="text-gray-600">Redirecionando...</p>
+      <main className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="max-w-md mx-auto p-6">
+          <div className="bg-white rounded-lg shadow-md p-6 text-center">
+            <CheckCircle className="w-16 h-16 text-green-500 mx-auto mb-4" />
+            <h1 className="text-xl font-bold text-green-600 mb-2">Pagamento Aprovado!</h1>
+            <p className="text-gray-600 mb-4">Redirecionando...</p>
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-500 mx-auto"></div>
+          </div>
         </div>
-      </div>
+      </main>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="max-w-md mx-auto p-6">
-        <div className="bg-white rounded-lg shadow-md p-6">
-          {/* Header */}
-          <div className="text-center mb-6">
-            <div className="flex items-center justify-center space-x-2 mb-2">
-              <Clock className="w-5 h-5 text-orange-500" />
-              <span className="text-lg font-bold text-orange-500">{formatTime(timeLeft)}</span>
-              {checking && <RefreshCw className="w-4 h-4 animate-spin text-blue-500" />}
-            </div>
-            <h1 className="text-xl font-bold text-gray-800">Finalize seu pagamento</h1>
-            <p className="text-gray-600 text-sm">Escaneie o QR Code ou copie o código PIX</p>
-          </div>
-
-          {/* Valor */}
-          <div className="text-center mb-6">
-            <p className="text-sm text-gray-600">Valor a pagar</p>
-            <p className="text-3xl font-bold text-green-600">R$ {amount}</p>
-          </div>
-
-          {/* QR Code */}
-          <div className="flex justify-center mb-6">
-            <div className="bg-white p-4 rounded-lg border-2 border-gray-200">
-              {qrCodeUrl && (
-                <Image
-                  src={qrCodeUrl || "/placeholder.svg"}
-                  alt="QR Code PIX"
-                  width={200}
-                  height={200}
-                  className="rounded"
-                />
-              )}
-            </div>
-          </div>
-
-          {/* Código PIX */}
-          <div className="mb-6">
-            <p className="text-sm font-medium text-gray-700 mb-2">Código PIX:</p>
-            <div className="bg-gray-100 p-3 rounded-lg border">
-              <p className="text-xs text-gray-600 break-all font-mono">{pixCode}</p>
-            </div>
-            <button
-              onClick={copyToClipboard}
-              className="w-full mt-3 bg-blue-600 text-white py-2 px-4 rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center justify-center space-x-2"
-            >
-              <Copy className="w-4 h-4" />
-              <span>{copied ? "Copiado!" : "Copiar código PIX"}</span>
-            </button>
-          </div>
-
-          {/* Instruções */}
-          <div className="bg-blue-50 p-4 rounded-lg">
-            <h3 className="font-medium text-blue-800 mb-2">Como pagar:</h3>
-            <ol className="text-sm text-blue-700 space-y-1">
-              <li>1. Abra o app do seu banco</li>
-              <li>2. Escolha a opção PIX</li>
-              <li>3. Escaneie o QR Code ou cole o código</li>
-              <li>4. Confirme o pagamento</li>
-            </ol>
-          </div>
-
-          {/* Status */}
-          <div className="mt-6 text-center">
-            <p className="text-sm text-gray-500">Aguardando confirmação do pagamento...</p>
+    <main className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <header className="bg-white border-b border-gray-200 px-4 py-4">
+        <div className="flex items-center justify-between">
+          <h1 className="text-lg font-semibold">Pagamento PIX</h1>
+          <div className="flex items-center justify-center space-x-2">
+            {checking && <RefreshCw className="w-4 h-4 animate-spin text-blue-500" />}
           </div>
         </div>
+      </header>
+
+      <div className="max-w-md mx-auto p-6">
+        {/* Timer */}
+        <div className="bg-white rounded-lg shadow-md p-4 mb-6">
+          <div className="flex items-center justify-center space-x-2 mb-2">
+            <Clock className="w-5 h-5 text-orange-500" />
+            <span className="text-lg font-bold text-orange-500">{formatTime(timeLeft)}</span>
+          </div>
+          <p className="text-sm text-gray-600 text-center">Tempo restante para pagamento</p>
+        </div>
+
+        {/* Amount */}
+        <div className="bg-white rounded-lg shadow-md p-6 mb-6 text-center">
+          <p className="text-sm text-gray-600 mb-2">Valor a pagar</p>
+          <p className="text-3xl font-bold text-gray-800">R$ {amount}</p>
+        </div>
+
+        {/* QR Code */}
+        <div className="bg-white rounded-lg shadow-md p-6 mb-6">
+          <h2 className="text-lg font-semibold mb-4 text-center">Escaneie o QR Code</h2>
+          <div className="flex justify-center mb-4">
+            {qrCodeUrl && (
+              <img
+                src={qrCodeUrl || "/placeholder.svg"}
+                alt="QR Code PIX"
+                className="w-48 h-48 border border-gray-200 rounded-lg"
+              />
+            )}
+          </div>
+          <p className="text-sm text-gray-600 text-center">Abra o app do seu banco e escaneie o código</p>
+        </div>
+
+        {/* PIX Code */}
+        <div className="bg-white rounded-lg shadow-md p-6 mb-6">
+          <h2 className="text-lg font-semibold mb-4">Código PIX</h2>
+          <div className="bg-gray-50 rounded-lg p-3 mb-4">
+            <p className="text-xs font-mono text-gray-700 break-all leading-relaxed">{pixCode}</p>
+          </div>
+          <button
+            onClick={copyPixCode}
+            className={`w-full flex items-center justify-center space-x-2 py-3 px-4 rounded-lg font-medium transition-colors ${
+              copied ? "bg-green-500 text-white" : "bg-blue-500 text-white hover:bg-blue-600"
+            }`}
+          >
+            <Copy className="w-4 h-4" />
+            <span>{copied ? "Código Copiado!" : "Copiar Código PIX"}</span>
+          </button>
+        </div>
+
+        {/* Instructions */}
+        <div className="bg-blue-50 rounded-lg p-4">
+          <h3 className="font-semibold text-blue-800 mb-2">Como pagar:</h3>
+          <ol className="text-sm text-blue-700 space-y-1">
+            <li>1. Abra o app do seu banco</li>
+            <li>2. Escolha a opção PIX</li>
+            <li>3. Escaneie o QR Code ou cole o código</li>
+            <li>4. Confirme o pagamento</li>
+          </ol>
+        </div>
       </div>
-    </div>
+    </main>
   )
 }

