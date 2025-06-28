@@ -88,7 +88,7 @@ export default function ManagerPage() {
 
           {/* Campo WhatsApp */}
           <div className="flex items-center justify-center mb-2">
-            <Image src="/whatsapp-icon.png" alt="WhatsApp" width={20} height={20} className="mr-3" />
+            <Image src="/placeholder.svg?height=20&width=20" alt="WhatsApp" width={20} height={20} className="mr-3" />
             <input
               type="tel"
               className="flex h-10 w-full px-3 py-2 border-0 border-b border-gray-300 rounded-none bg-transparent text-base font-sans focus:border-gray-400 focus:ring-0 flex-1 focus:outline-none"
