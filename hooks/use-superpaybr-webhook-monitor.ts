@@ -13,9 +13,12 @@ interface PaymentData {
   isCanceled: boolean
   isRefunded: boolean
   provider: string
+  statusCode?: number
+  statusName?: string
+  statusTitle?: string
 }
 
-interface PureWebhookMonitorOptions {
+interface SuperPayBRWebhookMonitorOptions {
   externalId: string | null
   onPaymentConfirmed?: (data: PaymentData) => void
   onPaymentDenied?: (data: PaymentData) => void
@@ -26,7 +29,7 @@ interface PureWebhookMonitorOptions {
   checkInterval?: number
 }
 
-export function usePureWebhookMonitor({
+export function useSuperPayBRWebhookMonitor({
   externalId,
   onPaymentConfirmed,
   onPaymentDenied,
@@ -35,19 +38,8 @@ export function usePureWebhookMonitor({
   onPaymentRefunded,
   enableDebug = false,
   checkInterval = 2000, // 2 segundos
-}: PureWebhookMonitorOptions) {
-  const [status, setStatus] = useState<{
-    isPaid: boolean
-    isDenied: boolean
-    isExpired: boolean
-    isCanceled: boolean
-    isRefunded: boolean
-    statusCode?: number
-    statusName?: string
-    amount?: number
-    paymentDate?: string
-  } | null>(null)
-
+}: SuperPayBRWebhookMonitorOptions) {
+  const [status, setStatus] = useState<PaymentData | null>(null)
   const [isWaitingForWebhook, setIsWaitingForWebhook] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [lastCheck, setLastCheck] = useState<Date | null>(null)
@@ -57,7 +49,7 @@ export function usePureWebhookMonitor({
 
   const log = (message: string, data?: any) => {
     if (enableDebug) {
-      console.log(`[PureWebhookMonitor] ${message}`, data || "")
+      console.log(`[SuperPayBRWebhookMonitor] ${message}`, data || "")
     }
   }
 
@@ -77,7 +69,7 @@ export function usePureWebhookMonitor({
 
       if (storedData) {
         const paymentData = JSON.parse(storedData)
-        log("💾 Dados encontrados no localStorage:", paymentData)
+        log("💾 Dados SuperPayBR encontrados no localStorage:", paymentData)
 
         // Marcar como processado
         processedPayments.current.add(externalId)
@@ -87,7 +79,8 @@ export function usePureWebhookMonitor({
 
       return null
     } catch (error) {
-      log("❌ Erro ao verificar localStorage:", error)
+      log("❌ Erro ao verificar localStorage SuperPayBR:", error)
+      setError("Erro ao verificar dados de pagamento")
       return null
     }
   }
@@ -102,44 +95,41 @@ export function usePureWebhookMonitor({
       status?.isCanceled ||
       status?.isRefunded
     ) {
-      log("🚫 Monitoramento não iniciado:", { externalId, status })
+      log("🚫 Monitoramento SuperPayBR não iniciado:", { externalId, status })
       return
     }
 
-    log("🔄 Iniciando monitoramento PURO para:", externalId)
+    log("🔄 Iniciando monitoramento SuperPayBR PURO para:", externalId)
     setIsWaitingForWebhook(true)
+    setError(null)
 
     const checkPaymentStatus = () => {
       const paymentData = checkLocalStorageForPayment()
       setLastCheck(new Date())
 
       if (paymentData) {
-        log("📋 Dados de pagamento encontrados:", paymentData)
+        log("📋 Dados de pagamento SuperPayBR encontrados:", paymentData)
         setStatus(paymentData)
+        setIsWaitingForWebhook(false)
 
         if (paymentData.isPaid) {
-          log("🎉 PAGAMENTO CONFIRMADO!")
-          setIsWaitingForWebhook(false)
+          log("🎉 PAGAMENTO SUPERPAYBR CONFIRMADO!")
           onPaymentConfirmed?.(paymentData)
         } else if (paymentData.isDenied) {
-          log("❌ PAGAMENTO NEGADO!")
-          setIsWaitingForWebhook(false)
+          log("❌ PAGAMENTO SUPERPAYBR NEGADO!")
           onPaymentDenied?.(paymentData)
         } else if (paymentData.isExpired) {
-          log("⏰ PAGAMENTO VENCIDO!")
-          setIsWaitingForWebhook(false)
+          log("⏰ PAGAMENTO SUPERPAYBR VENCIDO!")
           onPaymentExpired?.(paymentData)
         } else if (paymentData.isCanceled) {
-          log("🚫 PAGAMENTO CANCELADO!")
-          setIsWaitingForWebhook(false)
+          log("🚫 PAGAMENTO SUPERPAYBR CANCELADO!")
           onPaymentCanceled?.(paymentData)
         } else if (paymentData.isRefunded) {
-          log("💰 PAGAMENTO REEMBOLSADO!")
-          setIsWaitingForWebhook(false)
+          log("💰 PAGAMENTO SUPERPAYBR REEMBOLSADO!")
           onPaymentRefunded?.(paymentData)
         }
       } else {
-        log("⏳ Ainda aguardando webhook para:", externalId)
+        log("⏳ Ainda aguardando webhook SuperPayBR para:", externalId)
       }
     }
 
@@ -152,7 +142,7 @@ export function usePureWebhookMonitor({
     return () => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current)
-        log("🛑 Parando monitoramento PURO para:", externalId)
+        log("🛑 Parando monitoramento SuperPayBR PURO para:", externalId)
       }
     }
   }, [externalId, status, checkInterval])
