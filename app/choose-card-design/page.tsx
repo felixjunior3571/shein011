@@ -188,7 +188,7 @@ export default function ChooseCardDesignPage() {
           {/* Continue Button */}
           <div className="flex justify-end">
             <Link
-              href="/manager"
+              href="/delivery-method"
               className="bg-black text-white rounded-lg px-6 py-3 text-center font-medium hover:bg-black/90 transition-colors"
             >
               CONTINUAR

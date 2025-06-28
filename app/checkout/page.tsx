@@ -202,6 +202,18 @@ export default function CheckoutPage() {
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
   }
 
+  const getStatusColor = () => {
+    if (invoice?.type === "real") return "text-green-600"
+    if (invoice?.type === "simulated") return "text-yellow-600"
+    return "text-red-600"
+  }
+
+  const getStatusText = () => {
+    if (invoice?.type === "real") return "PIX Real"
+    if (invoice?.type === "simulated") return "PIX Simulado"
+    return "PIX Emergência"
+  }
+
   if (loading) {
     return (
       <main className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -248,11 +260,10 @@ export default function CheckoutPage() {
           <div className="text-center mb-6">
             <Image src="/shein-card-logo-new.png" alt="SHEIN Card" width={100} height={60} className="mx-auto mb-4" />
             <h1 className="text-2xl font-bold mb-2">Pagamento PIX</h1>
-            {checking && (
-              <div className="flex items-center justify-center">
-                <RefreshCw className="w-4 h-4 animate-spin text-blue-500" />
-              </div>
-            )}
+            <div className="flex items-center justify-center space-x-2">
+              <span className={`text-sm font-medium ${getStatusColor()}`}>{getStatusText()}</span>
+              {checking && <RefreshCw className="w-4 h-4 animate-spin text-blue-500" />}
+            </div>
           </div>
 
           {/* Timer */}
