@@ -18,8 +18,8 @@ export default function ActivateAccountPage() {
   }, [])
 
   const handleActivateAccount = () => {
-    // Redirecionar para página de ativação ou processo de depósito
-    window.location.href = "https://app.sheincard.com/activate" // URL fictícia
+    // Redirecionar para página de checkout de ativação
+    window.location.href = "/upp/checkout"
   }
 
   return (
