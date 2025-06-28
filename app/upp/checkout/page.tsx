@@ -195,7 +195,7 @@ export default function ActivationCheckoutPage() {
         whatsapp: userWhatsApp,
       })
 
-      const response = await fetch("/api/tryplopay/create-invoice", {
+      const response = await fetch("/api/tryplopay/create-activation-invoice", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -204,27 +204,39 @@ export default function ActivationCheckoutPage() {
           "x-user-whatsapp": userWhatsApp,
           "x-delivery-address": JSON.stringify(deliveryAddress),
         },
-        body: JSON.stringify({
-          amount: 25.0, // Valor fixo para ativação
-          shipping: "activation",
-          method: "ATIVAÇÃO",
-        }),
       })
 
-      const data = await response.json()
+      console.log("📥 Status da resposta:", response.status)
 
-      if (data.success) {
-        setInvoice(data.data)
-        localStorage.setItem("activationInvoice", JSON.stringify(data.data))
-        localStorage.setItem("activationExternalId", data.data.external_id)
-        console.log(`✅ Fatura de ativação criada: ${data.data.type} - Valor: R$ 25,00`)
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error("❌ Erro HTTP:", response.status, errorText)
+        throw new Error(`Erro HTTP ${response.status}: ${errorText}`)
+      }
+
+      const data = await response.json()
+      console.log("📋 Resposta da API de ativação:", data)
+
+      if (data.success && data.data) {
+        // Garantir que external_id está presente
+        const invoiceData = {
+          ...data.data,
+          external_id: data.data.external_id || data.data.id || `ACT_${Date.now()}`,
+        }
+
+        setInvoice(invoiceData)
+        localStorage.setItem("activationInvoice", JSON.stringify(invoiceData))
+
+        console.log(`✅ Fatura de ativação criada: ${invoiceData.type} - Valor: R$ 25,00`)
+        console.log(`🆔 External ID: ${invoiceData.external_id}`)
         console.log(`👤 Cliente: ${cpfData.nome || "N/A"}`)
       } else {
+        console.error("❌ Resposta inválida da API:", data)
         throw new Error(data.error || "Erro ao criar fatura de ativação")
       }
     } catch (error) {
-      console.log("❌ Erro ao criar fatura de ativação:", error)
-      setError("Erro ao gerar PIX de ativação. Tente novamente.")
+      console.error("❌ Erro ao criar fatura de ativação:", error)
+      setError(`Erro ao gerar PIX de ativação: ${error.message}`)
 
       // Fallback de emergência para ativação
       createEmergencyActivationPix()
@@ -236,11 +248,14 @@ export default function ActivationCheckoutPage() {
   const createEmergencyActivationPix = () => {
     console.log("🚨 Criando PIX de emergência para ativação...")
 
-    const emergencyPix = `00020101021226580014br.gov.bcb.pix2536emergency.pix.com/qr/v2/ACTIVATION${Date.now()}52040000530398654062500580BR5909SHEIN5011SAO PAULO62070503***6304ACTV`
+    const timestamp = Date.now()
+    const emergencyExternalId = `SHEIN_ACT_EMG_${timestamp}`
+    const emergencyPix = `00020101021226580014br.gov.bcb.pix2536emergency.pix.com/qr/v2/ACT${timestamp}52040000530398654062500580BR5909SHEIN5011SAO PAULO62070503***6304ACTV`
 
     const emergencyInvoice: InvoiceData = {
-      id: `ACT_${Date.now()}`,
-      invoice_id: `ACTIVATION_${Date.now()}`,
+      id: `ACT_${timestamp}`,
+      invoice_id: `ACTIVATION_${timestamp}`,
+      external_id: emergencyExternalId, // Garantir que está presente
       pix: {
         payload: emergencyPix,
         image: "/placeholder.svg?height=250&width=250",
@@ -263,7 +278,8 @@ export default function ActivationCheckoutPage() {
 
     setInvoice(emergencyInvoice)
     setError(null)
-    console.log("✅ PIX de emergência para ativação criado - Valor: R$ 25,00")
+    console.log("✅ PIX de emergência para ativação criado")
+    console.log("🆔 External ID de emergência:", emergencyExternalId)
   }
 
   const checkPayment = async () => {
