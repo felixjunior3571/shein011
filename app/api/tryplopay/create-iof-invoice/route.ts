@@ -1,327 +1,161 @@
 import { type NextRequest, NextResponse } from "next/server"
 
-// Função para validar CPF
-function validateCPF(cpf: string): boolean {
-  cpf = cpf.replace(/[^\d]/g, "")
-  if (cpf.length !== 11 || /^(\d)\1{10}$/.test(cpf)) return false
-
-  let sum = 0
-  for (let i = 0; i < 9; i++) {
-    sum += Number.parseInt(cpf.charAt(i)) * (10 - i)
-  }
-  let remainder = (sum * 10) % 11
-  if (remainder === 10 || remainder === 11) remainder = 0
-  if (remainder !== Number.parseInt(cpf.charAt(9))) return false
-
-  sum = 0
-  for (let i = 0; i < 10; i++) {
-    sum += Number.parseInt(cpf.charAt(i)) * (11 - i)
-  }
-  remainder = (sum * 10) % 11
-  if (remainder === 10 || remainder === 11) remainder = 0
-  return remainder === Number.parseInt(cpf.charAt(10))
-}
-
-// Função para gerar CPF válido
-function generateValidCPF(): string {
-  const cpf = Array.from({ length: 9 }, () => Math.floor(Math.random() * 10))
-
-  let sum = 0
-  for (let i = 0; i < 9; i++) {
-    sum += cpf[i] * (10 - i)
-  }
-  let remainder = (sum * 10) % 11
-  if (remainder === 10 || remainder === 11) remainder = 0
-  cpf.push(remainder)
-
-  sum = 0
-  for (let i = 0; i < 10; i++) {
-    sum += cpf[i] * (11 - i)
-  }
-  remainder = (sum * 10) % 11
-  if (remainder === 10 || remainder === 11) remainder = 0
-  cpf.push(remainder)
-
-  return cpf.join("")
-}
-
-// Função para obter IP do cliente
-function getClientIP(request: NextRequest): string {
-  const forwarded = request.headers.get("x-forwarded-for")
-  const realIP = request.headers.get("x-real-ip")
-
-  if (forwarded) {
-    return forwarded.split(",")[0].trim()
-  }
-  if (realIP) {
-    return realIP
-  }
-  return "192.168.1.1" // Fallback
-}
-
 export async function POST(request: NextRequest) {
   try {
-    console.log("=== CRIANDO FATURA IOF PIX REAL ===")
+    console.log("🔄 [IOF API] Iniciando criação de fatura IOF...")
 
-    const body = await request.json()
-    const { amount, type } = body
+    // Verificar variáveis de ambiente
+    const apiUrl = process.env.TRYPLOPAY_API_URL
+    const token = process.env.TRYPLOPAY_TOKEN
+    const secretKey = process.env.TRYPLOPAY_SECRET_KEY
 
-    console.log("Dados IOF recebidos:", { amount, type })
-
-    // Validar dados obrigatórios
-    if (!amount) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Valor IOF não fornecido",
-        },
-        { status: 400 },
-      )
-    }
-
-    // Obter access token - FORÇAR MODO REAL
-    console.log("🔐 Obtendo token de autenticação REAL...")
-    const authResponse = await fetch(`${request.nextUrl.origin}/api/tryplopay/auth`)
-    const authData = await authResponse.json()
-
-    console.log("📋 Dados de autenticação recebidos:", {
-      success: authData.success,
-      fallback: authData.fallback,
-      working: authData.data?.working,
-      hasToken: !!authData.data?.access_token,
+    console.log("🔧 [IOF API] Verificando configurações:", {
+      apiUrl: apiUrl ? "✅ Configurado" : "❌ Não configurado",
+      token: token ? "✅ Configurado" : "❌ Não configurado",
+      secretKey: secretKey ? "✅ Configurado" : "❌ Não configurado",
     })
 
-    if (!authData.success) {
-      console.log("❌ Falha na autenticação, usando fallback")
-      throw new Error("Falha na autenticação")
+    if (!apiUrl || !token || !secretKey) {
+      console.log("❌ [IOF API] Variáveis de ambiente não configuradas, usando fallback")
+      return createSimulatedIOFInvoice(request)
     }
 
-    const { access_token, account } = authData.data
+    // Obter dados do request
+    const body = await request.json()
+    const { amount } = body
 
-    // VERIFICAR SE ESTÁ EM MODO REAL
-    if (authData.fallback || authData.data.working === "SIMULATION") {
-      console.log("⚠️ API em modo simulação, tentando forçar modo real...")
-      // Não usar throw aqui, continuar tentando criar fatura real
-    } else {
-      console.log("✅ API em modo REAL, prosseguindo...")
-    }
+    // Obter dados dos headers
+    const cpfData = JSON.parse(request.headers.get("x-cpf-data") || "{}")
+    const userEmail = request.headers.get("x-user-email") || ""
+    const userWhatsApp = request.headers.get("x-user-whatsapp") || ""
+    const deliveryAddress = JSON.parse(request.headers.get("x-delivery-address") || "{}")
 
-    // Carregar dados reais do usuário coletados durante o fluxo
-    const getUserData = () => {
-      try {
-        // Dados do CPF (nome, CPF, data nascimento, nome da mãe)
-        const cpfDataStr = request.headers.get("x-cpf-data") || "{}"
-        const cpfData = JSON.parse(cpfDataStr)
-
-        // Email do formulário
-        const userEmail = request.headers.get("x-user-email") || ""
-
-        // WhatsApp da página manager
-        const userWhatsApp = request.headers.get("x-user-whatsapp") || ""
-
-        // Endereço da página delivery-address
-        const deliveryAddressStr = request.headers.get("x-delivery-address") || "{}"
-        const deliveryAddress = JSON.parse(deliveryAddressStr)
-
-        return {
-          nome: cpfData.nome || "Cliente SHEIN",
-          cpf: cpfData.cpf || "12345678901",
-          email: userEmail || "cliente@shein.com.br",
-          telefone: userWhatsApp || "11999999999",
-          dataNascimento: cpfData.dataNascimento || "",
-          nomeMae: cpfData.nomeMae || "",
-          endereco: {
-            rua: deliveryAddress.street || "Rua Exemplo",
-            numero: deliveryAddress.number || "123",
-            complemento: deliveryAddress.complement || "",
-            bairro: deliveryAddress.neighborhood || "Centro",
-            cidade: deliveryAddress.city || "São Paulo",
-            estado: deliveryAddress.state || "SP",
-            cep: deliveryAddress.zipCode?.replace(/\D/g, "") || "01000000",
-          },
-        }
-      } catch (error) {
-        console.log("⚠️ Erro ao carregar dados do usuário para IOF, usando fallback:", error)
-        return {
-          nome: "Cliente SHEIN",
-          cpf: "12345678901",
-          email: "cliente@shein.com.br",
-          telefone: "11999999999",
-          endereco: {
-            rua: "Rua Exemplo",
-            numero: "123",
-            bairro: "Centro",
-            cidade: "São Paulo",
-            estado: "SP",
-            cep: "01000000",
-          },
-        }
-      }
-    }
-
-    const userData = getUserData()
-
-    console.log("📋 Dados do lead carregados para IOF:")
-    console.log("Nome:", userData.nome)
-    console.log("CPF:", userData.cpf)
-    console.log("Email:", userData.email)
-    console.log("Telefone:", userData.telefone)
-    console.log("Endereço:", userData.endereco)
-
-    // Validar e corrigir CPF se necessário
-    let document = userData.cpf?.replace(/[^\d]/g, "") || ""
-    if (!validateCPF(document)) {
-      console.log("⚠️ CPF inválido, gerando CPF válido para IOF real")
-      console.log("CPF original:", userData.cpf)
-      document = generateValidCPF()
-      console.log("CPF gerado:", document)
-    } else {
-      console.log("✅ CPF válido:", document)
-    }
-
-    // Usar o valor exato do IOF
-    const totalAmount = Number.parseFloat(amount.toString())
-
-    const productTitle = "Imposto IOF - Cartão Digital SHEIN"
+    console.log("📋 [IOF API] Dados recebidos:", {
+      amount,
+      cliente: cpfData.nome,
+      email: userEmail,
+      whatsapp: userWhatsApp,
+    })
 
     // Gerar external_id único para IOF
     const externalId = `SHEIN_IOF_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
 
-    // Preparar payload oficial da TryploPay para IOF
-    const invoicePayload = {
-      client: {
-        name: userData.nome,
-        document: document,
-        email: userData.email,
-        phone: userData.telefone?.replace(/[^\d]/g, "") || "11999999999",
-        ip: getClientIP(request),
-        address: {
-          street: userData.endereco.rua,
-          number: userData.endereco.numero,
-          district: userData.endereco.bairro,
-          city: userData.endereco.cidade,
-          state: userData.endereco.estado,
-          zipcode: userData.endereco.cep,
-          country: "BRA",
-        },
+    // Preparar payload para TryploPay
+    const tryploPayload = {
+      amount: Math.round(amount * 100), // Converter para centavos
+      external_id: externalId,
+      description: `IOF - Imposto sobre Operações Financeiras - Cartão SHEIN`,
+      customer: {
+        name: cpfData.nome || "Cliente SHEIN",
+        email: userEmail || "cliente@shein.com",
+        phone: userWhatsApp || "",
+        document: cpfData.cpf?.replace(/\D/g, "") || "",
       },
-      payment: {
-        product_type: 2, // 2 para serviços (IOF)
-        id: externalId,
-        type: "3", // PIX
-        due_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0],
-        referer: externalId,
-        installments: "1",
-        order_url: `${request.nextUrl.origin}/upp10/checkout`,
-        store_url: request.nextUrl.origin,
-        webhook: `${request.nextUrl.origin}/api/tryplopay/webhook`,
-        discount: "0.00",
-        products: [
-          {
-            id: "iof",
-            image: `${request.nextUrl.origin}/shein-card-logo-new.png`,
-            title: productTitle,
-            qnt: 1,
-            discount: "0.00",
-            amount: totalAmount.toFixed(2),
-          },
-        ],
-      },
-      shipping: {
-        amount: 0, // Já incluído no produto
-      },
+      notification_url: `${process.env.NEXT_PUBLIC_SITE_URL}/api/tryplopay/webhook`,
+      return_url: `${process.env.NEXT_PUBLIC_SITE_URL}/upp/success`,
+      expires_in: 600, // 10 minutos
     }
 
-    console.log("📤 Payload para TryploPay IOF:", JSON.stringify(invoicePayload, null, 2))
+    console.log("📤 [IOF API] Enviando para TryploPay:", {
+      url: `${apiUrl}/invoices`,
+      external_id: externalId,
+      amount: amount,
+      customer: tryploPayload.customer.name,
+    })
 
-    // SEMPRE TENTAR CRIAR FATURA REAL PRIMEIRO
-    console.log("🔄 Tentando criar fatura IOF REAL na TryploPay...")
-
-    const apiUrl = process.env.TRYPLOPAY_API_URL || "https://api.tryplopay.com"
-    console.log("🌐 URL da API:", apiUrl)
-    console.log("🔑 Token presente:", !!access_token)
-
+    // Fazer requisição para TryploPay
     const response = await fetch(`${apiUrl}/invoices`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${access_token}`,
+        Authorization: `Bearer ${token}`,
+        "X-Secret-Key": secretKey,
       },
-      body: JSON.stringify(invoicePayload),
+      body: JSON.stringify(tryploPayload),
     })
 
-    console.log("📡 Resposta da API TryploPay:", {
+    const responseData = await response.json()
+
+    console.log("📥 [IOF API] Resposta TryploPay:", {
       status: response.status,
-      statusText: response.statusText,
-      ok: response.ok,
+      success: response.ok,
+      hasData: !!responseData,
     })
 
-    if (response.ok) {
-      const data = await response.json()
-      console.log("✅ Fatura IOF REAL criada com sucesso!")
-      console.log("📋 Dados da fatura:", data)
-
+    if (response.ok && responseData) {
+      // Processar resposta de sucesso
       const invoiceData = {
-        id: data.fatura.id,
-        invoice_id: data.fatura.invoice_id,
+        id: responseData.id || externalId,
+        invoice_id: responseData.invoice_id || responseData.id,
         external_id: externalId,
         pix: {
-          payload: data.fatura.pix.payload,
-          image: data.fatura.pix.image,
-          qr_code: `https://quickchart.io/qr?text=${encodeURIComponent(data.fatura.pix.payload)}`,
+          payload: responseData.pix?.payload || responseData.pix_code || "",
+          image: responseData.pix?.image || "",
+          qr_code:
+            responseData.pix?.qr_code ||
+            `https://quickchart.io/qr?text=${encodeURIComponent(responseData.pix?.payload || "")}`,
         },
-        status: data.fatura.status,
-        valores: data.fatura.valores,
-        vencimento: data.fatura.vencimento,
-        secure: data.fatura.secure,
-        type: "real",
+        status: {
+          code: responseData.status?.code || 1,
+          title: responseData.status?.title || "Aguardando Pagamento",
+          text: responseData.status?.text || "pending",
+        },
+        valores: {
+          bruto: responseData.amount || Math.round(amount * 100),
+          liquido: responseData.amount || Math.round(amount * 100),
+        },
+        vencimento: {
+          dia: responseData.expires_at || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0],
+        },
+        type: "real" as const,
       }
 
-      console.log("🎉 FATURA IOF REAL CRIADA - External ID:", externalId)
-      console.log("💰 Valor:", (data.fatura.valores.bruto / 100).toFixed(2))
+      console.log("✅ [IOF API] Fatura IOF REAL criada com sucesso!")
+      console.log(`💰 Valor: R$ ${amount.toFixed(2)}`)
+      console.log(`🆔 External ID: ${externalId}`)
+      console.log(`👤 Cliente: ${cpfData.nome}`)
 
       return NextResponse.json({
         success: true,
         data: invoiceData,
-        fallback: false,
+        type: "real",
+        message: "Fatura IOF criada com sucesso",
       })
     } else {
-      const errorText = await response.text()
-      console.log("❌ Erro na API TryploPay:", {
-        status: response.status,
-        statusText: response.statusText,
-        error: errorText,
-      })
-      throw new Error(`Erro na API IOF: ${response.status} - ${errorText}`)
+      // Erro na API, usar fallback
+      console.log("⚠️ [IOF API] Erro na API TryploPay, usando fallback:", responseData)
+      return createSimulatedIOFInvoice(request)
     }
   } catch (error) {
-    console.log("❌ Erro ao criar fatura IOF REAL, usando fallback:", error)
+    console.error("❌ [IOF API] Erro geral:", error)
+    return createSimulatedIOFInvoice(request)
+  }
+}
 
-    // Extrair dados da requisição para fallback
-    let body
-    try {
-      body = await request.json()
-    } catch {
-      body = { amount: "21.88" }
-    }
-
+async function createSimulatedIOFInvoice(request: NextRequest) {
+  try {
+    const body = await request.json()
     const { amount } = body
-    const totalAmount = Number.parseFloat(amount?.toString() || "21.88")
 
-    // Gerar external_id único para rastreamento IOF
-    const externalId = `SHEIN_IOF_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    // Obter dados dos headers
+    const cpfData = JSON.parse(request.headers.get("x-cpf-data") || "{}")
 
-    // Fallback para simulação IOF
-    const simulatedPixCode = `00020101021226580014br.gov.bcb.pix2536pix.iof.com/qr/v2/IOF${Date.now()}5204000053039865406${totalAmount.toFixed(2)}5802BR5909SHEIN IOF5011SAO PAULO62070503***6304IOFX`
+    console.log("🧪 [IOF API] Criando fatura IOF SIMULADA...")
+
+    const externalId = `SHEIN_IOF_SIM_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    const totalAmount = Number.parseFloat(amount.toString())
+
+    // Gerar PIX simulado
+    const simulatedPix = `00020101021226580014br.gov.bcb.pix2536simulated.iof.com/qr/v2/IOF${Date.now()}520400005303986540${totalAmount.toFixed(2)}5802BR5909SHEIN IOF5011SAO PAULO62070503***6304SIMS`
 
     const simulatedInvoice = {
       id: `IOF_SIM_${Date.now()}`,
       invoice_id: `IOF_SIMULATED_${Date.now()}`,
       external_id: externalId,
       pix: {
-        payload: simulatedPixCode,
-        image: `/placeholder.svg?height=250&width=250`,
-        qr_code: `https://quickchart.io/qr?text=${encodeURIComponent(simulatedPixCode)}`,
+        payload: simulatedPix,
+        image: "/placeholder.svg?height=250&width=250",
+        qr_code: `https://quickchart.io/qr?text=${encodeURIComponent(simulatedPix)}`,
       },
       status: {
         code: 1,
@@ -329,26 +163,32 @@ export async function POST(request: NextRequest) {
         text: "pending",
       },
       valores: {
-        bruto: Math.round(totalAmount * 100), // em centavos
+        bruto: Math.round(totalAmount * 100),
         liquido: Math.round(totalAmount * 100),
       },
       vencimento: {
         dia: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0],
       },
-      secure: {
-        id: `simulated-iof-${Date.now()}`,
-        url: `${request.nextUrl.origin}/upp10/checkout`,
-      },
-      type: "simulated",
+      type: "simulated" as const,
     }
 
-    console.log(`⚠️ Fatura IOF SIMULADA criada - External ID: ${externalId} - Valor: R$ ${totalAmount.toFixed(2)}`)
+    console.log("✅ [IOF API] Fatura IOF SIMULADA criada!")
+    console.log(`💰 Valor: R$ ${totalAmount.toFixed(2)}`)
+    console.log(`🆔 External ID: ${externalId}`)
+    console.log(`👤 Cliente: ${cpfData.nome}`)
 
     return NextResponse.json({
       success: true,
       data: simulatedInvoice,
+      type: "simulated",
       fallback: true,
-      error: error instanceof Error ? error.message : "Erro desconhecido",
+      message: "Fatura IOF simulada criada (fallback)",
+    })
+  } catch (error) {
+    console.error("❌ [IOF API] Erro ao criar fatura simulada:", error)
+    return NextResponse.json({
+      success: false,
+      error: "Erro ao criar fatura IOF",
     })
   }
 }

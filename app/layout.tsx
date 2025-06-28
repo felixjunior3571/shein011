@@ -30,40 +30,36 @@ export default function RootLayout({
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
 
-        {/* UTMify Script - Optimized */}
+        {/* UTMify Script - Configuração Oficial */}
+        <script
+          src="https://cdn.utmify.com.br/scripts/utms/latest.js"
+          data-utmify-prevent-xcod-sck="true"
+          data-utmify-prevent-subids="true"
+          async
+          defer
+        />
+
         <script
           dangerouslySetInnerHTML={{
             __html: `
-              (function() {
-                if (window.pixelId) {
-                  console.log('UTMify already initialized');
-                  return;
-                }
-                
-                try {
-                  window.pixelId = 'your-pixel-id';
-                  
-                  // Initialize UTMify with error handling
-                  if (typeof window !== 'undefined') {
-                    window.utmify = {
-                      track: function(event, data) {
-                        try {
-                          console.log('UTMify track:', event, data);
-                          // Your UTMify tracking logic here
-                        } catch (error) {
-                          console.warn('UTMify tracking error:', error);
-                        }
-                      }
-                    };
-                    
-                    console.log('UTMify initialized successfully');
-                  }
-                } catch (error) {
-                  console.warn('UTMify initialization error:', error);
-                }
-              })();
-            `,
+      window.pixelId = "6836abf356b3052677c77248";
+      var a = document.createElement("script");
+      a.setAttribute("async", "");
+      a.setAttribute("defer", "");
+      a.setAttribute("src", "https://cdn.utmify.com.br/scripts/pixel/pixel.js");
+      document.head.appendChild(a);
+    `,
           }}
+        />
+
+        {/* Script UTMify externo (opcional) */}
+        <script
+          src="https://cdn.utmify.com.br/scripts/utms/latest.js"
+          data-utmify-prevent-xcod-sck="true"
+          data-utmify-prevent-subids="true"
+          async
+          defer
+          onError={() => console.warn("Erro ao carregar script UTMify externo")}
         />
       </head>
       <body className={inter.className}>

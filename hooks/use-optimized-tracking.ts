@@ -1,192 +1,188 @@
 "use client"
 
-import { useEffect, useCallback, useRef } from "react"
+import { useCallback, useEffect, useRef } from "react"
 
-// Tipos para os eventos de rastreamento
-interface TrackingEvent {
-  event: string
-  properties: Record<string, any>
-  timestamp: number
-}
-
-interface UseOptimizedTrackingOptions {
+interface TrackingOptions {
   enableDebug?: boolean
   batchSize?: number
-  batchInterval?: number
+  flushInterval?: number
 }
 
-// Declaração global para o Utmify
-declare global {
-  interface Window {
-    pixelId?: string
-    utmify?: {
-      track: (event: string, data: Record<string, any>) => void
-    }
-    gtag?: (command: string, event: string, data: Record<string, any>) => void
-  }
+interface TrackingEvent {
+  event: string
+  timestamp: number
+  page?: string
+  [key: string]: any
 }
 
-export function useOptimizedTracking({
-  enableDebug = false,
-  batchSize = 5,
-  batchInterval = 2000,
-}: UseOptimizedTrackingOptions = {}) {
-  const eventQueueRef = useRef<TrackingEvent[]>([])
-  const batchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const isActiveRef = useRef<boolean>(true)
-  const sentEventsRef = useRef<Set<string>>(new Set())
+export function useOptimizedTracking(options: TrackingOptions = {}) {
+  const { enableDebug = false, batchSize = 10, flushInterval = 5000 } = options
 
-  // Monitor tab visibility to pause tracking when inactive
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      isActiveRef.current = !document.hidden
+  const eventQueue = useRef<TrackingEvent[]>([])
+  const flushTimer = useRef<NodeJS.Timeout | null>(null)
 
-      if (enableDebug) {
-        console.log(
-          `📊 Tracking ${document.hidden ? "paused" : "resumed"} - tab ${document.hidden ? "inactive" : "active"}`,
-        )
-      }
+  // Função para verificar se UTMify está disponível
+  const isUTMifyAvailable = useCallback(() => {
+    return typeof window !== "undefined" && window.utmify && typeof window.utmify.track === "function"
+  }, [])
 
-      // Flush queue when tab becomes active
-      if (!document.hidden && eventQueueRef.current.length > 0) {
-        flushEventQueue()
-      }
-    }
+  // Função para flush dos eventos em batch
+  const flushEvents = useCallback(() => {
+    if (eventQueue.current.length === 0) return
 
-    document.addEventListener("visibilitychange", handleVisibilityChange)
-    return () => document.removeEventListener("visibilitychange", handleVisibilityChange)
-  }, [enableDebug])
-
-  // Flush event queue
-  const flushEventQueue = useCallback(() => {
-    if (eventQueueRef.current.length === 0) return
-
-    const eventsToSend = [...eventQueueRef.current]
-    eventQueueRef.current = []
+    const events = [...eventQueue.current]
+    eventQueue.current = []
 
     if (enableDebug) {
-      console.log(`📊 Flushing ${eventsToSend.length} tracking events:`, eventsToSend)
+      console.log(`📊 Flushing ${events.length} tracking events:`, events)
     }
 
-    // Send events (in a real app, this would go to your analytics service)
-    eventsToSend.forEach((event) => {
-      if (enableDebug) {
-        console.log(`📊 Tracking: ${event.event}`, event.properties)
-      }
-    })
-
-    // Clear batch timeout
-    if (batchTimeoutRef.current) {
-      clearTimeout(batchTimeoutRef.current)
-      batchTimeoutRef.current = null
-    }
-  }, [enableDebug])
-
-  // Schedule batch flush
-  const scheduleBatchFlush = useCallback(() => {
-    if (batchTimeoutRef.current) return
-
-    batchTimeoutRef.current = setTimeout(() => {
-      if (isActiveRef.current) {
-        flushEventQueue()
-      }
-    }, batchInterval)
-  }, [batchInterval, flushEventQueue])
-
-  // Track event with batching and deduplication
-  const track = useCallback(
-    (event: string, properties: Record<string, any> = {}) => {
-      // Don't track if tab is inactive
-      if (!isActiveRef.current) {
-        if (enableDebug) {
-          console.log(`📊 Skipping tracking (tab inactive): ${event}`)
+    // Enviar eventos para UTMify
+    if (isUTMifyAvailable()) {
+      events.forEach((event) => {
+        try {
+          window.utmify.track(event.event, event)
+        } catch (error) {
+          console.warn("Erro ao enviar evento para UTMify:", error)
         }
-        return
-      }
-
-      // Create unique key for deduplication
-      const eventKey = `${event}_${JSON.stringify(properties)}_${Date.now()}`
-
-      // Check for recent duplicates (within 5 seconds)
-      const recentDuplicateKey = `${event}_${JSON.stringify(properties)}`
-      if (sentEventsRef.current.has(recentDuplicateKey)) {
-        if (enableDebug) {
-          console.log(`📊 Skipping duplicate event: ${event}`)
-        }
-        return
-      }
-
-      // Add to deduplication set with expiry
-      sentEventsRef.current.add(recentDuplicateKey)
-      setTimeout(() => {
-        sentEventsRef.current.delete(recentDuplicateKey)
-      }, 5000)
-
-      // Add to queue
-      eventQueueRef.current.push({
-        event,
-        properties: {
-          ...properties,
-          timestamp: Date.now(),
-          url: window.location.href,
-          user_agent: navigator.userAgent,
-        },
-        timestamp: Date.now(),
       })
+    }
 
-      if (enableDebug) {
-        console.log(`📊 Queued event: ${event} (queue size: ${eventQueueRef.current.length})`)
-      }
+    // Enviar para dataLayer
+    if (typeof window !== "undefined" && window.dataLayer) {
+      events.forEach((event) => {
+        try {
+          window.dataLayer.push({
+            event: event.event,
+            ...event,
+          })
+        } catch (error) {
+          console.warn("Erro ao enviar evento para dataLayer:", error)
+        }
+      })
+    }
+  }, [enableDebug, isUTMifyAvailable])
 
-      // Flush immediately if batch size reached
-      if (eventQueueRef.current.length >= batchSize) {
-        flushEventQueue()
+  // Função para adicionar evento à fila
+  const queueEvent = useCallback(
+    (event: TrackingEvent) => {
+      eventQueue.current.push(event)
+
+      // Flush imediato se atingir o tamanho do batch
+      if (eventQueue.current.length >= batchSize) {
+        flushEvents()
       } else {
-        scheduleBatchFlush()
+        // Agendar flush se não houver timer ativo
+        if (!flushTimer.current) {
+          flushTimer.current = setTimeout(() => {
+            flushEvents()
+            flushTimer.current = null
+          }, flushInterval)
+        }
       }
     },
-    [batchSize, enableDebug, flushEventQueue, scheduleBatchFlush],
+    [batchSize, flushInterval, flushEvents],
   )
 
-  // Track page view
+  // Função principal de tracking
+  const track = useCallback(
+    (event: string, data: Record<string, any> = {}) => {
+      try {
+        const trackingEvent: TrackingEvent = {
+          event,
+          timestamp: Date.now(),
+          ...data,
+        }
+
+        if (enableDebug) {
+          console.log("📈 Tracking event:", trackingEvent)
+        }
+
+        queueEvent(trackingEvent)
+      } catch (error) {
+        console.warn("Erro no tracking:", error)
+      }
+    },
+    [enableDebug, queueEvent],
+  )
+
+  // Função para tracking de pageview
   const trackPageView = useCallback(
-    (page: string, properties: Record<string, any> = {}) => {
+    (page: string) => {
       track("page_view", {
         page,
-        ...properties,
+        url: typeof window !== "undefined" ? window.location.href : "",
+        referrer: typeof document !== "undefined" ? document.referrer : "",
+        timestamp: Date.now(),
       })
     },
     [track],
   )
 
-  // Track conversion
+  // Função para tracking de conversão
   const trackConversion = useCallback(
-    (conversionType: string, value: number, properties: Record<string, any> = {}) => {
+    (conversionType: string, value?: number) => {
       track("conversion", {
         conversion_type: conversionType,
         value,
-        ...properties,
+        currency: "BRL",
+        timestamp: Date.now(),
       })
     },
     [track],
   )
 
-  // Cleanup on unmount
+  // Cleanup no unmount
   useEffect(() => {
     return () => {
-      // Flush remaining events on unmount
-      flushEventQueue()
+      if (flushTimer.current) {
+        clearTimeout(flushTimer.current)
+      }
+      // Flush final dos eventos pendentes
+      flushEvents()
+    }
+  }, [flushEvents])
 
-      if (batchTimeoutRef.current) {
-        clearTimeout(batchTimeoutRef.current)
+  // Flush eventos quando a página for fechada
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      flushEvents()
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        flushEvents()
       }
     }
-  }, [flushEventQueue])
+
+    if (typeof window !== "undefined") {
+      window.addEventListener("beforeunload", handleBeforeUnload)
+      document.addEventListener("visibilitychange", handleVisibilityChange)
+
+      return () => {
+        window.removeEventListener("beforeunload", handleBeforeUnload)
+        document.removeEventListener("visibilitychange", handleVisibilityChange)
+      }
+    }
+  }, [flushEvents])
 
   return {
     track,
     trackPageView,
     trackConversion,
-    flushEventQueue,
+    isUTMifyAvailable: isUTMifyAvailable(),
+    flushEvents,
+  }
+}
+
+// Declarações globais para TypeScript
+declare global {
+  interface Window {
+    utmify?: {
+      track: (event: string, data?: any) => void
+      pageview: (page?: string) => void
+    }
+    pixelId?: string
+    dataLayer?: any[]
   }
 }
