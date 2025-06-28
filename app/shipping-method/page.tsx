@@ -2,41 +2,39 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { usePageTracking } from "@/hooks/use-tracking"
-import { ChevronLeft, Volume2, VolumeX, Play, Pause } from "lucide-react"
+import { Check, Volume2, VolumeX, Plus, Minus } from "lucide-react"
 
 export default function ShippingMethodPage() {
-  const router = useRouter()
-  const [selectedMethod, setSelectedMethod] = useState("")
-  const [selectedPrice, setSelectedPrice] = useState(0)
+  const [selectedMethod, setSelectedMethod] = useState<string | null>(null)
   const [videoLoaded, setVideoLoaded] = useState(false)
   const [videoVolume, setVideoVolume] = useState(0.35) // Volume inicial em 35%
-  const [isPlaying, setIsPlaying] = useState(false)
   const [isMuted, setIsMuted] = useState(false)
-
-  usePageTracking("shipping_method")
+  const router = useRouter()
 
   const shippingMethods = [
     {
       id: "pac",
       name: "PAC",
       description: "Entrega em 8 a 12 dias úteis",
-      price: 15.9,
-      originalPrice: 25.9,
+      price: "19.90",
+      originalPrice: "29.90",
+      discount: "33% OFF",
     },
     {
       id: "sedex",
       name: "SEDEX",
       description: "Entrega em 3 a 5 dias úteis",
-      price: 25.9,
-      originalPrice: 35.9,
+      price: "29.90",
+      originalPrice: "39.90",
+      discount: "25% OFF",
     },
     {
       id: "express",
-      name: "EXPRESSO",
+      name: "EXPRESS",
       description: "Entrega em 1 a 2 dias úteis",
-      price: 35.9,
-      originalPrice: 45.9,
+      price: "39.90",
+      originalPrice: "59.90",
+      discount: "33% OFF",
     },
   ]
 
@@ -55,45 +53,33 @@ export default function ShippingMethodPage() {
     }
   }
 
-  // Listener para mensagens do Vimeo
   useEffect(() => {
+    // Listener para mensagens do Vimeo
     const handleMessage = (event: MessageEvent) => {
       if (event.origin !== "https://player.vimeo.com") return
 
       try {
         const data = JSON.parse(event.data)
-        console.log("📹 Evento do Vimeo:", data)
+        console.log("📹 Evento Vimeo:", data)
 
         if (data.event === "ready") {
           setVideoLoaded(true)
           console.log("✅ Vídeo carregado e pronto!")
 
-          // Define o volume imediatamente quando pronto
+          // Define o volume para 35% imediatamente quando pronto
           setTimeout(() => setVideoVolumeLevel(0.35), 100)
           setTimeout(() => setVideoVolumeLevel(0.35), 500)
           setTimeout(() => setVideoVolumeLevel(0.35), 1000)
         }
 
         if (data.event === "loaded") {
-          console.log("📹 Vídeo totalmente carregado!")
+          console.log("📹 Vídeo loaded!")
           setTimeout(() => setVideoVolumeLevel(0.35), 100)
         }
 
         if (data.event === "play") {
-          setIsPlaying(true)
           console.log("▶️ Vídeo iniciado!")
-          // Garante volume baixo quando inicia
           setTimeout(() => setVideoVolumeLevel(0.35), 100)
-        }
-
-        if (data.event === "pause") {
-          setIsPlaying(false)
-          console.log("⏸️ Vídeo pausado!")
-        }
-
-        if (data.event === "ended") {
-          setIsPlaying(false)
-          console.log("🏁 Vídeo finalizado!")
         }
       } catch (error) {
         console.error("Erro ao processar mensagem do Vimeo:", error)
@@ -104,177 +90,140 @@ export default function ShippingMethodPage() {
     return () => window.removeEventListener("message", handleMessage)
   }, [])
 
-  const handleMethodSelect = (method: any) => {
-    setSelectedMethod(method.id)
-    setSelectedPrice(method.price)
-    console.log("Método selecionado:", method)
+  const handleMethodSelect = (methodId: string) => {
+    setSelectedMethod(methodId)
   }
 
   const handleContinue = () => {
-    if (!selectedMethod) return
-
-    // Salva o método de entrega selecionado
-    localStorage.setItem("selectedShippingMethod", selectedMethod)
-    localStorage.setItem("selectedShippingPrice", selectedPrice.toString())
-
-    console.log("Navegando para checkout com:", {
-      method: selectedMethod,
-      price: selectedPrice,
-    })
-
-    router.push("/checkout")
+    if (selectedMethod) {
+      const method = shippingMethods.find((m) => m.id === selectedMethod)
+      if (method) {
+        // Salva o método selecionado no localStorage
+        localStorage.setItem("selectedShippingMethod", JSON.stringify(method))
+        router.push("/checkout")
+      }
+    }
   }
 
-  const togglePlayPause = () => {
-    const iframe = document.querySelector("iframe")
-    if (iframe && iframe.contentWindow) {
-      const method = isPlaying ? "pause" : "play"
-      iframe.contentWindow.postMessage(JSON.stringify({ method }), "https://player.vimeo.com")
-    }
+  const adjustVolume = (change: number) => {
+    const newVolume = Math.max(0, Math.min(1, videoVolume + change))
+    setVideoVolume(newVolume)
+    setVideoVolumeLevel(newVolume)
   }
 
   const toggleMute = () => {
-    const iframe = document.querySelector("iframe")
-    if (iframe && iframe.contentWindow) {
-      const newVolume = isMuted ? videoVolume : 0
-      setVideoVolumeLevel(newVolume)
-      setIsMuted(!isMuted)
-    }
-  }
-
-  const adjustVolume = (delta: number) => {
-    const newVolume = Math.max(0, Math.min(1, videoVolume + delta))
-    setVideoVolume(newVolume)
-    setVideoVolumeLevel(newVolume)
-    setIsMuted(newVolume === 0)
+    const newMuted = !isMuted
+    setIsMuted(newMuted)
+    setVideoVolumeLevel(newMuted ? 0 : videoVolume)
   }
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-white border-b border-gray-200 p-4">
-        <div className="flex items-center">
-          <button onClick={() => router.back()} className="mr-4 p-2 hover:bg-gray-100 rounded-full transition-colors">
-            <ChevronLeft className="w-6 h-6" />
-          </button>
-          <h1 className="text-lg font-semibold">Escolha o método de entrega</h1>
-        </div>
-      </div>
-
       <div className="max-w-md mx-auto p-6">
-        {/* Video Section */}
-        <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-          <h2 className="text-xl font-bold mb-4 text-center">Veja como funciona a entrega</h2>
+        <div className="bg-white rounded-lg shadow-md p-6">
+          {/* Title */}
+          <h1 className="text-2xl font-bold text-center mb-4">Escolha o método de entrega</h1>
 
-          <div className="relative mb-4">
-            <div className="aspect-video rounded-lg overflow-hidden bg-black">
+          {/* Subtitle */}
+          <p className="text-center text-gray-600 mb-6">Selecione a opção que melhor atende suas necessidades</p>
+
+          {/* Video Section */}
+          <div className="mb-6">
+            <div className="relative bg-black rounded-lg overflow-hidden">
               <iframe
-                src="https://player.vimeo.com/video/1037913019?badge=0&autopause=0&player_id=0&app_id=58479&autoplay=1&loop=1&muted=0&volume=0.35"
+                src="https://player.vimeo.com/video/1037913442?badge=0&autopause=0&player_id=0&app_id=58479&autoplay=1&loop=1&muted=0&volume=0.35"
                 width="100%"
-                height="100%"
+                height="200"
                 frameBorder="0"
                 allow="autoplay; fullscreen; picture-in-picture; clipboard-write"
-                title="Vídeo de entrega"
-                className="w-full h-full"
+                title="Shipping Video"
+                className="w-full"
               />
-            </div>
 
-            {/* Video Controls */}
-            {videoLoaded && (
-              <div className="absolute bottom-4 right-4 flex gap-2">
+              {/* Volume Controls */}
+              <div className="absolute bottom-2 right-2 flex items-center space-x-2 bg-black/50 rounded-lg p-2">
                 <button
-                  onClick={togglePlayPause}
-                  className="bg-black/70 text-white p-2 rounded-full hover:bg-black/90 transition-colors"
+                  onClick={() => adjustVolume(-0.1)}
+                  className="text-white hover:text-gray-300 transition-colors"
+                  aria-label="Diminuir volume"
                 >
-                  {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                  <Minus className="w-4 h-4" />
                 </button>
+
                 <button
                   onClick={toggleMute}
-                  className="bg-black/70 text-white p-2 rounded-full hover:bg-black/90 transition-colors"
+                  className="text-white hover:text-gray-300 transition-colors"
+                  aria-label={isMuted ? "Ativar som" : "Silenciar"}
                 >
                   {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
                 </button>
-                <div className="flex">
-                  <button
-                    onClick={() => adjustVolume(-0.1)}
-                    className="bg-black/70 text-white px-2 py-1 rounded-l-full hover:bg-black/90 transition-colors text-xs"
-                  >
-                    -
-                  </button>
-                  <button
-                    onClick={() => adjustVolume(0.1)}
-                    className="bg-black/70 text-white px-2 py-1 rounded-r-full hover:bg-black/90 transition-colors text-xs"
-                  >
-                    +
-                  </button>
-                </div>
+
+                <button
+                  onClick={() => adjustVolume(0.1)}
+                  className="text-white hover:text-gray-300 transition-colors"
+                  aria-label="Aumentar volume"
+                >
+                  <Plus className="w-4 h-4" />
+                </button>
+
+                <span className="text-white text-xs min-w-[3rem]">
+                  {Math.round((isMuted ? 0 : videoVolume) * 100)}%
+                </span>
               </div>
-            )}
+            </div>
           </div>
 
-          <p className="text-sm text-gray-600 text-center">Nossos produtos são entregues com segurança e rapidez</p>
-        </div>
-
-        {/* Shipping Methods */}
-        <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-          <h3 className="text-lg font-semibold mb-4">Métodos de entrega disponíveis</h3>
-
-          <div className="space-y-3">
+          {/* Shipping Methods */}
+          <div className="space-y-4 mb-6">
             {shippingMethods.map((method) => (
               <div
                 key={method.id}
-                className={`border rounded-lg p-4 cursor-pointer transition-all ${
+                className={`border-2 rounded-lg p-4 cursor-pointer transition-all ${
                   selectedMethod === method.id ? "border-black bg-gray-50" : "border-gray-200 hover:border-gray-300"
                 }`}
-                onClick={() => handleMethodSelect(method)}
+                onClick={() => handleMethodSelect(method.id)}
               >
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center">
-                    <div
-                      className={`w-4 h-4 rounded-full border-2 mr-3 ${
-                        selectedMethod === method.id ? "border-black bg-black" : "border-gray-300"
-                      }`}
-                    >
-                      {selectedMethod === method.id && (
-                        <div className="w-full h-full rounded-full bg-white scale-50"></div>
-                      )}
-                    </div>
-                    <div>
-                      <h4 className="font-semibold">{method.name}</h4>
-                      <p className="text-sm text-gray-600">{method.description}</p>
+                  <div className="flex-1">
+                    <div className="flex items-center space-x-3">
+                      <div
+                        className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                          selectedMethod === method.id ? "border-black bg-black" : "border-gray-300"
+                        }`}
+                      >
+                        {selectedMethod === method.id && <Check className="w-3 h-3 text-white" />}
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-lg">{method.name}</h3>
+                        <p className="text-gray-600 text-sm">{method.description}</p>
+                      </div>
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm text-gray-500 line-through">R$ {method.originalPrice.toFixed(2)}</span>
-                      <span className="font-bold text-green-600">R$ {method.price.toFixed(2)}</span>
+                    <div className="flex items-center space-x-2">
+                      <span className="bg-green-100 text-green-800 text-xs font-bold px-2 py-1 rounded">
+                        {method.discount}
+                      </span>
                     </div>
+                    <p className="text-gray-400 line-through text-sm">R$ {method.originalPrice}</p>
+                    <p className="font-bold text-lg text-green-600">R$ {method.price}</p>
                   </div>
                 </div>
               </div>
             ))}
           </div>
+
+          {/* Continue Button */}
+          <button
+            onClick={handleContinue}
+            disabled={!selectedMethod}
+            className={`w-full py-3 px-6 rounded-lg font-medium transition-colors ${
+              selectedMethod ? "bg-black text-white hover:bg-black/90" : "bg-gray-300 text-gray-500 cursor-not-allowed"
+            }`}
+          >
+            CONTINUAR
+          </button>
         </div>
-
-        {/* Continue Button */}
-        <button
-          onClick={handleContinue}
-          disabled={!selectedMethod}
-          className={`w-full py-4 px-6 rounded-lg font-bold text-base transition-colors ${
-            selectedMethod ? "bg-black text-white hover:bg-black/90" : "bg-gray-300 text-gray-500 cursor-not-allowed"
-          }`}
-        >
-          {selectedMethod ? "CONTINUAR" : "SELECIONE UM MÉTODO"}
-        </button>
-
-        {selectedMethod && (
-          <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg">
-            <p className="text-sm text-green-800 text-center">
-              ✅ Método selecionado: {shippingMethods.find((m) => m.id === selectedMethod)?.name} - R${" "}
-              {selectedPrice.toFixed(2)}
-            </p>
-          </div>
-        )}
       </div>
     </div>
   )
