@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import Image from "next/image"
 import { Copy, CheckCircle, Clock, AlertCircle } from "lucide-react"
-import { useWebhookPaymentMonitor } from "@/hooks/use-webhook-payment-monitor"
+import { usePureWebhookMonitor } from "@/hooks/use-pure-webhook-monitor"
 import { useOptimizedTracking } from "@/hooks/use-optimized-tracking"
 
 interface InvoiceData {
@@ -31,7 +31,7 @@ interface InvoiceData {
   external_id?: string
 }
 
-export default function WebhookOptimizedCheckoutPage() {
+export default function PureWebhookCheckoutPage() {
   const [loading, setLoading] = useState(true)
   const [invoice, setInvoice] = useState<InvoiceData | null>(null)
   const [timeLeft, setTimeLeft] = useState(300) // 5 minutos
@@ -53,21 +53,17 @@ export default function WebhookOptimizedCheckoutPage() {
     enableDebug: process.env.NODE_ENV === "development",
   })
 
-  // Webhook-based payment monitoring (NO POLLING!)
+  // PURE webhook monitoring (NO API CALLS!)
   const {
     status: paymentStatus,
     isWaitingForWebhook,
     error: webhookError,
     lastWebhookCheck,
-    fallbackCheckCount,
-    maxFallbackChecks,
-  } = useWebhookPaymentMonitor({
+  } = usePureWebhookMonitor({
     externalId,
-    fallbackCheckInterval: 30000, // 30 seconds fallback only
-    maxFallbackChecks: 10, // Maximum 10 fallback checks
     enableDebug: process.env.NODE_ENV === "development",
     onPaymentConfirmed: (data) => {
-      console.log("🎉 PAGAMENTO CONFIRMADO VIA WEBHOOK!")
+      console.log("🎉 PAGAMENTO CONFIRMADO VIA WEBHOOK PURO!")
 
       // Track conversion
       trackConversion("payment_confirmed", data.amount)
@@ -84,11 +80,11 @@ export default function WebhookOptimizedCheckoutPage() {
       }, 2000)
     },
     onPaymentDenied: (data) => {
-      console.log("❌ PAGAMENTO NEGADO VIA WEBHOOK!")
+      console.log("❌ PAGAMENTO NEGADO VIA WEBHOOK PURO!")
       track("payment_denied", { amount: data.amount, reason: data.statusName })
     },
     onPaymentExpired: (data) => {
-      console.log("⏰ PAGAMENTO VENCIDO VIA WEBHOOK!")
+      console.log("⏰ PAGAMENTO VENCIDO VIA WEBHOOK PURO!")
       track("payment_expired", { amount: data.amount })
     },
   })
@@ -411,7 +407,7 @@ export default function WebhookOptimizedCheckoutPage() {
             </div>
           </div>
 
-          {/* Status em Tempo Real - WEBHOOK BASED */}
+          {/* Status em Tempo Real - PURE WEBHOOK */}
           <div
             className={`border-2 rounded-lg p-4 mb-6 ${
               paymentStatus?.isPaid
@@ -443,7 +439,6 @@ export default function WebhookOptimizedCheckoutPage() {
             {lastWebhookCheck && (
               <p className="text-xs mt-1 text-center opacity-60">
                 Última verificação: {lastWebhookCheck.toLocaleTimeString()}
-                {fallbackCheckCount > 0 && ` (fallback ${fallbackCheckCount}/${maxFallbackChecks})`}
               </p>
             )}
           </div>
@@ -491,7 +486,7 @@ export default function WebhookOptimizedCheckoutPage() {
             {copied && <p className="text-green-600 text-sm mt-2">✅ Código copiado!</p>}
           </div>
 
-          {/* Status Webhook-Based */}
+          {/* Status PURE Webhook */}
           <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
             <div className="flex items-center space-x-2">
               <div
@@ -502,7 +497,7 @@ export default function WebhookOptimizedCheckoutPage() {
               </span>
             </div>
             <p className="text-green-700 text-sm mt-1">
-              ✅ Sem polling! Confirmação instantânea via webhook
+              ✅ ZERO API calls! Confirmação instantânea via webhook
               {webhookError && <span className="text-red-600"> - Erro: {webhookError}</span>}
             </p>
           </div>

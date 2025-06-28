@@ -1,135 +1,84 @@
 import { type NextRequest, NextResponse } from "next/server"
-import {
-  getPaymentConfirmation,
-  getAllConfirmations,
-  getRealtimeEvents,
-  paymentConfirmations,
-} from "@/lib/payment-storage"
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
     const externalId = searchParams.get("externalId")
-    const invoiceId = searchParams.get("invoiceId")
-    const token = searchParams.get("token")
-    const action = searchParams.get("action") // Para debug: "all" ou "events"
 
-    console.log("🔍 CONSULTA DE STATUS RECEBIDA:")
-    console.log(`- External ID: ${externalId}`)
-    console.log(`- Invoice ID: ${invoiceId}`)
-    console.log(`- Token: ${token}`)
-    console.log(`- Action: ${action}`)
-
-    // Ações especiais para debug
-    if (action === "all") {
-      const allConfirmations = getAllConfirmations()
-      console.log(`📊 Retornando ${allConfirmations.length} confirmações`)
-      return NextResponse.json({
-        success: true,
-        action: "all_confirmations",
-        total: allConfirmations.length,
-        data: allConfirmations,
-      })
+    if (!externalId) {
+      return NextResponse.json({ success: false, error: "External ID is required" }, { status: 400 })
     }
 
-    if (action === "events") {
-      const events = getRealtimeEvents()
-      console.log(`📊 Retornando ${events.length} eventos em tempo real`)
-      return NextResponse.json({
-        success: true,
-        action: "realtime_events",
-        total: events.length,
-        data: events,
-      })
-    }
+    console.log("🔍 Consultando status do pagamento para:", externalId)
 
-    // Busca principal
-    const identifier = externalId || invoiceId || token
+    // Buscar no Supabase (dados do webhook)
+    try {
+      const { createClient } = await import("@supabase/supabase-js")
+      const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
-    if (!identifier) {
-      console.log("❌ Nenhum identificador fornecido")
-      return NextResponse.json(
-        {
-          success: false,
-          error: "É necessário fornecer externalId, invoiceId ou token",
-        },
-        { status: 400 },
-      )
-    }
+      const { data, error } = await supabase
+        .from("payment_webhooks")
+        .select("*")
+        .eq("external_id", externalId)
+        .order("received_at", { ascending: false })
+        .limit(1)
+        .single()
 
-    console.log(`🔎 Buscando confirmação para: ${identifier}`)
-    console.log(`📊 Total de confirmações em memória: ${paymentConfirmations.size}`)
+      if (error && error.code !== "PGRST116") {
+        // PGRST116 = no rows returned
+        console.error("❌ Erro ao consultar Supabase:", error)
+        throw error
+      }
 
-    // Listar todas as chaves disponíveis para debug
-    const allKeys = Array.from(paymentConfirmations.keys())
-    console.log(`🔑 Chaves disponíveis:`, allKeys)
+      if (data) {
+        console.log("✅ Status encontrado no webhook:", data)
 
-    // Buscar em múltiplas chaves
-    const confirmation = getPaymentConfirmation(identifier)
+        const paymentStatus = {
+          isPaid: data.is_paid,
+          isDenied: data.is_denied,
+          isRefunded: data.is_refunded,
+          isExpired: data.is_expired,
+          isCanceled: data.is_canceled,
+          statusCode: data.status_code,
+          statusName: data.status_name,
+          amount: data.amount,
+          paymentDate: data.payment_date,
+        }
 
-    if (!confirmation) {
-      console.log(`❌ Confirmação não encontrada para: ${identifier}`)
-      console.log(`🔍 Tentativas de busca:`)
-      console.log(`  - Busca direta: ${paymentConfirmations.has(identifier)}`)
-      console.log(`  - Busca por token: ${paymentConfirmations.has(`token_${identifier}`)}`)
+        return NextResponse.json({
+          success: true,
+          found: true,
+          data: paymentStatus,
+          source: "webhook",
+          receivedAt: data.received_at,
+        })
+      } else {
+        console.log("⏳ Nenhum webhook recebido ainda para:", externalId)
+
+        return NextResponse.json({
+          success: true,
+          found: false,
+          message: "No webhook received yet",
+          externalId,
+        })
+      }
+    } catch (dbError) {
+      console.error("❌ Erro na consulta ao banco:", dbError)
 
       return NextResponse.json({
-        success: true,
-        found: false,
-        searched_for: identifier,
-        message: "Nenhuma confirmação encontrada",
-        debug: {
-          total_confirmations: paymentConfirmations.size,
-          available_keys: allKeys,
-          searched_keys: [identifier, `token_${identifier}`],
-        },
+        success: false,
+        error: "Database error",
+        message: "Unable to check payment status",
       })
     }
-
-    console.log("✅ Confirmação encontrada:")
-    console.log(`- External ID: ${confirmation.externalId}`)
-    console.log(`- Invoice ID: ${confirmation.invoiceId}`)
-    console.log(`- Status: ${confirmation.statusName} (${confirmation.statusCode})`)
-    console.log(`- isPaid: ${confirmation.isPaid}`)
-    console.log(`- isRefunded: ${confirmation.isRefunded}`)
-    console.log(`- isDenied: ${confirmation.isDenied}`)
-    console.log(`- isExpired: ${confirmation.isExpired}`)
-    console.log(`- isCanceled: ${confirmation.isCanceled}`)
-    console.log(`- Valor: R$ ${confirmation.amount.toFixed(2)}`)
-    console.log(`- Recebido em: ${confirmation.receivedAt}`)
-
-    // Resposta estruturada
-    const response = {
-      success: true,
-      found: true,
-      searched_for: identifier,
-      data: {
-        externalId: confirmation.externalId,
-        invoiceId: confirmation.invoiceId,
-        token: confirmation.token,
-        isPaid: confirmation.isPaid,
-        isRefunded: confirmation.isRefunded,
-        isDenied: confirmation.isDenied,
-        isExpired: confirmation.isExpired,
-        isCanceled: confirmation.isCanceled,
-        amount: confirmation.amount,
-        paymentDate: confirmation.paymentDate,
-        statusCode: confirmation.statusCode,
-        statusName: confirmation.statusName,
-        statusDescription: confirmation.statusDescription,
-        receivedAt: confirmation.receivedAt,
-      },
-    }
-
-    return NextResponse.json(response)
   } catch (error) {
-    console.log("❌ Erro na consulta de status:", error)
+    console.error("❌ Erro geral na consulta de status:", error)
 
     return NextResponse.json(
       {
         success: false,
-        error: "Erro interno do servidor",
-        details: error instanceof Error ? error.message : "Erro desconhecido",
+        error: "Internal server error",
+        message: error instanceof Error ? error.message : "Unknown error",
       },
       { status: 500 },
     )
