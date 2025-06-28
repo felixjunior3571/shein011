@@ -41,6 +41,7 @@ export default function CheckoutPage() {
   const searchParams = useSearchParams()
   const checkIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const timerRef = useRef<NodeJS.Timeout | null>(null)
+  const fastCheckIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
   // Obter parâmetros da URL
   const amount = searchParams.get("amount") || "34.90"
@@ -53,6 +54,7 @@ export default function CheckoutPage() {
   >("pending")
   const [externalId, setExternalId] = useState<string | null>(null)
   const [statusMessage, setStatusMessage] = useState("⏳ Aguardando Pagamento...")
+  const [checkCount, setCheckCount] = useState(0)
 
   // Carregar dados do usuário e criar fatura
   useEffect(() => {
@@ -74,18 +76,25 @@ export default function CheckoutPage() {
     }
   }, [timeLeft, invoice])
 
-  // Verificação automática de pagamento
+  // Verificação automática de pagamento - OTIMIZADA
   useEffect(() => {
-    if (invoice && timeLeft > 0) {
+    if (invoice && timeLeft > 0 && paymentStatus === "pending") {
+      // Verificação rápida a cada 2 segundos nos primeiros 2 minutos
+      fastCheckIntervalRef.current = setInterval(() => {
+        checkPaymentFast()
+      }, 2000)
+
+      // Verificação normal a cada 10 segundos
       checkIntervalRef.current = setInterval(() => {
         checkPayment()
-      }, 10000) // A cada 10 segundos
+      }, 10000)
     }
 
     return () => {
       if (checkIntervalRef.current) clearInterval(checkIntervalRef.current)
+      if (fastCheckIntervalRef.current) clearInterval(fastCheckIntervalRef.current)
     }
-  }, [invoice, timeLeft])
+  }, [invoice, timeLeft, paymentStatus])
 
   // Carregar external_id quando a fatura for criada
   useEffect(() => {
@@ -115,23 +124,30 @@ export default function CheckoutPage() {
     }
   }, [invoice])
 
-  // Sistema de verificação automática via webhook
+  // Sistema de verificação automática via webhook - SUPER OTIMIZADO
   useEffect(() => {
     if (!externalId || paymentStatus === "confirmed") {
       console.log("🚫 Monitoramento não iniciado:", { externalId, paymentStatus })
       return
     }
 
-    console.log("🔄 Iniciando monitoramento automático para:", externalId)
+    console.log("🚀 Iniciando monitoramento SUPER RÁPIDO para:", externalId)
 
     const checkWebhookConfirmation = async () => {
       try {
-        console.log("🔍 Verificando status via webhook para:", externalId)
+        setCheckCount((prev) => prev + 1)
+        console.log(`🔍 [${checkCount + 1}] Verificando status via webhook para:`, externalId)
 
-        const response = await fetch(`/api/tryplopay/payment-status?externalId=${externalId}`)
+        const response = await fetch(`/api/tryplopay/payment-status?externalId=${externalId}&t=${Date.now()}`, {
+          cache: "no-store",
+          headers: {
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            Pragma: "no-cache",
+          },
+        })
         const result = await response.json()
 
-        console.log("📋 Resultado da verificação:", result)
+        console.log(`📋 [${checkCount + 1}] Resultado da verificação:`, result)
 
         if (result.success && result.found) {
           const { data } = result
@@ -146,20 +162,23 @@ export default function CheckoutPage() {
           })
 
           if (data.isPaid) {
-            console.log("🎉 PAGAMENTO CONFIRMADO VIA WEBHOOK!")
+            console.log("🎉🎉🎉 PAGAMENTO CONFIRMADO VIA WEBHOOK! 🎉🎉🎉")
             setPaymentStatus("confirmed")
-            setStatusMessage("✅ Pagamento Confirmado!")
+            setStatusMessage("✅ Pagamento Confirmado! Redirecionando...")
 
             // Salvar confirmação
             localStorage.setItem("paymentConfirmed", "true")
             localStorage.setItem("paymentAmount", data.amount.toFixed(2))
             localStorage.setItem("paymentDate", data.paymentDate || new Date().toISOString())
 
-            // Redirecionar após 2 segundos
-            setTimeout(() => {
-              console.log("🚀 Redirecionando para página de sucesso...")
-              window.location.href = "/success"
-            }, 2000)
+            // Parar todos os intervalos
+            if (checkIntervalRef.current) clearInterval(checkIntervalRef.current)
+            if (fastCheckIntervalRef.current) clearInterval(fastCheckIntervalRef.current)
+            if (timerRef.current) clearTimeout(timerRef.current)
+
+            // Redirecionar IMEDIATAMENTE
+            console.log("🚀 Redirecionando AGORA para página de ativação...")
+            window.location.href = "/upp/001"
           } else if (data.isDenied) {
             console.log("❌ PAGAMENTO NEGADO VIA WEBHOOK!")
             setPaymentStatus("denied")
@@ -178,24 +197,24 @@ export default function CheckoutPage() {
             setStatusMessage("🚫 Pagamento Cancelado")
           }
         } else {
-          console.log("⏳ Ainda aguardando confirmação para:", externalId)
+          console.log(`⏳ [${checkCount + 1}] Ainda aguardando confirmação para:`, externalId)
         }
       } catch (error) {
         console.log("❌ Erro na verificação:", error)
       }
     }
 
-    // Verificar imediatamente
+    // Verificar IMEDIATAMENTE
     checkWebhookConfirmation()
 
-    // Verificar a cada 3 segundos
-    const interval = setInterval(checkWebhookConfirmation, 3000)
+    // Verificar a cada 1 segundo (super rápido)
+    const interval = setInterval(checkWebhookConfirmation, 1000)
 
     return () => {
       console.log("🛑 Parando monitoramento automático para:", externalId)
       clearInterval(interval)
     }
-  }, [externalId, paymentStatus])
+  }, [externalId, paymentStatus, checkCount])
 
   const createInvoice = async () => {
     try {
@@ -290,34 +309,69 @@ export default function CheckoutPage() {
     console.log(`✅ PIX de emergência criado - Valor: R$ ${totalAmount.toFixed(2)}`)
   }
 
+  // Verificação rápida otimizada
+  const checkPaymentFast = async () => {
+    if (!invoice || checking || paymentStatus !== "pending") return
+
+    try {
+      const response = await fetch(
+        `/api/tryplopay/check-payment?invoiceId=${invoice.id}&token=${invoice.invoice_id}&fast=true&t=${Date.now()}`,
+        {
+          cache: "no-store",
+        },
+      )
+      const data = await response.json()
+
+      if (data.success && data.data.isPaid) {
+        console.log("🎉 Pagamento confirmado via verificação rápida!")
+        handlePaymentConfirmed()
+      }
+    } catch (error) {
+      console.log("❌ Erro na verificação rápida:", error)
+    }
+  }
+
   const checkPayment = async () => {
-    if (!invoice || checking) return
+    if (!invoice || checking || paymentStatus !== "pending") return
 
     try {
       setChecking(true)
 
-      const response = await fetch(`/api/tryplopay/check-payment?invoiceId=${invoice.id}&token=${invoice.invoice_id}`)
+      const response = await fetch(
+        `/api/tryplopay/check-payment?invoiceId=${invoice.id}&token=${invoice.invoice_id}&t=${Date.now()}`,
+        {
+          cache: "no-store",
+        },
+      )
       const data = await response.json()
 
       if (data.success && data.data.isPaid) {
-        console.log("🎉 Pagamento confirmado!")
-
-        // Limpar intervalos
-        if (checkIntervalRef.current) clearInterval(checkIntervalRef.current)
-        if (timerRef.current) clearTimeout(timerRef.current)
-
-        // Salvar confirmação
-        localStorage.setItem("paymentConfirmed", "true")
-        localStorage.setItem("paymentAmount", (invoice.valores.bruto / 100).toFixed(2))
-
-        // Redirecionar para sucesso
-        router.push("/success")
+        console.log("🎉 Pagamento confirmado via verificação normal!")
+        handlePaymentConfirmed()
       }
     } catch (error) {
       console.log("❌ Erro ao verificar pagamento:", error)
     } finally {
       setChecking(false)
     }
+  }
+
+  const handlePaymentConfirmed = () => {
+    // Limpar todos os intervalos
+    if (checkIntervalRef.current) clearInterval(checkIntervalRef.current)
+    if (fastCheckIntervalRef.current) clearInterval(fastCheckIntervalRef.current)
+    if (timerRef.current) clearTimeout(timerRef.current)
+
+    // Salvar confirmação
+    localStorage.setItem("paymentConfirmed", "true")
+    localStorage.setItem("paymentAmount", (invoice!.valores.bruto / 100).toFixed(2))
+
+    // Atualizar status
+    setPaymentStatus("confirmed")
+    setStatusMessage("✅ Pagamento Confirmado! Redirecionando...")
+
+    // Redirecionar IMEDIATAMENTE
+    router.push("/upp/001")
   }
 
   const copyPixCode = async () => {
@@ -470,7 +524,7 @@ export default function CheckoutPage() {
             </div>
           </div>
 
-          {/* Status em Tempo Real */}
+          {/* Status em Tempo Real - OTIMIZADO */}
           <div className={`border-2 rounded-lg p-4 mb-6 ${getStatusColor()}`}>
             <div className="flex items-center justify-center space-x-2">
               <div
@@ -478,7 +532,12 @@ export default function CheckoutPage() {
               ></div>
               <span className="font-bold">{statusMessage}</span>
             </div>
-            {externalId && <p className="text-xs mt-2 text-center opacity-75">ID: {externalId}</p>}
+            {externalId && (
+              <div className="text-xs mt-2 text-center opacity-75 space-y-1">
+                <p>ID: {externalId}</p>
+                <p>Verificações: {checkCount} | Modo: SUPER RÁPIDO ⚡</p>
+              </div>
+            )}
           </div>
 
           {/* Valor */}
@@ -530,7 +589,7 @@ export default function CheckoutPage() {
               <div className="animate-pulse w-3 h-3 bg-blue-500 rounded-full"></div>
               <span className="text-blue-800 font-medium">Aguardando pagamento...</span>
             </div>
-            <p className="text-blue-700 text-sm mt-1">Verificamos automaticamente a cada 10 segundos</p>
+            <p className="text-blue-700 text-sm mt-1">Verificamos automaticamente a cada 1 segundo ⚡</p>
           </div>
 
           {/* Instruções */}
