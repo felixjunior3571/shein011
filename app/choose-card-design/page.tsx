@@ -5,59 +5,100 @@ import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import Image from "next/image"
 
-// Função para abreviar o nome do titular
-const abbreviateName = (fullName: string): string => {
-  if (!fullName) return "Santos Silva"
-
-  const words = fullName.trim().split(" ")
-
-  if (words.length <= 2) {
-    return fullName
+// Função completa de abreviação de nomes para cartões
+const abreviarNome = (nomeCompleto: string): string => {
+  if (!nomeCompleto || typeof nomeCompleto !== "string") {
+    return "USUÁRIO"
   }
 
-  // Pega o primeiro nome e o último sobrenome
-  const firstName = words[0]
-  const lastName = words[words.length - 1]
+  const nomes = nomeCompleto
+    .trim()
+    .split(" ")
+    .filter((nome) => nome.length > 0)
 
-  // Se o nome for muito longo, abrevia ainda mais
-  if (`${firstName} ${lastName}`.length > 18) {
-    return `${firstName.substring(0, 10)} ${lastName.substring(0, 8)}`
+  // Se o nome completo tem menos de 26 caracteres, usar completo
+  if (nomeCompleto.length <= 26) {
+    return nomeCompleto.toUpperCase()
   }
 
-  return `${firstName} ${lastName}`
+  // Lista de preposições e artigos que NÃO devem ser abreviados
+  const naoAbreviar = ["da", "de", "di", "do", "du", "das", "dos", "e"]
+
+  // Se tem mais de 26 caracteres, abreviar
+  if (nomes.length >= 3) {
+    // Primeiro nome + nomes do meio (abreviados ou completos) + último nome
+    const primeiro = nomes[0]
+    const ultimo = nomes[nomes.length - 1]
+
+    const meios = nomes
+      .slice(1, -1)
+      .map((nome) => {
+        // Se é uma preposição/artigo, manter completo
+        if (naoAbreviar.includes(nome.toLowerCase())) {
+          return nome.toLowerCase()
+        }
+        // Senão, abreviar
+        return nome.charAt(0).toUpperCase()
+      })
+      .join(" ")
+
+    const nomeAbreviado = `${primeiro} ${meios} ${ultimo}`.toUpperCase()
+
+    // Se ainda está muito longo, fazer abreviação mais agressiva
+    if (nomeAbreviado.length > 26) {
+      const meiosAgressivos = nomes
+        .slice(1, -1)
+        .map((nome) => {
+          // Manter preposições/artigos, mas abreviar tudo mais
+          if (naoAbreviar.includes(nome.toLowerCase())) {
+            return nome.toLowerCase()
+          }
+          return nome.charAt(0).toUpperCase()
+        })
+        .join(" ")
+
+      return `${primeiro} ${meiosAgressivos} ${ultimo}`.toUpperCase()
+    }
+
+    return nomeAbreviado
+  } else if (nomes.length === 2) {
+    // Apenas primeiro e último nome
+    return `${nomes[0]} ${nomes[1]}`.toUpperCase()
+  } else {
+    // Apenas um nome, truncar se necessário
+    return nomes[0].substring(0, 26).toUpperCase()
+  }
 }
 
 export default function ChooseCardDesignPage() {
   const searchParams = useSearchParams()
   const [cardColor, setCardColor] = useState("black")
   const [cardholderName, setCardholderName] = useState("Santos Silva")
-  const [abbreviatedName, setAbbreviatedName] = useState("Santos Silva")
+  const [abbreviatedName, setAbbreviatedName] = useState("SANTOS SILVA")
 
   useEffect(() => {
-    // Try to get the name from localStorage first, then URL params
-    const nameFromStorage = typeof window !== "undefined" ? localStorage.getItem("cardholderName") : null
-    const nameFromParams = searchParams.get("name")
+    // Carregar nome do localStorage (dados do CPF)
+    try {
+      const cpfData = localStorage.getItem("cpfConsultaData")
+      let fullName = "Santos Silva" // Nome padrão
 
-    let fullName = "Santos Silva" // Nome padrão
-
-    if (nameFromStorage) {
-      fullName = nameFromStorage
-      setCardholderName(nameFromStorage)
-    } else if (nameFromParams) {
-      fullName = nameFromParams
-      setCardholderName(nameFromParams)
-      // Save to localStorage for future use
-      if (typeof window !== "undefined") {
-        localStorage.setItem("cardholderName", nameFromParams)
+      if (cpfData) {
+        const dados = JSON.parse(cpfData)
+        fullName = dados.nome || "Santos Silva"
+        setCardholderName(fullName)
       }
+
+      // Aplicar a função de abreviação
+      const nomeFormatado = abreviarNome(fullName)
+      setAbbreviatedName(nomeFormatado)
+
+      console.log("Nome completo:", fullName)
+      console.log("Nome abreviado:", nomeFormatado)
+    } catch (error) {
+      console.error("Erro ao carregar dados do usuário:", error)
+      setCardholderName("Santos Silva")
+      setAbbreviatedName("SANTOS SILVA")
     }
-
-    // Abrevia o nome para exibição no cartão
-    const abbreviated = abbreviateName(fullName)
-    setAbbreviatedName(abbreviated)
-
-    console.log("Nome completo:", fullName)
-    console.log("Nome abreviado:", abbreviated)
   }, [searchParams])
 
   const colors = [
@@ -175,7 +216,9 @@ export default function ChooseCardDesignPage() {
               <div className="flex justify-between items-end">
                 <div>
                   <p className="text-xs opacity-80 mb-1">TITULAR DO CARTÃO</p>
-                  <p className="font-medium text-sm">{abbreviatedName}</p>
+                  <p className="font-medium text-sm" style={{ letterSpacing: "1px" }}>
+                    {abbreviatedName}
+                  </p>
                 </div>
                 <div className="text-right">
                   <p className="text-xs opacity-80 mb-1">VÁLIDO ATÉ</p>

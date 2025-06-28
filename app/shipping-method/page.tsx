@@ -67,7 +67,23 @@ export default function ShippingMethodPage() {
     }
   }, [])
 
-  // Listener para eventos do Vimeo com debug melhorado
+  // Função para definir volume do vídeo
+  const setVideoVolumeLevel = (volume: number) => {
+    const iframe = document.querySelector("iframe")
+    if (iframe && iframe.contentWindow) {
+      iframe.contentWindow.postMessage(
+        JSON.stringify({
+          method: "setVolume",
+          value: volume,
+        }),
+        "https://player.vimeo.com",
+      )
+      setVideoVolume(volume)
+      console.log(`🔊 Volume definido para: ${Math.round(volume * 100)}%`)
+    }
+  }
+
+  // Listener para eventos do Vimeo com controle de volume melhorado
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       // Aceita mensagens do Vimeo
@@ -81,33 +97,29 @@ export default function ShippingMethodPage() {
           setVideoLoaded(true)
           console.log("✅ Vídeo carregado e pronto!")
 
-          // Define o volume para 35% quando o vídeo estiver pronto
-          const iframe = document.querySelector("iframe")
-          if (iframe && iframe.contentWindow) {
-            setTimeout(() => {
-              iframe.contentWindow.postMessage(
-                JSON.stringify({
-                  method: "setVolume",
-                  value: 0.35,
-                }),
-                "https://player.vimeo.com",
-              )
-            }, 1000)
-          }
+          // Define o volume para 35% imediatamente quando o vídeo estiver pronto
+          setTimeout(() => setVideoVolumeLevel(0.35), 100)
+          // Reforça o volume após um tempo para garantir
+          setTimeout(() => setVideoVolumeLevel(0.35), 500)
+          setTimeout(() => setVideoVolumeLevel(0.35), 1000)
+        }
+
+        if (data.event === "loaded") {
+          console.log("📹 Vídeo foi carregado completamente")
+          // Define o volume novamente quando carregado
+          setTimeout(() => setVideoVolumeLevel(0.35), 100)
         }
 
         if (data.event === "play") {
           setVideoStarted(true)
           console.log("▶️ Vídeo iniciou!")
+          // Garante que o volume está correto quando o vídeo inicia
+          setTimeout(() => setVideoVolumeLevel(0.35), 100)
         }
 
         if (data.event === "ended") {
           setVideoEnded(true)
           console.log("🎬 Vídeo terminou!")
-        }
-
-        if (data.event === "loaded") {
-          console.log("📹 Vídeo foi carregado completamente")
         }
       } catch (error) {
         console.log("Erro ao processar evento Vimeo:", error)
@@ -208,17 +220,7 @@ export default function ShippingMethodPage() {
 
   // Função para ajustar volume
   const adjustVolume = (newVolume: number) => {
-    const iframe = document.querySelector("iframe")
-    if (iframe && iframe.contentWindow) {
-      iframe.contentWindow.postMessage(
-        JSON.stringify({
-          method: "setVolume",
-          value: newVolume,
-        }),
-        "https://player.vimeo.com",
-      )
-      setVideoVolume(newVolume)
-    }
+    setVideoVolumeLevel(newVolume)
   }
 
   // Encontra o método selecionado
@@ -328,9 +330,9 @@ export default function ShippingMethodPage() {
                   </div>
                 )}
 
-                {/* Iframe do Vimeo - sempre com som habilitado */}
+                {/* Iframe do Vimeo - com volume controlado desde o início */}
                 <iframe
-                  src="https://player.vimeo.com/video/1091329936?h=77a25f5325&autoplay=1&muted=0&controls=1&title=0&byline=0&portrait=0&background=0&loop=0&api=1&autopause=0&quality=auto&playsinline=1"
+                  src="https://player.vimeo.com/video/1091329936?h=77a25f5325&autoplay=1&muted=0&controls=1&title=0&byline=0&portrait=0&background=0&loop=0&api=1&autopause=0&quality=auto&playsinline=1&volume=0.35"
                   className={`absolute top-0 left-0 w-full h-full transition-opacity duration-500 ${
                     videoLoaded ? "opacity-100" : "opacity-0"
                   }`}
