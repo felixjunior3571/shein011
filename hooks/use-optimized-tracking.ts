@@ -15,6 +15,19 @@ interface TrackingEvent {
   [key: string]: any
 }
 
+// Declarações globais para TypeScript
+declare global {
+  interface Window {
+    utmify?: {
+      track: (event: string, data?: any) => void
+      pageview: (page?: string) => void
+    }
+    pixelId?: string
+    dataLayer?: any[]
+    trackUTMify?: (event: string, data?: any) => void
+  }
+}
+
 export function useOptimizedTracking(options: TrackingOptions = {}) {
   const { enableDebug = false, batchSize = 10, flushInterval = 5000 } = options
 
@@ -23,7 +36,9 @@ export function useOptimizedTracking(options: TrackingOptions = {}) {
 
   // Função para verificar se UTMify está disponível
   const isUTMifyAvailable = useCallback(() => {
-    return typeof window !== "undefined" && window.utmify && typeof window.utmify.track === "function"
+    return (
+      typeof window !== "undefined" && typeof window.utmify !== "undefined" && typeof window.utmify.track === "function"
+    )
   }, [])
 
   // Função para flush dos eventos em batch
@@ -41,14 +56,30 @@ export function useOptimizedTracking(options: TrackingOptions = {}) {
     if (isUTMifyAvailable()) {
       events.forEach((event) => {
         try {
-          window.utmify.track(event.event, event)
+          window.utmify!.track(event.event, event)
+          if (enableDebug) {
+            console.log("✅ Evento enviado para UTMify:", event.event, event)
+          }
         } catch (error) {
-          console.warn("Erro ao enviar evento para UTMify:", error)
+          console.warn("❌ Erro ao enviar evento para UTMify:", error)
         }
       })
+    } else {
+      // Usar função helper se disponível
+      if (typeof window !== "undefined" && window.trackUTMify) {
+        events.forEach((event) => {
+          try {
+            window.trackUTMify(event.event, event)
+          } catch (error) {
+            console.warn("❌ Erro ao usar trackUTMify helper:", error)
+          }
+        })
+      } else {
+        console.warn("⚠️ UTMify não disponível, eventos perdidos:", events.length)
+      }
     }
 
-    // Enviar para dataLayer
+    // Enviar para dataLayer como fallback
     if (typeof window !== "undefined" && window.dataLayer) {
       events.forEach((event) => {
         try {
@@ -57,7 +88,7 @@ export function useOptimizedTracking(options: TrackingOptions = {}) {
             ...event,
           })
         } catch (error) {
-          console.warn("Erro ao enviar evento para dataLayer:", error)
+          console.warn("❌ Erro ao enviar evento para dataLayer:", error)
         }
       })
     }
@@ -91,16 +122,18 @@ export function useOptimizedTracking(options: TrackingOptions = {}) {
         const trackingEvent: TrackingEvent = {
           event,
           timestamp: Date.now(),
+          page: typeof window !== "undefined" ? window.location.pathname : "",
+          url: typeof window !== "undefined" ? window.location.href : "",
           ...data,
         }
 
         if (enableDebug) {
-          console.log("📈 Tracking event:", trackingEvent)
+          console.log("📈 Queueing tracking event:", trackingEvent)
         }
 
         queueEvent(trackingEvent)
       } catch (error) {
-        console.warn("Erro no tracking:", error)
+        console.warn("❌ Erro no tracking:", error)
       }
     },
     [enableDebug, queueEvent],
@@ -111,12 +144,20 @@ export function useOptimizedTracking(options: TrackingOptions = {}) {
     (page: string) => {
       track("page_view", {
         page,
-        url: typeof window !== "undefined" ? window.location.href : "",
         referrer: typeof document !== "undefined" ? document.referrer : "",
         timestamp: Date.now(),
       })
+
+      // Também usar o método nativo do UTMify se disponível
+      if (isUTMifyAvailable() && window.utmify.pageview) {
+        try {
+          window.utmify.pageview(page)
+        } catch (error) {
+          console.warn("❌ Erro no pageview UTMify:", error)
+        }
+      }
     },
-    [track],
+    [track, isUTMifyAvailable],
   )
 
   // Função para tracking de conversão
@@ -125,6 +166,31 @@ export function useOptimizedTracking(options: TrackingOptions = {}) {
       track("conversion", {
         conversion_type: conversionType,
         value,
+        currency: "BRL",
+        timestamp: Date.now(),
+      })
+    },
+    [track],
+  )
+
+  // Função para tracking de formulário
+  const trackFormSubmit = useCallback(
+    (formName: string, formData?: Record<string, any>) => {
+      track("form_submit", {
+        form_name: formName,
+        form_data: formData,
+        timestamp: Date.now(),
+      })
+    },
+    [track],
+  )
+
+  // Função para tracking de PIX
+  const trackPixGenerated = useCallback(
+    (amount: number, type: string) => {
+      track("pix_generated", {
+        amount,
+        type,
         currency: "BRL",
         timestamp: Date.now(),
       })
@@ -170,19 +236,9 @@ export function useOptimizedTracking(options: TrackingOptions = {}) {
     track,
     trackPageView,
     trackConversion,
+    trackFormSubmit,
+    trackPixGenerated,
     isUTMifyAvailable: isUTMifyAvailable(),
     flushEvents,
-  }
-}
-
-// Declarações globais para TypeScript
-declare global {
-  interface Window {
-    utmify?: {
-      track: (event: string, data?: any) => void
-      pageview: (page?: string) => void
-    }
-    pixelId?: string
-    dataLayer?: any[]
   }
 }
