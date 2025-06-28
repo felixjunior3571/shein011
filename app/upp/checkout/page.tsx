@@ -3,7 +3,8 @@
 import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import Image from "next/image"
-import { Copy, CheckCircle, Clock, AlertCircle, RefreshCw, ArrowLeft } from "lucide-react"
+import { Copy, CheckCircle, Clock, AlertCircle, ArrowLeft } from "lucide-react"
+import { usePureWebhookMonitor } from "@/hooks/use-pure-webhook-monitor"
 
 interface InvoiceData {
   id: string
@@ -34,12 +35,10 @@ export default function ActivationCheckoutPage() {
   const [invoice, setInvoice] = useState<InvoiceData | null>(null)
   const [timeLeft, setTimeLeft] = useState(1800) // 30 minutos para ativação
   const [copied, setCopied] = useState(false)
-  const [checking, setChecking] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [userName, setUserName] = useState("")
 
   const router = useRouter()
-  const checkIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const timerRef = useRef<NodeJS.Timeout | null>(null)
 
   // Estados para monitoramento
@@ -71,19 +70,6 @@ export default function ActivationCheckoutPage() {
     }
   }, [timeLeft, invoice])
 
-  // Verificação automática de pagamento
-  useEffect(() => {
-    if (invoice && timeLeft > 0) {
-      checkIntervalRef.current = setInterval(() => {
-        checkPayment()
-      }, 5000) // A cada 5 segundos
-    }
-
-    return () => {
-      if (checkIntervalRef.current) clearInterval(checkIntervalRef.current)
-    }
-  }, [invoice, timeLeft])
-
   // Carregar external_id quando a fatura for criada
   useEffect(() => {
     if (invoice) {
@@ -109,72 +95,45 @@ export default function ActivationCheckoutPage() {
     }
   }, [invoice])
 
-  // Sistema de verificação automática via webhook
-  useEffect(() => {
-    if (!externalId || paymentStatus === "confirmed") {
-      console.log("🚫 Monitoramento de ativação não iniciado:", { externalId, paymentStatus })
-      return
-    }
+  // Pure webhook monitoring (NO API CALLS) - EXACTLY LIKE /checkout
+  const {
+    status: webhookStatus,
+    isWaitingForWebhook,
+    error: webhookError,
+  } = usePureWebhookMonitor({
+    externalId,
+    onPaymentConfirmed: (data) => {
+      console.log("🎉 DEPÓSITO DE ATIVAÇÃO CONFIRMADO VIA WEBHOOK!")
+      setPaymentStatus("confirmed")
+      setStatusMessage("✅ Depósito Confirmado! Conta Ativada!")
 
-    console.log("🔄 Iniciando monitoramento automático de ativação para:", externalId)
+      // Salvar confirmação de ativação
+      localStorage.setItem("accountActivated", "true")
+      localStorage.setItem("activationAmount", "25.00")
+      localStorage.setItem("activationDate", data.paymentDate || new Date().toISOString())
 
-    const checkWebhookConfirmation = async () => {
-      try {
-        console.log("🔍 Verificando status de ativação via webhook para:", externalId)
-
-        const response = await fetch(`/api/tryplopay/payment-status?externalId=${externalId}&t=${Date.now()}`, {
-          cache: "no-store",
-          headers: {
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            Pragma: "no-cache",
-          },
-        })
-        const result = await response.json()
-
-        console.log("📋 Resultado da verificação de ativação:", result)
-
-        if (result.success && result.found) {
-          const { data } = result
-
-          if (data.isPaid) {
-            console.log("🎉 DEPÓSITO DE ATIVAÇÃO CONFIRMADO VIA WEBHOOK!")
-            setPaymentStatus("confirmed")
-            setStatusMessage("✅ Depósito Confirmado! Conta Ativada!")
-
-            // Salvar confirmação de ativação
-            localStorage.setItem("accountActivated", "true")
-            localStorage.setItem("activationAmount", "25.00")
-            localStorage.setItem("activationDate", data.paymentDate || new Date().toISOString())
-
-            // Redirecionar após 3 segundos para página de sucesso
-            setTimeout(() => {
-              console.log("🚀 Redirecionando para página de sucesso...")
-              window.location.href = "/upp/success"
-            }, 3000)
-          } else if (data.isDenied) {
-            console.log("❌ DEPÓSITO NEGADO VIA WEBHOOK!")
-            setPaymentStatus("denied")
-            setStatusMessage("❌ Depósito Negado")
-          }
-        } else {
-          console.log("⏳ Ainda aguardando confirmação de ativação para:", externalId)
-        }
-      } catch (error) {
-        console.log("❌ Erro na verificação de ativação:", error)
-      }
-    }
-
-    // Verificar imediatamente
-    checkWebhookConfirmation()
-
-    // Verificar a cada 2 segundos (mais rápido para ativação)
-    const interval = setInterval(checkWebhookConfirmation, 2000)
-
-    return () => {
-      console.log("🛑 Parando monitoramento automático de ativação para:", externalId)
-      clearInterval(interval)
-    }
-  }, [externalId, paymentStatus])
+      // Redirecionar após 3 segundos
+      setTimeout(() => {
+        window.location.href = "/upp/success"
+      }, 3000)
+    },
+    onPaymentDenied: (data) => {
+      console.log("❌ DEPÓSITO NEGADO VIA WEBHOOK!")
+      setPaymentStatus("denied")
+      setStatusMessage("❌ Depósito Negado")
+    },
+    onPaymentExpired: (data) => {
+      console.log("⏰ DEPÓSITO VENCIDO VIA WEBHOOK!")
+      setPaymentStatus("expired")
+      setStatusMessage("⏰ Depósito Vencido")
+    },
+    onPaymentCanceled: (data) => {
+      console.log("🚫 DEPÓSITO CANCELADO VIA WEBHOOK!")
+      setPaymentStatus("canceled")
+      setStatusMessage("🚫 Depósito Cancelado")
+    },
+    enableDebug: process.env.NODE_ENV === "development",
+  })
 
   const createActivationInvoice = async () => {
     try {
@@ -255,7 +214,7 @@ export default function ActivationCheckoutPage() {
     const emergencyInvoice: InvoiceData = {
       id: `ACT_${timestamp}`,
       invoice_id: `ACTIVATION_${timestamp}`,
-      external_id: emergencyExternalId, // Garantir que está presente
+      external_id: emergencyExternalId,
       pix: {
         payload: emergencyPix,
         image: "/placeholder.svg?height=250&width=250",
@@ -280,41 +239,6 @@ export default function ActivationCheckoutPage() {
     setError(null)
     console.log("✅ PIX de emergência para ativação criado")
     console.log("🆔 External ID de emergência:", emergencyExternalId)
-  }
-
-  const checkPayment = async () => {
-    if (!invoice || checking) return
-
-    try {
-      setChecking(true)
-
-      const response = await fetch(
-        `/api/tryplopay/check-payment?invoiceId=${invoice.id}&token=${invoice.invoice_id}&t=${Date.now()}`,
-        {
-          cache: "no-store",
-        },
-      )
-      const data = await response.json()
-
-      if (data.success && data.data.isPaid) {
-        console.log("🎉 Depósito de ativação confirmado!")
-
-        // Limpar intervalos
-        if (checkIntervalRef.current) clearInterval(checkIntervalRef.current)
-        if (timerRef.current) clearTimeout(timerRef.current)
-
-        // Salvar confirmação
-        localStorage.setItem("accountActivated", "true")
-        localStorage.setItem("activationAmount", "25.00")
-
-        // Redirecionar para página de sucesso
-        router.push("/upp/success")
-      }
-    } catch (error) {
-      console.log("❌ Erro ao verificar depósito de ativação:", error)
-    } finally {
-      setChecking(false)
-    }
   }
 
   const copyPixCode = async () => {
@@ -468,11 +392,16 @@ export default function ActivationCheckoutPage() {
           <div className={`border-2 rounded-lg p-4 mb-6 ${getStatusColor()}`}>
             <div className="flex items-center justify-center space-x-2">
               <div
-                className={`w-3 h-3 rounded-full ${paymentStatus === "pending" ? "animate-pulse bg-blue-500" : paymentStatus === "confirmed" ? "bg-green-500" : "bg-red-500"}`}
+                className={`w-3 h-3 rounded-full ${
+                  paymentStatus === "pending"
+                    ? "animate-pulse bg-blue-500"
+                    : paymentStatus === "confirmed"
+                      ? "bg-green-500"
+                      : "bg-red-500"
+                }`}
               ></div>
               <span className="font-bold">{statusMessage}</span>
             </div>
-            {externalId && <p className="text-xs mt-2 text-center opacity-75">ID: {externalId}</p>}
           </div>
 
           {/* Valor */}
@@ -524,7 +453,7 @@ export default function ActivationCheckoutPage() {
               <div className="animate-pulse w-3 h-3 bg-blue-500 rounded-full"></div>
               <span className="text-blue-800 font-medium">Aguardando depósito...</span>
             </div>
-            <p className="text-blue-700 text-sm mt-1">Verificamos automaticamente a cada 2 segundos</p>
+            <p className="text-blue-700 text-sm mt-1">Confirmação automática via webhook</p>
           </div>
 
           {/* Instruções */}
@@ -587,22 +516,6 @@ export default function ActivationCheckoutPage() {
               🧪 SIMULAR DEPÓSITO APROVADO (TESTE)
             </button>
           )}
-
-          {/* Botão de Verificação Manual */}
-          <button
-            onClick={checkPayment}
-            disabled={checking}
-            className="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium py-3 px-4 rounded-lg transition-colors disabled:opacity-50"
-          >
-            {checking ? (
-              <div className="flex items-center justify-center">
-                <RefreshCw className="w-4 h-4 animate-spin mr-2" />
-                Verificando...
-              </div>
-            ) : (
-              "Verificar Depósito"
-            )}
-          </button>
         </div>
       </div>
     </main>

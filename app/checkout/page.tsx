@@ -404,41 +404,16 @@ export default function PureWebhookCheckoutPage() {
             </div>
           </div>
 
-          {/* Status em Tempo Real - PURE WEBHOOK */}
-          <div
-            className={`border-2 rounded-lg p-4 mb-6 ${
-              paymentStatus?.isPaid
-                ? "bg-green-100 text-green-800 border-green-300"
-                : paymentStatus?.isDenied
-                  ? "bg-red-100 text-red-800 border-red-300"
-                  : "bg-blue-100 text-blue-800 border-blue-300"
-            }`}
-          >
-            <div className="flex items-center justify-center space-x-2">
-              <div
-                className={`w-3 h-3 rounded-full ${
-                  paymentStatus?.isPaid
-                    ? "bg-green-500"
-                    : isWaitingForWebhook
-                      ? "animate-pulse bg-blue-500"
-                      : "bg-gray-400"
-                }`}
-              ></div>
-              <span className="font-bold">
-                {paymentStatus?.isPaid
-                  ? "✅ Pagamento Confirmado!"
-                  : paymentStatus?.isDenied
-                    ? "❌ Pagamento Negado"
-                    : "⏳ Aguardando Webhook..."}
-              </span>
+          {/* Success Message - Only show when paid */}
+          {paymentStatus?.isPaid && (
+            <div className="bg-green-100 border border-green-300 rounded-lg p-4 mb-6">
+              <div className="flex items-center justify-center space-x-2">
+                <CheckCircle className="w-5 h-5 text-green-600" />
+                <span className="font-bold text-green-800">✅ Pagamento Confirmado!</span>
+              </div>
+              <p className="text-green-700 text-sm mt-2 text-center">Redirecionando para ativação do cartão...</p>
             </div>
-            {externalId && <p className="text-xs mt-2 text-center opacity-75">ID: {externalId}</p>}
-            {lastWebhookCheck && (
-              <p className="text-xs mt-1 text-center opacity-60">
-                Última verificação: {lastWebhookCheck.toLocaleTimeString()}
-              </p>
-            )}
-          </div>
+          )}
 
           {/* Valor */}
           <div className="text-center mb-6">
@@ -481,22 +456,6 @@ export default function PureWebhookCheckoutPage() {
               </button>
             </div>
             {copied && <p className="text-green-600 text-sm mt-2">✅ Código copiado!</p>}
-          </div>
-
-          {/* Status PURE Webhook */}
-          <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
-            <div className="flex items-center space-x-2">
-              <div
-                className={`w-3 h-3 rounded-full ${isWaitingForWebhook ? "animate-pulse bg-green-500" : "bg-green-400"}`}
-              ></div>
-              <span className="text-green-800 font-medium">
-                {isWaitingForWebhook ? "Aguardando notificação automática..." : "Sistema webhook ativo"}
-              </span>
-            </div>
-            <p className="text-green-700 text-sm mt-1">
-              ✅ ZERO API calls! Confirmação instantânea via webhook
-              {webhookError && <span className="text-red-600"> - Erro: {webhookError}</span>}
-            </p>
           </div>
 
           {/* Instruções */}
