@@ -96,15 +96,21 @@ export async function POST(request: NextRequest) {
       const invoiceResult = await createResponse.json()
       console.log("✅ Fatura SuperPayBR criada com sucesso!")
 
+      // Gerar QR Code usando QuickChart como fallback
+      const pixPayload = invoiceResult.fatura?.pix?.payload
+      const qrCodeUrl = pixPayload
+        ? `https://quickchart.io/qr?text=${encodeURIComponent(pixPayload)}&size=200`
+        : "/placeholder.svg?height=200&width=200"
+
       // Mapear resposta para formato esperado
       const mappedInvoice = {
         id: invoiceResult.fatura.id,
         invoice_id: invoiceResult.fatura.invoice_id,
         external_id: invoiceData.payment.id,
         pix: {
-          payload: invoiceResult.fatura.pix.payload,
-          image: invoiceResult.fatura.pix.image,
-          qr_code: invoiceResult.fatura.pix.image,
+          payload: pixPayload || "",
+          image: invoiceResult.fatura?.pix?.image || qrCodeUrl,
+          qr_code: qrCodeUrl, // Usar QuickChart para garantir que funcione
         },
         status: {
           code: invoiceResult.fatura.status.code,
@@ -120,6 +126,8 @@ export async function POST(request: NextRequest) {
         },
         type: "real",
       }
+
+      console.log("🎯 QR Code URL gerada:", qrCodeUrl)
 
       return NextResponse.json({
         success: true,
