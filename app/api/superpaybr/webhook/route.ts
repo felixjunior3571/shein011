@@ -5,26 +5,27 @@ const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("=== WEBHOOK SUPERPAYBR RECEBIDO ===")
+    console.log("📨 Webhook SuperPayBR recebido")
 
-    const webhookData = await request.json()
-    console.log("📥 Dados do webhook SuperPayBR:", JSON.stringify(webhookData, null, 2))
+    const body = await request.json()
+    console.log("📋 Dados do webhook:", JSON.stringify(body, null, 2))
 
     // Verificar se é um evento de atualização de fatura
-    if (webhookData.event?.type !== "invoice.update") {
-      console.log("ℹ️ Evento ignorado:", webhookData.event?.type)
+    if (body.event?.type !== "invoice.update") {
+      console.log("ℹ️ Evento ignorado:", body.event?.type)
       return NextResponse.json({ success: true, message: "Evento ignorado" })
     }
 
-    const invoice = webhookData.invoices || webhookData.invoice
+    const invoice = body.invoices
     if (!invoice) {
-      console.log("❌ Dados da fatura não encontrados no webhook")
-      return NextResponse.json({ success: false, error: "Dados da fatura não encontrados" }, { status: 400 })
+      console.log("⚠️ Dados da fatura não encontrados no webhook")
+      return NextResponse.json({ success: false, error: "Dados da fatura não encontrados" })
     }
 
-    const externalId = invoice.external_id || invoice.id
+    const externalId = invoice.external_id || invoice.payment?.id
     const statusCode = invoice.status?.code
-    const statusTitle = invoice.status?.title || "Status desconhecido"
+    const statusTitle = invoice.status?.title
+    const statusName = invoice.status?.text || "unknown"
 
     console.log("🔍 Processando webhook SuperPayBR:", {
       external_id: externalId,
@@ -33,36 +34,11 @@ export async function POST(request: NextRequest) {
     })
 
     // Determinar status do pagamento
-    let isPaid = false
-    let isDenied = false
-    let isExpired = false
-    let isCanceled = false
-    let isRefunded = false
-
-    switch (statusCode) {
-      case 5: // Pagamento Confirmado
-        isPaid = true
-        console.log("✅ PAGAMENTO CONFIRMADO SuperPayBR!")
-        break
-      case 6: // Pagamento Negado
-        isDenied = true
-        console.log("❌ PAGAMENTO NEGADO SuperPayBR!")
-        break
-      case 7: // Pagamento Vencido
-        isExpired = true
-        console.log("⏰ PAGAMENTO VENCIDO SuperPayBR!")
-        break
-      case 8: // Pagamento Cancelado
-        isCanceled = true
-        console.log("🚫 PAGAMENTO CANCELADO SuperPayBR!")
-        break
-      case 9: // Pagamento Estornado
-        isRefunded = true
-        console.log("↩️ PAGAMENTO ESTORNADO SuperPayBR!")
-        break
-      default:
-        console.log(`ℹ️ Status SuperPayBR não processado: ${statusCode} - ${statusTitle}`)
-    }
+    const isPaid = statusCode === 5 // SuperPayBR: 5 = Pago
+    const isDenied = statusCode === 6 // SuperPayBR: 6 = Negado
+    const isExpired = statusCode === 7 // SuperPayBR: 7 = Vencido
+    const isCanceled = statusCode === 8 // SuperPayBR: 8 = Cancelado
+    const isRefunded = statusCode === 9 // SuperPayBR: 9 = Estornado
 
     // Preparar dados para salvar no Supabase
     const webhookPaymentData = {
@@ -75,7 +51,7 @@ export async function POST(request: NextRequest) {
       statusName: statusTitle,
       amount: invoice.valores?.liquido ? invoice.valores.liquido / 100 : 0, // Converter de centavos
       paymentDate: isPaid ? new Date().toISOString() : null,
-      webhookData: webhookData,
+      webhookData: body,
       provider: "superpaybr",
     }
 
@@ -84,7 +60,7 @@ export async function POST(request: NextRequest) {
       status: webhookPaymentData,
     })
 
-    // Salvar no Supabase
+    // ⚠️ UPSERT com tratamento de erro
     const { data, error } = await supabase
       .from("payment_webhooks")
       .upsert(
@@ -101,32 +77,43 @@ export async function POST(request: NextRequest) {
       .select()
 
     if (error) {
-      console.log("❌ Erro ao salvar webhook SuperPayBR no Supabase:", error)
-      return NextResponse.json({ success: false, error: "Erro ao salvar webhook" }, { status: 500 })
+      console.error("❌ Erro ao salvar webhook SuperPayBR no Supabase:", error)
+      // ⚠️ NÃO retornar erro 500 para não afetar o webhook
+      console.log("⚠️ Continuando processamento apesar do erro no Supabase")
+    } else {
+      console.log("✅ Webhook SuperPayBR salvo no Supabase com sucesso!")
     }
 
-    console.log("✅ Webhook SuperPayBR salvo no Supabase com sucesso!")
-
-    // Log para debug
+    // Log específico para cada status
     if (isPaid) {
-      console.log("🎉 PAGAMENTO SUPERPAYBR CONFIRMADO - Cliente será redirecionado!")
+      console.log("🎉 PAGAMENTO CONFIRMADO VIA WEBHOOK SUPERPAYBR!")
+      console.log(`💰 Valor: R$ ${webhookPaymentData.amount}`)
+      console.log(`👤 External ID: ${externalId}`)
+    } else if (isDenied) {
+      console.log("❌ PAGAMENTO NEGADO VIA WEBHOOK SUPERPAYBR!")
+    } else if (isExpired) {
+      console.log("⏰ PAGAMENTO VENCIDO VIA WEBHOOK SUPERPAYBR!")
+    } else if (isCanceled) {
+      console.log("🚫 PAGAMENTO CANCELADO VIA WEBHOOK SUPERPAYBR!")
+    } else if (isRefunded) {
+      console.log("↩️ PAGAMENTO ESTORNADO VIA WEBHOOK SUPERPAYBR!")
     }
 
     return NextResponse.json({
       success: true,
       message: "Webhook SuperPayBR processado com sucesso",
       external_id: externalId,
-      status: webhookPaymentData,
+      status: statusTitle,
+      is_paid: isPaid,
     })
   } catch (error) {
-    console.log("❌ Erro ao processar webhook SuperPayBR:", error)
-    return NextResponse.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : "Erro desconhecido no webhook SuperPayBR",
-      },
-      { status: 500 },
-    )
+    console.error("❌ Erro ao processar webhook SuperPayBR:", error)
+    // ⚠️ Retornar sucesso para não afetar o webhook
+    return NextResponse.json({
+      success: true,
+      message: "Webhook processado com erro interno",
+      error: error instanceof Error ? error.message : "Erro desconhecido",
+    })
   }
 }
 
