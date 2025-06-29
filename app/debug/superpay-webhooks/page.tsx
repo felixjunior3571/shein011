@@ -1,48 +1,53 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useEffect, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { RefreshCw, Webhook, CheckCircle, XCircle, Clock, AlertTriangle } from "lucide-react"
-
-interface WebhookEvent {
-  type: string
-  timestamp: string
-  statusCode?: number
-  statusName?: string
-  externalId?: string
-  amount?: number
-  isPaid?: boolean
-  isDenied?: boolean
-  isExpired?: boolean
-  isCanceled?: boolean
-  isRefunded?: boolean
-  gateway?: string
-}
+import { RefreshCw, Webhook, Database, CheckCircle, XCircle, Clock, AlertTriangle } from "lucide-react"
 
 interface WebhookStats {
   total_received: number
-  processed: number
   payments_confirmed: number
-  recent_events: WebhookEvent[]
-  recent_webhooks: any[]
+  payments_denied: number
+  payments_expired: number
+  recent_webhooks: Array<{
+    timestamp: string
+    invoice_id: string
+    external_id: string
+    status: number
+    status_name: string
+    is_paid: boolean
+    amount: number
+  }>
+}
+
+interface SystemInfo {
+  webhook_only: boolean
+  polling_disabled: boolean
+  realtime_notifications: boolean
+  storage: string
+  memory_storage: boolean
+  database_persistent: boolean
 }
 
 export default function SuperPayWebhooksDebug() {
   const [stats, setStats] = useState<WebhookStats | null>(null)
+  const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null)
   const [loading, setLoading] = useState(true)
-  const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
+  const [lastUpdate, setLastUpdate] = useState<string>("")
 
   const fetchStats = async () => {
     try {
       setLoading(true)
       const response = await fetch("/api/superpay/webhook")
       const data = await response.json()
+
       setStats(data.statistics)
-      setLastUpdate(new Date())
+      setSystemInfo(data.system_info)
+      setLastUpdate(new Date().toLocaleTimeString())
     } catch (error) {
-      console.error("Erro ao buscar estatísticas SuperPay:", error)
+      console.error("Erro ao buscar estatísticas:", error)
     } finally {
       setLoading(false)
     }
@@ -50,41 +55,30 @@ export default function SuperPayWebhooksDebug() {
 
   useEffect(() => {
     fetchStats()
-    const interval = setInterval(fetchStats, 5000) // Atualizar a cada 5 segundos
+
+    // Atualizar a cada 5 segundos
+    const interval = setInterval(fetchStats, 5000)
+
     return () => clearInterval(interval)
   }, [])
 
-  const getStatusIcon = (event: WebhookEvent) => {
-    if (event.isPaid) return <CheckCircle className="h-4 w-4 text-green-500" />
-    if (event.isDenied) return <XCircle className="h-4 w-4 text-red-500" />
-    if (event.isExpired) return <Clock className="h-4 w-4 text-orange-500" />
-    if (event.isCanceled) return <XCircle className="h-4 w-4 text-gray-500" />
-    if (event.isRefunded) return <AlertTriangle className="h-4 w-4 text-yellow-500" />
-    return <Clock className="h-4 w-4 text-blue-500" />
+  const getStatusIcon = (status: number, isPaid: boolean) => {
+    if (isPaid) return <CheckCircle className="h-4 w-4 text-green-500" />
+    if (status === 12) return <XCircle className="h-4 w-4 text-red-500" />
+    if (status === 15) return <Clock className="h-4 w-4 text-orange-500" />
+    return <AlertTriangle className="h-4 w-4 text-yellow-500" />
   }
 
-  const getStatusBadge = (event: WebhookEvent) => {
-    if (event.isPaid)
+  const getStatusBadge = (status: number, isPaid: boolean) => {
+    if (isPaid)
       return (
         <Badge variant="default" className="bg-green-500">
           Pago
         </Badge>
       )
-    if (event.isDenied) return <Badge variant="destructive">Negado</Badge>
-    if (event.isExpired)
-      return (
-        <Badge variant="secondary" className="bg-orange-500">
-          Vencido
-        </Badge>
-      )
-    if (event.isCanceled) return <Badge variant="outline">Cancelado</Badge>
-    if (event.isRefunded)
-      return (
-        <Badge variant="secondary" className="bg-yellow-500">
-          Estornado
-        </Badge>
-      )
-    return <Badge variant="outline">Aguardando</Badge>
+    if (status === 12) return <Badge variant="destructive">Negado</Badge>
+    if (status === 15) return <Badge variant="secondary">Vencido</Badge>
+    return <Badge variant="outline">Pendente</Badge>
   }
 
   return (
@@ -100,9 +94,7 @@ export default function SuperPayWebhooksDebug() {
             <p className="text-gray-600 mt-1">Monitoramento em tempo real do sistema de webhooks SuperPay</p>
           </div>
           <div className="flex items-center gap-4">
-            {lastUpdate && (
-              <span className="text-sm text-gray-500">Última atualização: {lastUpdate.toLocaleTimeString()}</span>
-            )}
+            <span className="text-sm text-gray-500">Última atualização: {lastUpdate}</span>
             <Button onClick={fetchStats} disabled={loading} size="sm">
               <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
               Atualizar
@@ -110,152 +102,160 @@ export default function SuperPayWebhooksDebug() {
           </div>
         </div>
 
-        {/* Estatísticas Gerais */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-gray-600">Total Recebidos</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-blue-600">{stats?.total_received || 0}</div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-gray-600">Processados</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-green-600">{stats?.processed || 0}</div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-gray-600">Pagamentos Confirmados</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-emerald-600">{stats?.payments_confirmed || 0}</div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-gray-600">Taxa de Sucesso</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-purple-600">
-                {stats?.total_received ? Math.round((stats.processed / stats.total_received) * 100) : 0}%
+        {/* System Info */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Database className="h-5 w-5" />
+              Informações do Sistema
+            </CardTitle>
+            <CardDescription>Configuração atual do sistema de webhooks SuperPay</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {systemInfo && (
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                <div className="flex items-center gap-2">
+                  <Badge variant={systemInfo.webhook_only ? "default" : "secondary"}>
+                    {systemInfo.webhook_only ? "✅" : "❌"} Webhook Only
+                  </Badge>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant={systemInfo.polling_disabled ? "default" : "destructive"}>
+                    {systemInfo.polling_disabled ? "✅" : "❌"} Polling Disabled
+                  </Badge>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant={systemInfo.realtime_notifications ? "default" : "secondary"}>
+                    {systemInfo.realtime_notifications ? "✅" : "❌"} Real-time
+                  </Badge>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant={systemInfo.storage === "supabase_only" ? "default" : "secondary"}>
+                    📊 {systemInfo.storage}
+                  </Badge>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant={!systemInfo.memory_storage ? "default" : "destructive"}>
+                    {!systemInfo.memory_storage ? "✅" : "❌"} No Memory Storage
+                  </Badge>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant={systemInfo.database_persistent ? "default" : "secondary"}>
+                    {systemInfo.database_persistent ? "✅" : "❌"} DB Persistent
+                  </Badge>
+                </div>
               </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Statistics */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Total Recebidos</CardTitle>
+              <Webhook className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats?.total_received || 0}</div>
+              <p className="text-xs text-muted-foreground">Webhooks processados</p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Pagamentos Confirmados</CardTitle>
+              <CheckCircle className="h-4 w-4 text-green-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-green-600">{stats?.payments_confirmed || 0}</div>
+              <p className="text-xs text-muted-foreground">Status 5 - Pago</p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Pagamentos Negados</CardTitle>
+              <XCircle className="h-4 w-4 text-red-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-red-600">{stats?.payments_denied || 0}</div>
+              <p className="text-xs text-muted-foreground">Status 12 - Negado</p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Pagamentos Vencidos</CardTitle>
+              <Clock className="h-4 w-4 text-orange-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-orange-600">{stats?.payments_expired || 0}</div>
+              <p className="text-xs text-muted-foreground">Status 15 - Vencido</p>
             </CardContent>
           </Card>
         </div>
 
-        {/* Eventos Recentes */}
+        {/* Recent Webhooks */}
         <Card>
           <CardHeader>
-            <CardTitle>Eventos Recentes SuperPay</CardTitle>
-            <CardDescription>Últimos eventos de webhook recebidos em tempo real</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {loading ? (
-              <div className="flex items-center justify-center py-8">
-                <RefreshCw className="h-6 w-6 animate-spin text-gray-400" />
-                <span className="ml-2 text-gray-500">Carregando eventos...</span>
-              </div>
-            ) : stats?.recent_events && stats.recent_events.length > 0 ? (
-              <div className="space-y-3">
-                {stats.recent_events.map((event, index) => (
-                  <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border">
-                    <div className="flex items-center gap-3">
-                      {getStatusIcon(event)}
-                      <div>
-                        <div className="font-medium text-sm">
-                          {event.type === "webhook_received" ? "Webhook Recebido" : "Erro"}
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          {event.externalId && `ID: ${event.externalId.slice(-8)}`}
-                          {event.amount && ` • R$ ${event.amount.toFixed(2)}`}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {getStatusBadge(event)}
-                      <span className="text-xs text-gray-500">{new Date(event.timestamp).toLocaleTimeString()}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="text-center py-8 text-gray-500">
-                <Webhook className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-                <p>Nenhum evento SuperPay recebido ainda</p>
-                <p className="text-sm mt-1">Os webhooks aparecerão aqui quando forem recebidos</p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Webhooks Recentes */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Webhooks SuperPay Processados</CardTitle>
-            <CardDescription>Histórico detalhado dos webhooks processados</CardDescription>
+            <CardTitle>Webhooks Recentes</CardTitle>
+            <CardDescription>Últimos webhooks processados pelo sistema (dados do Supabase)</CardDescription>
           </CardHeader>
           <CardContent>
             {stats?.recent_webhooks && stats.recent_webhooks.length > 0 ? (
-              <div className="space-y-3">
+              <div className="space-y-4">
                 {stats.recent_webhooks.map((webhook, index) => (
-                  <div key={index} className="flex items-center justify-between p-4 border rounded-lg">
-                    <div className="space-y-1">
-                      <div className="font-medium">Invoice #{webhook.invoice_id}</div>
-                      <div className="text-sm text-gray-600">External ID: {webhook.external_id}</div>
-                      <div className="text-xs text-gray-500">{new Date(webhook.timestamp).toLocaleString()}</div>
+                  <div key={index} className="flex items-center justify-between p-4 border rounded-lg bg-white">
+                    <div className="flex items-center gap-4">
+                      {getStatusIcon(webhook.status, webhook.is_paid)}
+                      <div>
+                        <div className="font-medium">External ID: {webhook.external_id}</div>
+                        <div className="text-sm text-gray-500">
+                          Invoice: {webhook.invoice_id} • {webhook.status_name}
+                        </div>
+                        <div className="text-xs text-gray-400">{new Date(webhook.timestamp).toLocaleString()}</div>
+                      </div>
                     </div>
-                    <div className="text-right space-y-1">
-                      <Badge
-                        variant={webhook.processed ? "default" : "secondary"}
-                        className={webhook.processed ? "bg-green-500" : ""}
-                      >
-                        {webhook.processed ? "Processado" : "Pendente"}
-                      </Badge>
-                      <div className="text-sm text-gray-600">Status: {webhook.status_name || "Desconhecido"}</div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">R$ {webhook.amount?.toFixed(2) || "0.00"}</span>
+                      {getStatusBadge(webhook.status, webhook.is_paid)}
                     </div>
                   </div>
                 ))}
               </div>
             ) : (
               <div className="text-center py-8 text-gray-500">
-                <p>Nenhum webhook SuperPay processado ainda</p>
+                <Webhook className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>Nenhum webhook recebido ainda</p>
+                <p className="text-sm">Os webhooks aparecerão aqui quando forem processados</p>
               </div>
             )}
           </CardContent>
         </Card>
 
-        {/* Informações do Sistema */}
+        {/* API Endpoints */}
         <Card>
           <CardHeader>
-            <CardTitle>Informações do Sistema SuperPay</CardTitle>
+            <CardTitle>Endpoints da API</CardTitle>
+            <CardDescription>URLs disponíveis para integração e testes</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-              <div>
-                <strong>Endpoint:</strong> /api/superpay/webhook
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <Badge variant="outline">POST</Badge>
+                <code className="text-sm bg-gray-100 px-2 py-1 rounded">/api/superpay/webhook</code>
+                <span className="text-sm text-gray-600">Recebe webhooks da SuperPay</span>
               </div>
-              <div>
-                <strong>Método:</strong> POST
+              <div className="flex items-center gap-2">
+                <Badge variant="outline">GET</Badge>
+                <code className="text-sm bg-gray-100 px-2 py-1 rounded">/api/superpay/payment-status</code>
+                <span className="text-sm text-gray-600">Consulta status de pagamento</span>
               </div>
-              <div>
-                <strong>Tipo:</strong> Webhook Only (sem polling)
-              </div>
-              <div>
-                <strong>Armazenamento:</strong> In-Memory Global
-              </div>
-              <div>
-                <strong>Verificação:</strong> A cada 3 segundos
-              </div>
-              <div>
-                <strong>Gateway:</strong> SuperPay
+              <div className="flex items-center gap-2">
+                <Badge variant="outline">GET</Badge>
+                <code className="text-sm bg-gray-100 px-2 py-1 rounded">/api/superpay/webhook</code>
+                <span className="text-sm text-gray-600">Informações e estatísticas</span>
               </div>
             </div>
           </CardContent>
