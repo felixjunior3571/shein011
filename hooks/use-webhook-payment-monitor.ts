@@ -75,7 +75,7 @@ export function useWebhookPaymentMonitor({
         console.log("🔍 Checking webhook data for:", externalId)
       }
 
-      const response = await fetch(`/api/tryplopay/payment-status?externalId=${externalId}`, {
+      const response = await fetch(`/api/superpaybr/payment-status?externalId=${externalId}`, {
         headers: {
           "Cache-Control": "no-cache, no-store, must-revalidate",
           Pragma: "no-cache",
