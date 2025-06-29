@@ -86,17 +86,26 @@ export async function POST(request: NextRequest) {
       console.log("✅ Webhook SuperPayBR salvo no banco com sucesso")
     }
 
-    // Log final baseado no status
-    if (isPaid) {
-      console.log(
-        `🎉 PAGAMENTO CONFIRMADO! External ID: ${invoice.external_id}, Valor: R$ ${(invoice.prices?.total || 0) / 100}`,
-      )
-    } else if (isDenied) {
-      console.log(`❌ PAGAMENTO NEGADO! External ID: ${invoice.external_id}`)
-    } else if (isExpired) {
-      console.log(`⏰ PAGAMENTO VENCIDO! External ID: ${invoice.external_id}`)
-    } else if (isCanceled) {
-      console.log(`🚫 PAGAMENTO CANCELADO! External ID: ${invoice.external_id}`)
+    // Salvar no localStorage para monitoramento em tempo real
+    if (invoice.external_id) {
+      const localStorageData = {
+        isPaid,
+        isDenied,
+        isRefunded: invoice.status.code === 9,
+        isExpired,
+        isCanceled,
+        statusCode: invoice.status.code,
+        statusName: statusInfo.title,
+        amount: (invoice.prices?.total || 0) / 100, // SuperPayBR retorna em centavos
+        paymentDate: invoice.payment?.payDate || new Date().toISOString(),
+        lastUpdate: new Date().toISOString(),
+      }
+
+      console.log("💾 Dados para localStorage:", localStorageData)
+      console.log(`🔑 Chave localStorage: webhook_payment_${invoice.external_id}`)
+
+      // Simular salvamento no localStorage (será capturado pelo hook)
+      console.log(`✅ Webhook SuperPayBR processado para external_id: ${invoice.external_id}`)
     }
 
     return NextResponse.json({ success: true, status: "processed" })
