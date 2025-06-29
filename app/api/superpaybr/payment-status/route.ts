@@ -1,16 +1,12 @@
-import { createClient } from "@supabase/supabase-js"
 import { type NextRequest, NextResponse } from "next/server"
+import { createClient } from "@supabase/supabase-js"
 
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
-// Cache em memória para evitar consultas excessivas
-const statusCache = new Map<string, { data: any; timestamp: number }>()
-const CACHE_DURATION = 30000 // 30 segundos
-
 export async function GET(request: NextRequest) {
   try {
-    const searchParams = request.nextUrl.searchParams
-    const externalId = searchParams.get("external_id")
+    const { searchParams } = new URL(request.url)
+    const externalId = searchParams.get("externalId")
 
     if (!externalId) {
       return NextResponse.json(
@@ -22,87 +18,56 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    console.log("🔍 Consultando status para:", externalId)
+    console.log("📊 === STATUS PAGAMENTO SUPERPAYBR ===")
+    console.log("🆔 External ID:", externalId)
 
-    // Verificar cache primeiro
-    const cached = statusCache.get(externalId)
-    const now = Date.now()
+    // Consultar apenas Supabase (dados do webhook)
+    const { data: paymentData, error } = await supabase
+      .from("payments")
+      .select("*")
+      .eq("external_id", externalId)
+      .single()
 
-    if (cached && now - cached.timestamp < CACHE_DURATION) {
-      console.log("⚡ Retornando do cache")
-      return NextResponse.json({
-        success: true,
-        cached: true,
-        data: cached.data,
-      })
-    }
-
-    // Consultar Supabase
-    const { data, error } = await supabase.from("payments").select("*").eq("external_id", externalId).maybeSingle()
-
-    if (error) {
-      console.error("❌ Erro na consulta:", error)
+    if (error || !paymentData) {
+      console.log("❌ Pagamento não encontrado no Supabase")
       return NextResponse.json(
         {
           success: false,
-          error: "Erro na consulta do banco",
+          error: "Pagamento não encontrado",
+          external_id: externalId,
         },
-        { status: 500 },
+        { status: 404 },
       )
     }
 
-    // Mapear status SuperPayBR
-    const statusMapping = {
-      1: "Aguardando Pagamento",
-      5: "Pagamento Confirmado",
-      6: "Pagamento Cancelado",
-      9: "Pagamento Estornado",
-      12: "Pagamento Negado",
-      15: "Pagamento Vencido",
-    }
-
-    const result = {
-      found: !!data,
-      external_id: externalId,
-      status: {
-        code: data?.status_code || 1,
-        name: statusMapping[data?.status_code as keyof typeof statusMapping] || "Status Desconhecido",
-        isPaid: data?.is_paid || false,
-        isDenied: data?.is_denied || false,
-        isRefunded: data?.is_refunded || false,
-        isExpired: data?.is_expired || false,
-        isCanceled: data?.is_canceled || false,
-      },
-      payment: {
-        amount: data?.amount || 0,
-        payment_date: data?.payment_date,
-        invoice_id: data?.invoice_id,
-      },
-      timestamps: {
-        created_at: data?.created_at,
-        updated_at: data?.updated_at,
-      },
-    }
-
-    // Salvar no cache
-    statusCache.set(externalId, {
-      data: result,
-      timestamp: now,
+    console.log("✅ Status encontrado:", {
+      status: paymentData.status,
+      is_paid: paymentData.is_paid,
+      amount: paymentData.amount,
     })
-
-    console.log("✅ Status consultado:", result.status.name)
 
     return NextResponse.json({
       success: true,
-      cached: false,
-      data: result,
+      data: {
+        external_id: externalId,
+        status: paymentData.status,
+        is_paid: paymentData.is_paid,
+        is_denied: paymentData.is_denied,
+        is_expired: paymentData.is_expired,
+        is_canceled: paymentData.is_canceled,
+        is_refunded: paymentData.is_refunded,
+        amount: paymentData.amount,
+        payment_date: paymentData.payment_date,
+        updated_at: paymentData.updated_at,
+      },
     })
   } catch (error) {
-    console.error("❌ Erro na consulta de status:", error)
+    console.error("❌ Erro ao consultar status:", error)
     return NextResponse.json(
       {
         success: false,
-        error: "Erro interno",
+        error: "Erro interno ao consultar status",
+        details: error instanceof Error ? error.message : "Erro desconhecido",
       },
       { status: 500 },
     )
