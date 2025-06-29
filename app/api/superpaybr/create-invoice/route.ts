@@ -101,18 +101,32 @@ export async function POST(request: NextRequest) {
     if (createResponse.ok) {
       const invoiceResult = await createResponse.json()
       console.log("✅ Fatura SuperPayBR criada com sucesso!")
-      console.log("📋 Dados da fatura:", invoiceResult)
+      console.log("📋 Dados da fatura:", JSON.stringify(invoiceResult, null, 2))
 
-      // Extrair dados do PIX
-      const pixPayload = invoiceResult.fatura?.pix?.payload || invoiceResult.pix?.payload || ""
-      const qrCodeImage = invoiceResult.fatura?.pix?.image || invoiceResult.pix?.image || ""
+      // Extrair dados do PIX com múltiplas tentativas
+      let pixPayload = ""
+      let qrCodeImage = ""
 
-      // Gerar QR Code usando QuickChart como fallback
-      const qrCodeUrl =
-        qrCodeImage ||
-        (pixPayload
-          ? `https://quickchart.io/qr?text=${encodeURIComponent(pixPayload)}&size=200`
-          : "/placeholder.svg?height=200&width=200")
+      // Tentar diferentes caminhos para encontrar o PIX payload
+      if (invoiceResult.fatura?.pix?.payload) {
+        pixPayload = invoiceResult.fatura.pix.payload
+        qrCodeImage = invoiceResult.fatura.pix.image || ""
+      } else if (invoiceResult.pix?.payload) {
+        pixPayload = invoiceResult.pix.payload
+        qrCodeImage = invoiceResult.pix.image || ""
+      } else if (invoiceResult.payload) {
+        pixPayload = invoiceResult.payload
+      }
+
+      console.log("🔍 PIX Payload encontrado:", pixPayload ? "✅ SIM" : "❌ NÃO")
+      console.log("🖼️ QR Code Image:", qrCodeImage ? "✅ SIM" : "❌ NÃO")
+
+      // Gerar QR Code usando QuickChart SEMPRE
+      const qrCodeUrl = pixPayload
+        ? `https://quickchart.io/qr?text=${encodeURIComponent(pixPayload)}&size=250&format=png&margin=1`
+        : "/placeholder.svg?height=250&width=250"
+
+      console.log("🎯 QR Code URL final:", qrCodeUrl)
 
       // Mapear resposta para formato esperado
       const mappedInvoice = {
@@ -121,8 +135,8 @@ export async function POST(request: NextRequest) {
         external_id: externalId,
         pix: {
           payload: pixPayload,
-          image: qrCodeUrl,
-          qr_code: qrCodeUrl,
+          image: qrCodeUrl, // Usar sempre QuickChart
+          qr_code: qrCodeUrl, // Usar sempre QuickChart
         },
         status: {
           code: invoiceResult.fatura?.status?.code || invoiceResult.status?.code || 1,
@@ -139,13 +153,17 @@ export async function POST(request: NextRequest) {
         type: "real",
       }
 
-      console.log("🎯 Fatura mapeada:", mappedInvoice)
+      console.log("🎯 Fatura mapeada final:", JSON.stringify(mappedInvoice, null, 2))
 
       return NextResponse.json({
         success: true,
         data: mappedInvoice,
         message: "Fatura SuperPayBR criada com sucesso",
-        raw_response: invoiceResult,
+        debug: {
+          has_pix_payload: !!pixPayload,
+          qr_code_url: qrCodeUrl,
+          raw_response_keys: Object.keys(invoiceResult),
+        },
       })
     } else {
       const errorText = await createResponse.text()

@@ -1,21 +1,33 @@
-import { type NextRequest, NextResponse } from "next/server"
+import { NextResponse } from "next/server"
 
-export async function POST(request: NextRequest) {
+export async function POST() {
   try {
     console.log("=== AUTENTICAÇÃO SUPERPAYBR ===")
 
-    // Credenciais SuperPayBR conforme especificação
-    const token = process.env.SUPERPAYBR_TOKEN || "ykt9tPrVpDSyWyZ"
-    const secretKey = process.env.SUPERPAYBR_SECRET_KEY || "eWt0OXRQclZwRFN5V3laOjoxNzM0OTExODcxMA=="
+    const token = process.env.SUPERPAYBR_TOKEN
+    const secretKey = process.env.SUPERPAYBR_SECRET_KEY
 
-    console.log("🔑 Fazendo autenticação SuperPayBR...")
+    if (!token || !secretKey) {
+      console.log("❌ Credenciais SuperPayBR não encontradas")
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Credenciais SuperPayBR não configuradas",
+        },
+        { status: 500 },
+      )
+    }
 
-    // Fazer requisição de autenticação usando Basic Auth
+    console.log("🔐 Fazendo autenticação SuperPayBR...")
+
+    // Criar Basic Auth header
+    const credentials = Buffer.from(`${token}:${secretKey}`).toString("base64")
+
     const authResponse = await fetch("https://api.superpaybr.com/auth", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Basic ${Buffer.from(`${token}:${secretKey}`).toString("base64")}`,
+        Authorization: `Basic ${credentials}`,
         Accept: "application/json",
       },
       body: JSON.stringify({
@@ -45,7 +57,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           success: false,
-          error: `Erro de autenticação SuperPayBR: ${authResponse.status} - ${errorText}`,
+          error: `Erro SuperPayBR ${authResponse.status}: ${errorText}`,
         },
         { status: authResponse.status },
       )
@@ -62,7 +74,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   return NextResponse.json({
     success: true,
     message: "SuperPayBR Auth endpoint ativo",
