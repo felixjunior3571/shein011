@@ -1,353 +1,144 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 
-const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
-
-// Armazenamento global em memória (igual TryploPay)
-export const paymentConfirmations = new Map<string, any>()
-
-// Interface para webhook SuperPayBR
-interface SuperPayBRWebhookPayload {
-  event: {
-    type: string
-    date: string
-  }
-  invoices: {
-    id: string
-    invoice_id: string
-    external_id: string
-    token: string
-    status: {
-      code: number
-      title: string
-      text: string
-      description: string
-    }
-    prices: {
-      total: number
-    }
-    valores: {
-      bruto: number
-      liquido: number
-    }
-    client: {
-      name: string
-      document: string
-      email: string
-    }
-    payment: {
-      type: string
-      due_at: string
-      payDate?: string
-      details?: {
-        pix_code?: string
-        qrcode?: string
-        url?: string
-      }
-    }
-  }
-}
-
-// Mapeamento de status codes SuperPayBR
-const statusCodeMapping = {
-  1: {
-    name: "Aguardando Pagamento",
-    isPaid: false,
-    isDenied: false,
-    isRefunded: false,
-    isExpired: false,
-    isCanceled: false,
-  },
-  2: {
-    name: "Em Processamento",
-    isPaid: false,
-    isDenied: false,
-    isRefunded: false,
-    isExpired: false,
-    isCanceled: false,
-  },
-  3: {
-    name: "Processando",
-    isPaid: false,
-    isDenied: false,
-    isRefunded: false,
-    isExpired: false,
-    isCanceled: false,
-  },
-  4: {
-    name: "Aprovado",
-    isPaid: false,
-    isDenied: false,
-    isRefunded: false,
-    isExpired: false,
-    isCanceled: false,
-  },
-  5: {
-    name: "Pago",
-    isPaid: true,
-    isDenied: false,
-    isRefunded: false,
-    isExpired: false,
-    isCanceled: false,
-  },
-  6: {
-    name: "Cancelado",
-    isPaid: false,
-    isDenied: false,
-    isRefunded: false,
-    isExpired: false,
-    isCanceled: true,
-  },
-  7: {
-    name: "Negado",
-    isPaid: false,
-    isDenied: true,
-    isRefunded: false,
-    isExpired: false,
-    isCanceled: false,
-  },
-  8: {
-    name: "Estornado",
-    isPaid: false,
-    isDenied: false,
-    isRefunded: true,
-    isExpired: false,
-    isCanceled: false,
-  },
-  9: {
-    name: "Vencido",
-    isPaid: false,
-    isDenied: false,
-    isRefunded: false,
-    isExpired: true,
-    isCanceled: false,
-  },
-  10: {
-    name: "Contestado",
-    isPaid: false,
-    isDenied: true,
-    isRefunded: false,
-    isExpired: false,
-    isCanceled: false,
-  },
-  11: {
-    name: "Chargeback",
-    isPaid: false,
-    isDenied: true,
-    isRefunded: false,
-    isExpired: false,
-    isCanceled: false,
-  },
-  12: {
-    name: "Negado",
-    isPaid: false,
-    isDenied: true,
-    isRefunded: false,
-    isExpired: false,
-    isCanceled: false,
-  },
-  13: {
-    name: "Pendente",
-    isPaid: false,
-    isDenied: false,
-    isRefunded: false,
-    isExpired: false,
-    isCanceled: false,
-  },
-  14: {
-    name: "Expirado",
-    isPaid: false,
-    isDenied: false,
-    isRefunded: false,
-    isExpired: true,
-    isCanceled: false,
-  },
-  15: {
-    name: "Vencido",
-    isPaid: false,
-    isDenied: false,
-    isRefunded: false,
-    isExpired: true,
-    isCanceled: false,
-  },
-  16: {
-    name: "Falha",
-    isPaid: false,
-    isDenied: true,
-    isRefunded: false,
-    isExpired: false,
-    isCanceled: false,
-  },
-}
+// Armazenamento em memória global para webhooks
+const paymentConfirmations = new Map<string, any>()
 
 export async function POST(request: NextRequest) {
   try {
     console.log("🔔 === WEBHOOK SUPERPAYBR RECEBIDO ===")
 
-    const payload: SuperPayBRWebhookPayload = await request.json()
-    console.log("📥 Payload completo:", JSON.stringify(payload, null, 2))
+    const webhookData = await request.json()
+    console.log("📋 Dados do webhook:", JSON.stringify(webhookData, null, 2))
 
-    // Verificar se é um evento de atualização de fatura
-    if (payload.event?.type !== "invoice.update") {
-      console.log("ℹ️ Evento ignorado:", payload.event?.type)
-      return NextResponse.json({ success: true, message: "Evento ignorado" })
+    // Extrair dados do webhook SuperPayBR
+    const externalId = webhookData.external_id || webhookData.payment?.external_id || webhookData.id
+    const statusCode = webhookData.status?.code || webhookData.status_code || 1
+    const statusTitle = webhookData.status?.title || webhookData.status_name || "Aguardando"
+    const amount = webhookData.amount || webhookData.payment?.amount || 0
+
+    console.log("🔍 Dados extraídos do webhook:", {
+      externalId,
+      statusCode,
+      statusTitle,
+      amount,
+    })
+
+    if (!externalId) {
+      console.log("⚠️ External ID não encontrado no webhook")
+      return NextResponse.json({ success: true, message: "External ID não encontrado" })
     }
 
-    const invoice = payload.invoices
-    if (!invoice) {
-      console.log("⚠️ Webhook SuperPayBR sem dados de fatura")
-      return NextResponse.json({ success: true, message: "Webhook recebido mas sem dados de fatura" })
+    // Mapear status codes SuperPayBR
+    const statusMapping = {
+      1: { isPaid: false, isDenied: false, isRefunded: false, isExpired: false, isCanceled: false }, // Aguardando
+      2: { isPaid: false, isDenied: false, isRefunded: false, isExpired: false, isCanceled: false }, // Processando
+      3: { isPaid: false, isDenied: true, isRefunded: false, isExpired: false, isCanceled: false }, // Negado
+      4: { isPaid: false, isDenied: false, isRefunded: false, isExpired: true, isCanceled: false }, // Vencido
+      5: { isPaid: true, isDenied: false, isRefunded: false, isExpired: false, isCanceled: false }, // Pago
+      6: { isPaid: false, isDenied: false, isRefunded: true, isExpired: false, isCanceled: false }, // Estornado
+      7: { isPaid: false, isDenied: false, isRefunded: false, isExpired: false, isCanceled: true }, // Cancelado
     }
 
-    const externalId = invoice.external_id
-    const invoiceId = invoice.invoice_id || invoice.id
-    const token = invoice.token
-    const statusCode = invoice.status.code
-    const statusTitle = invoice.status.title
-    const statusDescription = invoice.status.description
-    const amount = (invoice.prices?.total || invoice.valores?.bruto || 0) / 100 // SuperPayBR usa centavos
+    const statusInfo = statusMapping[statusCode as keyof typeof statusMapping] || statusMapping[1]
 
-    console.log("📊 Dados do webhook SuperPayBR:")
-    console.log(`External ID: ${externalId}`)
-    console.log(`Invoice ID: ${invoiceId}`)
-    console.log(`Token: ${token}`)
-    console.log(`Status Code: ${statusCode}`)
-    console.log(`Status Title: ${statusTitle}`)
-    console.log(`Valor: R$ ${amount.toFixed(2)}`)
-    console.log(`Cliente: ${invoice.client?.name || "N/A"}`)
-
-    // Mapear status code
-    const statusInfo = statusCodeMapping[statusCode as keyof typeof statusCodeMapping] || {
-      name: statusTitle || "Status Desconhecido",
-      isPaid: false,
-      isDenied: false,
-      isRefunded: false,
-      isExpired: false,
-      isCanceled: false,
-    }
-
-    // Preparar dados do pagamento (formato TryploPay)
+    // Dados do pagamento para armazenamento
     const webhookPaymentData = {
-      isPaid: statusInfo.isPaid,
-      isDenied: statusInfo.isDenied,
-      isRefunded: statusInfo.isRefunded,
-      isExpired: statusInfo.isExpired,
-      isCanceled: statusInfo.isCanceled,
-      statusCode: statusCode,
-      statusName: statusInfo.name,
-      statusDescription: statusDescription,
-      amount: amount,
-      paymentDate: statusInfo.isPaid ? invoice.payment?.payDate || new Date().toISOString() : null,
+      external_id: externalId,
+      status_code: statusCode,
+      status_name: statusTitle,
+      amount: Number.parseFloat(amount.toString()) || 0,
+      payment_date: statusInfo.isPaid ? new Date().toISOString() : null,
       timestamp: new Date().toISOString(),
-      externalId: externalId,
-      invoiceId: invoiceId,
-      token: token,
-      clientName: invoice.client?.name || "",
-      clientDocument: invoice.client?.document || "",
-      clientEmail: invoice.client?.email || "",
-      paymentDetails: invoice.payment,
-      webhookData: payload,
-      provider: "superpaybr",
+      raw_webhook: webhookData,
+      ...statusInfo,
     }
 
-    console.log("💾 Salvando confirmação SuperPayBR em memória...")
+    console.log("💾 Dados do pagamento processados:", {
+      external_id: webhookPaymentData.external_id,
+      isPaid: webhookPaymentData.isPaid,
+      isDenied: webhookPaymentData.isDenied,
+      amount: webhookPaymentData.amount,
+    })
 
-    // Salvar em memória global (igual TryploPay)
+    // Armazenar em memória global (principal)
     paymentConfirmations.set(externalId, webhookPaymentData)
-    paymentConfirmations.set(invoiceId, webhookPaymentData)
-    paymentConfirmations.set(token, webhookPaymentData)
-    paymentConfirmations.set(`token_${token}`, webhookPaymentData)
+    console.log("✅ Webhook armazenado em memória global")
 
-    console.log(`✅ Confirmação SuperPayBR salva para: ${externalId}`)
-    console.log(`📊 Total de confirmações em memória: ${paymentConfirmations.size}`)
-
-    // Backup no Supabase
+    // Backup no Supabase (opcional)
     try {
-      const { error: supabaseError } = await supabase.from("payment_webhooks").upsert(
-        {
-          external_id: externalId,
-          invoice_id: invoiceId,
-          token: token,
-          status_code: statusCode,
-          status_name: statusInfo.name,
-          status_description: statusDescription,
-          amount: amount,
-          payment_date: webhookPaymentData.paymentDate,
-          is_paid: statusInfo.isPaid,
-          is_denied: statusInfo.isDenied,
-          is_refunded: statusInfo.isRefunded,
-          is_expired: statusInfo.isExpired,
-          is_canceled: statusInfo.isCanceled,
-          webhook_data: payload,
-          received_at: new Date().toISOString(),
-        },
-        {
-          onConflict: "external_id",
-        },
-      )
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 
-      if (supabaseError) {
-        console.log("⚠️ Erro ao salvar no Supabase SuperPayBR:", supabaseError)
-      } else {
-        console.log("✅ Backup SuperPayBR salvo no Supabase")
+      if (supabaseUrl && supabaseKey) {
+        const supabase = createClient(supabaseUrl, supabaseKey)
+
+        const { error } = await supabase.from("superpaybr_webhooks").upsert({
+          external_id: externalId,
+          status_code: statusCode,
+          status_name: statusTitle,
+          amount: webhookPaymentData.amount,
+          is_paid: webhookPaymentData.isPaid,
+          is_denied: webhookPaymentData.isDenied,
+          is_refunded: webhookPaymentData.isRefunded,
+          is_expired: webhookPaymentData.isExpired,
+          is_canceled: webhookPaymentData.isCanceled,
+          payment_date: webhookPaymentData.payment_date,
+          raw_webhook: webhookData,
+          created_at: new Date().toISOString(),
+        })
+
+        if (error) {
+          console.log("⚠️ Erro ao salvar no Supabase:", error.message)
+        } else {
+          console.log("✅ Webhook salvo no Supabase como backup")
+        }
       }
     } catch (supabaseError) {
-      console.log("⚠️ Erro no backup Supabase SuperPayBR:", supabaseError)
+      console.log("⚠️ Erro no backup Supabase:", supabaseError)
     }
 
-    // Log do status
-    if (statusInfo.isPaid) {
-      console.log("🎉 PAGAMENTO CONFIRMADO VIA WEBHOOK SUPERPAYBR!")
-    } else if (statusInfo.isDenied) {
-      console.log("❌ PAGAMENTO NEGADO VIA WEBHOOK SUPERPAYBR!")
-    } else if (statusInfo.isRefunded) {
-      console.log("↩️ PAGAMENTO ESTORNADO VIA WEBHOOK SUPERPAYBR!")
-    } else if (statusInfo.isExpired) {
-      console.log("⏰ PAGAMENTO VENCIDO VIA WEBHOOK SUPERPAYBR!")
-    } else if (statusInfo.isCanceled) {
-      console.log("🚫 PAGAMENTO CANCELADO VIA WEBHOOK SUPERPAYBR!")
-    } else {
-      console.log("ℹ️ Status SuperPayBR atualizado:", statusInfo.name)
-    }
+    console.log(`✅ Webhook SuperPayBR processado: ${externalId} - ${statusTitle}`)
 
-    // SEMPRE retornar 200 OK (igual TryploPay)
+    // SEMPRE retornar 200 OK para SuperPayBR
     return NextResponse.json({
       success: true,
-      message: "Webhook SuperPayBR processado com sucesso",
+      message: "Webhook processado com sucesso",
       external_id: externalId,
-      invoice_id: invoiceId,
-      status: statusInfo.name,
-      status_code: statusCode,
-      is_paid: statusInfo.isPaid,
-      amount: amount,
-      processed_at: new Date().toISOString(),
+      status: statusTitle,
     })
   } catch (error) {
     console.error("❌ Erro ao processar webhook SuperPayBR:", error)
 
-    // SEMPRE retornar 200 OK mesmo com erro (igual TryploPay)
+    // SEMPRE retornar 200 OK mesmo com erro
     return NextResponse.json({
       success: true,
-      message: "Webhook SuperPayBR recebido com erro",
+      message: "Webhook recebido (com erro interno)",
       error: error instanceof Error ? error.message : "Erro desconhecido",
-      timestamp: new Date().toISOString(),
     })
   }
 }
 
 export async function GET() {
+  const totalWebhooks = paymentConfirmations.size
+  const recentWebhooks = Array.from(paymentConfirmations.entries())
+    .slice(-5)
+    .map(([key, value]) => ({
+      external_id: key,
+      status: value.status_name,
+      timestamp: value.timestamp,
+    }))
+
   return NextResponse.json({
     success: true,
     message: "SuperPayBR Webhook endpoint ativo",
+    total_webhooks: totalWebhooks,
+    recent_webhooks: recentWebhooks,
     timestamp: new Date().toISOString(),
-    confirmations_count: paymentConfirmations.size,
-    recent_confirmations: Array.from(paymentConfirmations.entries())
-      .slice(-5)
-      .map(([key, value]) => ({
-        external_id: key,
-        status: value.statusName,
-        amount: value.amount,
-        timestamp: value.timestamp,
-      })),
   })
+}
+
+// Função para acessar dados de pagamento (usada por outros endpoints)
+export function getPaymentData(externalId: string) {
+  return paymentConfirmations.get(externalId) || null
 }
