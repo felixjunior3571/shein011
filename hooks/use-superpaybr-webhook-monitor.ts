@@ -12,10 +12,15 @@ interface PaymentStatus {
   statusName: string
   amount: number
   paymentDate: string | null
+  externalId: string
+  invoiceId: string
+  token: string
 }
 
 interface WebhookMonitorOptions {
   externalId: string | null
+  invoiceId?: string | null
+  token?: string | null
   enableDebug?: boolean
   onPaymentConfirmed?: (data: PaymentStatus) => void
   onPaymentDenied?: (data: PaymentStatus) => void
@@ -26,6 +31,8 @@ interface WebhookMonitorOptions {
 
 export function useSuperPayBRWebhookMonitor({
   externalId,
+  invoiceId,
+  token,
   enableDebug = false,
   onPaymentConfirmed,
   onPaymentDenied,
@@ -40,130 +47,100 @@ export function useSuperPayBRWebhookMonitor({
 
   const intervalRef = useRef<NodeJS.Timeout | null>(null)
   const callbackExecutedRef = useRef<boolean>(false)
-  const isCheckingRef = useRef<boolean>(false)
-  const requestCountRef = useRef<number>(0)
-  const lastRequestTimeRef = useRef<number>(0)
+  const paymentStatusRef = useRef<string>("waiting")
 
-  const checkPaymentStatus = useCallback(async () => {
-    // ⚠️ IMPORTANTE: Evitar múltiplas requisições simultâneas
-    if (!externalId || callbackExecutedRef.current || isCheckingRef.current) {
-      return
-    }
-
-    // ⚠️ RATE LIMITING: Máximo 1 requisição por 10 segundos
-    const now = Date.now()
-    if (now - lastRequestTimeRef.current < 10000) {
-      if (enableDebug) {
-        console.log("⏳ Rate limit ativo - aguardando...")
-      }
-      return
-    }
-
-    // ⚠️ LIMITE de requisições por sessão
-    if (requestCountRef.current > 50) {
-      if (enableDebug) {
-        console.log("🛑 Limite de requisições atingido")
-      }
+  const checkWebhookConfirmation = useCallback(async () => {
+    if (!externalId || callbackExecutedRef.current || paymentStatusRef.current === "confirmed") {
       return
     }
 
     try {
-      isCheckingRef.current = true
-      requestCountRef.current++
-      lastRequestTimeRef.current = now
       setError(null)
       setLastCheck(new Date())
 
       if (enableDebug) {
-        console.log(`🔍 Verificando status SuperPayBR (${requestCountRef.current}/50):`, externalId)
+        console.log("🔍 Verificando confirmação webhook SuperPayBR:", {
+          externalId,
+          invoiceId,
+          token,
+        })
       }
 
-      // ⚠️ TIMEOUT agressivo para evitar requisições travadas
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 3000) // 3 segundos timeout
+      // ✅ CONSULTAR API DE STATUS COM MÚLTIPLAS CHAVES
+      const params = new URLSearchParams()
+      if (externalId) params.append("external_id", externalId)
+      if (invoiceId) params.append("invoice_id", invoiceId)
+      if (token) params.append("token", token)
 
-      const response = await fetch(`/api/superpaybr/check-payment?external_id=${externalId}`, {
+      const response = await fetch(`/api/superpaybr/payment-status?${params.toString()}`, {
         method: "GET",
         headers: {
           "Cache-Control": "no-cache",
           Pragma: "no-cache",
         },
-        signal: controller.signal,
       })
-
-      clearTimeout(timeoutId)
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`)
       }
 
-      const data = await response.json()
+      const result = await response.json()
 
-      if (data.success) {
-        const paymentStatus: PaymentStatus = {
-          isPaid: data.isPaid || false,
-          isDenied: data.isDenied || false,
-          isRefunded: data.isRefunded || false,
-          isExpired: data.isExpired || false,
-          isCanceled: data.isCanceled || false,
-          statusCode: data.statusCode || 1,
-          statusName: data.statusName || "pending",
-          amount: data.amount || 0,
-          paymentDate: data.paymentDate || null,
+      if (result.success && result.found && result.data) {
+        const paymentData: PaymentStatus = result.data
+
+        setStatus(paymentData)
+
+        if (enableDebug) {
+          console.log("✅ Confirmação encontrada:", {
+            isPaid: paymentData.isPaid,
+            statusCode: paymentData.statusCode,
+            statusName: paymentData.statusName,
+          })
         }
 
-        setStatus(paymentStatus)
-
-        // ⚠️ IMPORTANTE: Executar callbacks apenas uma vez
+        // ✅ EXECUTAR CALLBACKS APENAS UMA VEZ
         if (!callbackExecutedRef.current) {
-          if (paymentStatus.isPaid && onPaymentConfirmed) {
-            if (enableDebug) {
-              console.log("✅ SuperPayBR: Pagamento confirmado!")
-            }
+          if (paymentData.isPaid && onPaymentConfirmed) {
+            console.log("🎉 PAGAMENTO CONFIRMADO VIA WEBHOOK!")
             callbackExecutedRef.current = true
+            paymentStatusRef.current = "confirmed"
             setIsWaitingForWebhook(false)
-            onPaymentConfirmed(paymentStatus)
-          } else if (paymentStatus.isDenied && onPaymentDenied) {
-            if (enableDebug) {
-              console.log("❌ SuperPayBR: Pagamento negado!")
-            }
+            onPaymentConfirmed(paymentData)
+          } else if (paymentData.isDenied && onPaymentDenied) {
+            console.log("❌ PAGAMENTO NEGADO VIA WEBHOOK!")
             callbackExecutedRef.current = true
+            paymentStatusRef.current = "denied"
             setIsWaitingForWebhook(false)
-            onPaymentDenied(paymentStatus)
-          } else if (paymentStatus.isExpired && onPaymentExpired) {
-            if (enableDebug) {
-              console.log("⏰ SuperPayBR: Pagamento vencido!")
-            }
+            onPaymentDenied(paymentData)
+          } else if (paymentData.isExpired && onPaymentExpired) {
+            console.log("⏰ PAGAMENTO VENCIDO VIA WEBHOOK!")
             callbackExecutedRef.current = true
+            paymentStatusRef.current = "expired"
             setIsWaitingForWebhook(false)
-            onPaymentExpired(paymentStatus)
-          } else if (paymentStatus.isCanceled && onPaymentCanceled) {
-            if (enableDebug) {
-              console.log("🚫 SuperPayBR: Pagamento cancelado!")
-            }
+            onPaymentExpired(paymentData)
+          } else if (paymentData.isCanceled && onPaymentCanceled) {
+            console.log("🚫 PAGAMENTO CANCELADO VIA WEBHOOK!")
             callbackExecutedRef.current = true
+            paymentStatusRef.current = "canceled"
             setIsWaitingForWebhook(false)
-            onPaymentCanceled(paymentStatus)
-          } else if (paymentStatus.isRefunded && onPaymentRefunded) {
-            if (enableDebug) {
-              console.log("↩️ SuperPayBR: Pagamento estornado!")
-            }
+            onPaymentCanceled(paymentData)
+          } else if (paymentData.isRefunded && onPaymentRefunded) {
+            console.log("↩️ PAGAMENTO ESTORNADO VIA WEBHOOK!")
             callbackExecutedRef.current = true
+            paymentStatusRef.current = "refunded"
             setIsWaitingForWebhook(false)
-            onPaymentRefunded(paymentStatus)
-          } else {
-            // Status ainda pendente
-            setIsWaitingForWebhook(true)
+            onPaymentRefunded(paymentData)
           }
         }
 
-        // ⚠️ PARAR monitoramento se status final foi atingido
+        // ✅ PARAR MONITORAMENTO SE STATUS FINAL FOI ATINGIDO
         if (
-          paymentStatus.isPaid ||
-          paymentStatus.isDenied ||
-          paymentStatus.isExpired ||
-          paymentStatus.isCanceled ||
-          paymentStatus.isRefunded
+          paymentData.isPaid ||
+          paymentData.isDenied ||
+          paymentData.isExpired ||
+          paymentData.isCanceled ||
+          paymentData.isRefunded
         ) {
           if (intervalRef.current) {
             clearInterval(intervalRef.current)
@@ -174,25 +151,23 @@ export function useSuperPayBRWebhookMonitor({
           }
         }
       } else {
-        throw new Error(data.error || "Erro ao verificar status SuperPayBR")
+        // Ainda aguardando webhook
+        setIsWaitingForWebhook(true)
+        if (enableDebug) {
+          console.log("⏳ Aguardando confirmação via webhook SuperPayBR...")
+        }
       }
     } catch (err) {
-      if (err instanceof Error && err.name === "AbortError") {
-        if (enableDebug) {
-          console.log("⏰ Timeout na verificação SuperPayBR")
-        }
-      } else {
-        const errorMessage = err instanceof Error ? err.message : "Erro desconhecido SuperPayBR"
-        setError(errorMessage)
-        if (enableDebug) {
-          console.error("❌ Erro ao verificar SuperPayBR:", errorMessage)
-        }
+      const errorMessage = err instanceof Error ? err.message : "Erro desconhecido SuperPayBR"
+      setError(errorMessage)
+      if (enableDebug) {
+        console.error("❌ Erro ao verificar webhook SuperPayBR:", errorMessage)
       }
-    } finally {
-      isCheckingRef.current = false
     }
   }, [
     externalId,
+    invoiceId,
+    token,
     enableDebug,
     onPaymentConfirmed,
     onPaymentDenied,
@@ -201,54 +176,52 @@ export function useSuperPayBRWebhookMonitor({
     onPaymentRefunded,
   ])
 
-  // ⚠️ IMPORTANTE: Iniciar monitoramento apenas quando necessário
+  // ✅ MONITORAMENTO A CADA 3 SEGUNDOS
   useEffect(() => {
     if (!externalId || callbackExecutedRef.current) {
       return
     }
 
     if (enableDebug) {
-      console.log("🚀 Iniciando monitoramento SuperPayBR:", externalId)
+      console.log("🚀 Iniciando monitoramento webhook SuperPayBR:", {
+        externalId,
+        invoiceId,
+        token,
+      })
     }
 
     setIsWaitingForWebhook(true)
     callbackExecutedRef.current = false
-    requestCountRef.current = 0
-    lastRequestTimeRef.current = 0
+    paymentStatusRef.current = "waiting"
 
-    // Verificação inicial após 2 segundos
-    const initialTimeout = setTimeout(() => {
-      checkPaymentStatus()
-    }, 2000)
+    // Verificação inicial imediata
+    checkWebhookConfirmation()
 
-    // ⚠️ IMPORTANTE: Intervalo muito maior para evitar ERR_INSUFFICIENT_RESOURCES
+    // ✅ VERIFICAR A CADA 3 SEGUNDOS
     intervalRef.current = setInterval(() => {
-      if (!callbackExecutedRef.current) {
-        checkPaymentStatus()
+      if (!callbackExecutedRef.current && paymentStatusRef.current !== "confirmed") {
+        checkWebhookConfirmation()
       }
-    }, 30000) // 30 segundos entre verificações
+    }, 3000)
 
     return () => {
-      clearTimeout(initialTimeout)
       if (intervalRef.current) {
         clearInterval(intervalRef.current)
         intervalRef.current = null
       }
-      isCheckingRef.current = false
       if (enableDebug) {
         console.log("🛑 Monitoramento SuperPayBR limpo")
       }
     }
-  }, [externalId, checkPaymentStatus, enableDebug])
+  }, [externalId, invoiceId, token, checkWebhookConfirmation, enableDebug])
 
-  // ⚠️ CLEANUP ao desmontar componente
+  // ✅ CLEANUP AO DESMONTAR COMPONENTE
   useEffect(() => {
     return () => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current)
         intervalRef.current = null
       }
-      isCheckingRef.current = false
     }
   }, [])
 
@@ -257,6 +230,6 @@ export function useSuperPayBRWebhookMonitor({
     isWaitingForWebhook,
     error,
     lastCheck,
-    checkPaymentStatus,
+    checkWebhookConfirmation,
   }
 }
