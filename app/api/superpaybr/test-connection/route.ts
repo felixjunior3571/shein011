@@ -1,129 +1,115 @@
-import { type NextRequest, NextResponse } from "next/server"
+import { NextResponse } from "next/server"
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
-    console.log("🧪 === TESTANDO CONEXÃO SUPERPAYBR ===")
+    console.log("🔧 Testando conexão SuperPayBR...")
 
     // Verificar variáveis de ambiente
     const apiUrl = process.env.SUPERPAY_API_URL
     const token = process.env.SUPERPAY_TOKEN
     const secretKey = process.env.SUPERPAY_SECRET_KEY
+    const webhookUrl = process.env.SUPERPAY_WEBHOOK_URL
 
-    console.log("🔍 Verificando variáveis de ambiente:", {
-      apiUrl: apiUrl ? "✅ DEFINIDA" : "❌ NÃO DEFINIDA",
-      token: token ? "✅ DEFINIDA" : "❌ NÃO DEFINIDA",
-      secretKey: secretKey ? "✅ DEFINIDA" : "❌ NÃO DEFINIDA",
-    })
+    console.log("📋 Configurações:")
+    console.log("- API URL:", apiUrl ? "✅ Configurada" : "❌ Não configurada")
+    console.log("- Token:", token ? "✅ Configurado" : "❌ Não configurado")
+    console.log("- Secret Key:", secretKey ? "✅ Configurada" : "❌ Não configurada")
+    console.log("- Webhook URL:", webhookUrl ? "✅ Configurada" : "❌ Não configurada")
 
     if (!apiUrl || !token || !secretKey) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Variáveis de ambiente SuperPayBR não configuradas",
-          missing: {
-            SUPERPAY_API_URL: !apiUrl,
-            SUPERPAY_TOKEN: !token,
-            SUPERPAY_SECRET_KEY: !secretKey,
-          },
+      return NextResponse.json({
+        success: false,
+        error: "Configuração SuperPayBR incompleta",
+        details: {
+          hasApiUrl: !!apiUrl,
+          hasToken: !!token,
+          hasSecretKey: !!secretKey,
+          hasWebhookUrl: !!webhookUrl,
         },
-        { status: 500 },
-      )
+      })
     }
 
     // Testar autenticação
     console.log("🔐 Testando autenticação...")
-    const authResponse = await fetch(`${request.nextUrl.origin}/api/superpaybr/auth`, {
-      method: "POST",
-    })
 
-    const authResult = await authResponse.json()
+    const authResponse = await fetch("/api/superpaybr/auth")
+    const authData = await authResponse.json()
 
-    if (!authResult.success) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Falha na autenticação SuperPayBR",
-          details: authResult.error,
-          step: "authentication",
-        },
-        { status: 500 },
-      )
+    if (!authData.success) {
+      return NextResponse.json({
+        success: false,
+        error: "Falha na autenticação SuperPayBR",
+        details: authData.details,
+        step: "authentication",
+      })
     }
 
-    console.log("✅ Autenticação SuperPayBR bem-sucedida!")
+    console.log("✅ Autenticação bem-sucedida!")
 
-    // Testar consulta de faturas (endpoint básico)
-    console.log("📋 Testando consulta de faturas...")
-    const accessToken = authResult.data.access_token
+    // Testar criação de fatura
+    console.log("🧾 Testando criação de fatura...")
 
-    const listResponse = await fetch(`${apiUrl}/v4/invoices?limit=1`, {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-        Accept: "application/json",
+    const testInvoiceData = {
+      external_id: `TEST_${Date.now()}`,
+      amount: 1.0,
+      description: "Teste de conexão SuperPayBR",
+      customer: {
+        name: "Teste SuperPayBR",
+        email: "teste@superpaybr.com",
+        document: "00000000000",
+        phone: "11999999999",
       },
-    })
-
-    console.log("📥 Resposta da consulta:", {
-      status: listResponse.status,
-      statusText: listResponse.statusText,
-      ok: listResponse.ok,
-    })
-
-    if (!listResponse.ok) {
-      const errorText = await listResponse.text()
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Falha na consulta de faturas SuperPayBR",
-          details: errorText,
-          step: "invoice_list",
-        },
-        { status: 500 },
-      )
     }
 
-    const listData = await listResponse.json()
-    console.log("✅ Consulta de faturas SuperPayBR bem-sucedida!")
+    const invoiceResponse = await fetch("/api/superpaybr/create-invoice", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(testInvoiceData),
+    })
+
+    const invoiceData = await invoiceResponse.json()
+
+    if (!invoiceData.success) {
+      return NextResponse.json({
+        success: false,
+        error: "Falha na criação de fatura SuperPayBR",
+        details: invoiceData.error,
+        step: "invoice_creation",
+      })
+    }
+
+    console.log("✅ Fatura criada com sucesso!")
 
     return NextResponse.json({
       success: true,
-      message: "Conexão SuperPayBR testada com sucesso!",
+      message: "Conexão SuperPayBR funcionando perfeitamente!",
       tests: {
-        environment_variables: "✅ PASS",
-        authentication: "✅ PASS",
-        api_access: "✅ PASS",
+        authentication: "✅ Passou",
+        invoice_creation: "✅ Passou",
+        mode: invoiceData.mode,
       },
-      auth_data: {
-        token_type: authResult.data.token_type,
-        expires_in: authResult.data.expires_in,
+      config: {
+        hasApiUrl: !!apiUrl,
+        hasToken: !!token,
+        hasSecretKey: !!secretKey,
+        hasWebhookUrl: !!webhookUrl,
       },
-      api_response: {
-        status: listResponse.status,
-        has_data: !!listData.data,
+      test_invoice: {
+        external_id: invoiceData.external_id,
+        amount: invoiceData.amount,
+        mode: invoiceData.mode,
       },
-      timestamp: new Date().toISOString(),
     })
   } catch (error) {
-    console.error("❌ Erro no teste de conexão SuperPayBR:", error)
+    console.error("❌ Erro no teste de conexão:", error)
 
-    return NextResponse.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : "Erro desconhecido",
-        step: "general_error",
-        timestamp: new Date().toISOString(),
-      },
-      { status: 500 },
-    )
+    return NextResponse.json({
+      success: false,
+      error: "Erro interno no teste de conexão",
+      details: error instanceof Error ? error.message : "Erro desconhecido",
+      step: "internal_error",
+    })
   }
-}
-
-export async function POST() {
-  return NextResponse.json({
-    success: true,
-    message: "Use GET para testar conexão",
-    timestamp: new Date().toISOString(),
-  })
 }

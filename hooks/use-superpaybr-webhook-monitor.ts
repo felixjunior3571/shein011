@@ -48,6 +48,7 @@ export function useSuperPayBRWebhookMonitor({
   const intervalRef = useRef<NodeJS.Timeout | null>(null)
   const callbacksExecutedRef = useRef<Set<string>>(new Set())
   const abortControllerRef = useRef<AbortController | null>(null)
+  const consecutiveErrorsRef = useRef<number>(0)
 
   const checkPaymentStatus = async () => {
     if (!externalId || !enabled) return
@@ -98,6 +99,7 @@ export function useSuperPayBRWebhookMonitor({
       }
 
       setStatus(newStatus)
+      consecutiveErrorsRef.current = 0
 
       // Executar callbacks apenas uma vez por status
       const statusKey = `${externalId}_${newStatus.statusCode}_${newStatus.statusName}`
@@ -171,11 +173,25 @@ export function useSuperPayBRWebhookMonitor({
         return // Requisição cancelada, não é erro
       }
 
+      consecutiveErrorsRef.current++
       const errorMessage = err instanceof Error ? err.message : "Erro desconhecido"
+
       if (enableDebug) {
         console.error("❌ Erro no monitoramento SuperPayBR:", errorMessage)
       }
+
       setError(errorMessage)
+
+      // Parar monitoramento após muitos erros consecutivos
+      if (consecutiveErrorsRef.current >= 5) {
+        if (enableDebug) {
+          console.log("⚠️ Muitos erros consecutivos, parando monitoramento")
+        }
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current)
+          intervalRef.current = null
+        }
+      }
     }
   }
 
@@ -208,11 +224,17 @@ export function useSuperPayBRWebhookMonitor({
     }
   }, [externalId, enabled, interval, enableDebug])
 
+  // Função para verificação manual
+  const checkNow = () => {
+    checkPaymentStatus()
+  }
+
   return {
     status,
     isWaitingForWebhook,
     error,
     lastCheck,
-    checkPaymentStatus,
+    checkPaymentStatus: checkNow,
+    isMonitoring: !!intervalRef.current,
   }
 }
