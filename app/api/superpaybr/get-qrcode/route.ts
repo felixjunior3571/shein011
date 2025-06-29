@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
+import { getSuperPayAccessToken } from "@/lib/superpaybr-auth"
 
 export async function GET(request: NextRequest) {
   try {
@@ -18,52 +19,44 @@ export async function GET(request: NextRequest) {
     console.log("=== OBTENDO QRCODE SUPERPAYBR ===")
     console.log("Invoice ID:", invoiceId)
 
-    // URL específica para obter QR Code conforme documentação SuperPayBR
-    const qrcodeUrl = `https://api.superpaybr.com/invoices/qrcode/${invoiceId}`
-    console.log("🔗 URL QR Code SuperPayBR:", qrcodeUrl)
+    // Obter access token
+    const accessToken = await getSuperPayAccessToken()
 
-    // Fazer requisição pública para obter QR Code (não precisa de autenticação)
-    const qrcodeResponse = await fetch(qrcodeUrl, {
+    // Consultar QR Code na SuperPayBR
+    const qrCodeResponse = await fetch(`https://api.superpaybr.com/v4/invoices/qrcode/${invoiceId}`, {
       method: "GET",
       headers: {
         "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
       },
     })
 
-    console.log("📥 Resposta QR Code SuperPayBR:", {
-      status: qrcodeResponse.status,
-      statusText: qrcodeResponse.statusText,
-      ok: qrcodeResponse.ok,
-    })
-
-    if (qrcodeResponse.ok) {
-      const qrcodeData = await qrcodeResponse.json()
-      console.log("✅ QR Code SuperPayBR obtido com sucesso!")
+    if (qrCodeResponse.ok) {
+      const qrCodeData = await qrCodeResponse.json()
+      console.log("✅ QR Code SuperPayBR obtido:", qrCodeData)
 
       return NextResponse.json({
         success: true,
-        data: qrcodeData,
-        qrcode_url: qrcodeUrl,
+        data: qrCodeData,
       })
     } else {
-      const errorText = await qrcodeResponse.text()
-      console.log("❌ Erro ao obter QR Code SuperPayBR:", qrcodeResponse.status, errorText)
+      const errorText = await qrCodeResponse.text()
+      console.log("❌ Erro ao obter QR Code SuperPayBR:", qrCodeResponse.status, errorText)
 
       return NextResponse.json(
         {
           success: false,
-          error: `Erro ao obter QR Code: ${qrcodeResponse.status} - ${errorText}`,
-          attempted_url: qrcodeUrl,
+          error: `Erro ao obter QR Code: ${qrCodeResponse.status}`,
         },
-        { status: qrcodeResponse.status },
+        { status: qrCodeResponse.status },
       )
     }
   } catch (error) {
-    console.log("❌ Erro ao obter QR Code SuperPayBR:", error)
+    console.log("❌ Erro na obtenção de QR Code SuperPayBR:", error)
     return NextResponse.json(
       {
         success: false,
-        error: "Erro interno ao obter QR Code",
+        error: "Erro interno na obtenção de QR Code",
       },
       { status: 500 },
     )
