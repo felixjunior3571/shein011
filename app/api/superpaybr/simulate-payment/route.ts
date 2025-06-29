@@ -5,10 +5,8 @@ const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("=== SIMULANDO PAGAMENTO SUPERPAYBR ===")
-
     const body = await request.json()
-    const { external_id, amount = 27.97 } = body
+    const { external_id, amount = 34.9 } = body
 
     if (!external_id) {
       return NextResponse.json(
@@ -20,61 +18,48 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    console.log("🧪 Simulando pagamento SuperPayBR:", {
-      external_id,
-      amount,
-    })
+    console.log("🧪 Simulando pagamento SuperPayBR:", external_id)
 
-    // Simular dados do webhook SuperPayBR
-    const simulatedWebhookData = {
+    // Simular dados de pagamento aprovado
+    const simulatedPaymentData = {
       isPaid: true,
       isDenied: false,
       isRefunded: false,
       isExpired: false,
       isCanceled: false,
-      statusCode: 5, // SuperPayBR: 5 = Pagamento Confirmado
+      statusCode: 5, // SuperPayBR: 5 = Pago
       statusName: "Pagamento Confirmado!",
       amount: Number.parseFloat(amount.toString()),
       paymentDate: new Date().toISOString(),
-      webhookData: {
-        event: {
-          type: "invoice.update",
-          date: new Date().toISOString(),
+      webhook_data: {
+        external_id,
+        status: {
+          code: 5,
+          title: "Pagamento Confirmado!",
+          text: "paid",
         },
-        invoices: {
-          external_id,
-          status: {
-            code: 5,
-            title: "Pagamento Confirmado!",
-          },
-          valores: {
-            liquido: Math.round(Number.parseFloat(amount.toString()) * 100), // Centavos
-          },
-        },
+        amount: Math.round(Number.parseFloat(amount.toString()) * 100),
+        paid: true,
+        paid_at: new Date().toISOString(),
+        simulated: true,
       },
-      provider: "superpaybr",
     }
 
-    console.log("💾 Salvando simulação SuperPayBR no Supabase...")
-
     // Salvar no Supabase
-    const { data, error } = await supabase
-      .from("payment_webhooks")
-      .upsert(
-        {
-          external_id,
-          payment_data: simulatedWebhookData,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        },
-        {
-          onConflict: "external_id",
-        },
-      )
-      .select()
+    const { error } = await supabase.from("payment_webhooks").upsert(
+      {
+        external_id,
+        payment_data: simulatedPaymentData,
+        provider: "superpaybr",
+        updated_at: new Date().toISOString(),
+      },
+      {
+        onConflict: "external_id",
+      },
+    )
 
     if (error) {
-      console.log("❌ Erro ao salvar simulação SuperPayBR:", error)
+      console.error("❌ Erro ao simular pagamento SuperPayBR:", error)
       return NextResponse.json({ success: false, error: "Erro ao salvar simulação" }, { status: 500 })
     }
 
@@ -83,25 +68,21 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       message: "Pagamento SuperPayBR simulado com sucesso!",
-      data: simulatedWebhookData,
-      external_id,
+      data: {
+        external_id,
+        status: "paid",
+        amount: simulatedPaymentData.amount,
+        payment_date: simulatedPaymentData.paymentDate,
+      },
     })
   } catch (error) {
-    console.log("❌ Erro ao simular pagamento SuperPayBR:", error)
+    console.error("❌ Erro na simulação SuperPayBR:", error)
     return NextResponse.json(
       {
         success: false,
-        error: error instanceof Error ? error.message : "Erro desconhecido ao simular pagamento SuperPayBR",
+        error: error instanceof Error ? error.message : "Erro desconhecido na simulação SuperPayBR",
       },
       { status: 500 },
     )
   }
-}
-
-export async function GET() {
-  return NextResponse.json({
-    success: true,
-    message: "SuperPayBR Simulate Payment endpoint ativo",
-    timestamp: new Date().toISOString(),
-  })
 }
