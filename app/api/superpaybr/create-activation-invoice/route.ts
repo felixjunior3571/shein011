@@ -2,71 +2,71 @@ import { type NextRequest, NextResponse } from "next/server"
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("💳 Criando fatura de ativação SuperPayBR...")
+    console.log("💳 === CRIANDO FATURA DE ATIVAÇÃO SUPERPAYBR ===")
 
     const body = await request.json()
     const { customerData } = body
 
-    if (!customerData) {
+    if (!customerData?.name || !customerData?.cpf || !customerData?.email) {
       return NextResponse.json(
         {
           success: false,
-          error: "Dados do cliente são obrigatórios",
+          error: "Dados do cliente obrigatórios: name, cpf, email",
         },
         { status: 400 },
       )
     }
 
-    const externalId = `SHEIN_ACTIVATION_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`
-    const activationAmount = 1.0 // R$ 1,00 para ativação
+    const externalId = `ACTIVATION_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    const amount = 9.9 // Taxa de ativação
 
-    console.log("📄 Criando fatura de ativação:", { externalId, amount: activationAmount })
+    console.log("📋 Criando fatura de ativação:", { externalId, amount, customer: customerData.name })
 
-    // Usar o endpoint de criação de fatura padrão
-    const createResponse = await fetch(`${request.nextUrl.origin}/api/superpaybr/create-invoice`, {
+    // Usar o endpoint principal de criação
+    const invoiceResponse = await fetch(`${request.nextUrl.origin}/api/superpaybr/create-invoice`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        amount: activationAmount,
+        amount,
         customerData,
         externalId,
-        description: "Ativação do Cartão SHEIN",
+        description: "Taxa de Ativação - Cartão SHEIN",
       }),
     })
 
-    const createResult = await createResponse.json()
+    const invoiceResult = await invoiceResponse.json()
 
-    if (!createResult.success) {
+    if (invoiceResult.success) {
+      console.log("✅ Fatura de ativação criada:", invoiceResult.data.invoice_id)
+
+      return NextResponse.json({
+        success: true,
+        message: "Fatura de ativação criada com sucesso",
+        data: {
+          ...invoiceResult.data,
+          type: "activation",
+          description: "Taxa de Ativação - Cartão SHEIN",
+        },
+      })
+    } else {
+      console.error("❌ Erro ao criar fatura de ativação:", invoiceResult.error)
       return NextResponse.json(
         {
           success: false,
           error: "Falha ao criar fatura de ativação",
-          details: createResult.error,
+          details: invoiceResult.error,
         },
-        { status: createResponse.status },
+        { status: 500 },
       )
     }
-
-    console.log("✅ Fatura de ativação criada com sucesso:", createResult.data.invoice_id)
-
-    return NextResponse.json({
-      success: true,
-      message: "Fatura de ativação SuperPayBR criada com sucesso",
-      data: {
-        ...createResult.data,
-        type: "activation",
-        description: "Ativação do Cartão SHEIN",
-      },
-    })
   } catch (error) {
-    console.error("❌ Erro ao criar fatura de ativação SuperPayBR:", error)
+    console.error("❌ Erro na criação da fatura de ativação:", error)
     return NextResponse.json(
       {
         success: false,
-        error: "Erro interno ao criar fatura de ativação",
-        details: error instanceof Error ? error.message : "Erro desconhecido",
+        error: "Erro interno na criação da fatura de ativação",
       },
       { status: 500 },
     )

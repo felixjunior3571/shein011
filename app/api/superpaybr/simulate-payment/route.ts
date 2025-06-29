@@ -1,73 +1,53 @@
-import { type NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
+import { type NextRequest, NextResponse } from "next/server"
 
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("🧪 Simulando pagamento SuperPayBR...")
+    console.log("🧪 === SIMULANDO PAGAMENTO SUPERPAYBR ===")
 
     const body = await request.json()
-    const { externalId, shouldPay = true } = body
+    const { external_id, amount } = body
 
-    if (!externalId) {
+    if (!external_id) {
       return NextResponse.json(
         {
           success: false,
-          error: "external_id é obrigatório",
+          error: "External ID é obrigatório",
         },
         { status: 400 },
       )
     }
 
-    console.log(`🎭 Simulando pagamento para: ${externalId} (pago: ${shouldPay})`)
+    console.log("🎭 Simulando pagamento para:", external_id)
 
-    // Simular webhook de pagamento
-    const simulatedWebhook = {
-      event: {
-        type: "invoice.paid",
-        date: new Date().toISOString(),
-      },
-      invoices: {
-        id: `sim_${Date.now()}`,
-        external_id: externalId,
-        token: `sim_token_${Math.random().toString(36).substring(2, 15)}`,
-        status: {
-          code: shouldPay ? 5 : 12, // 5 = pago, 12 = negado
-          title: shouldPay ? "Pagamento Confirmado!" : "Pagamento Negado",
-          text: shouldPay ? "paid" : "denied",
-        },
-        prices: {
-          total: 34.9,
-          discount: 0,
-        },
-        payment: {
-          payDate: shouldPay ? new Date().toISOString() : null,
-          gateway: "SuperPayBR",
-        },
-        type: "PIX",
-      },
+    // Simular dados de webhook de pagamento aprovado
+    const simulatedWebhookData = {
+      external_id,
+      invoice_id: `SIM_${Date.now()}`,
+      token: `sim_token_${Date.now()}`,
+      amount: amount || 34.9,
+      status_code: 5, // 5 = Pagamento Confirmado
+      status_text: "Pagamento Confirmado (Simulado)",
+      payment_date: new Date().toISOString(),
+      is_paid: true,
+      is_refunded: false,
+      is_denied: false,
+      is_expired: false,
+      is_canceled: false,
+      updated_at: new Date().toISOString(),
     }
 
-    console.log("📤 Enviando webhook simulado...")
+    // Salvar no Supabase como se fosse um webhook real
+    const { data, error } = await supabase.from("payments").upsert(simulatedWebhookData, { onConflict: "external_id" })
 
-    // Processar webhook simulado
-    const webhookResponse = await fetch(`${request.nextUrl.origin}/api/superpaybr/webhook`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(simulatedWebhook),
-    })
-
-    const webhookResult = await webhookResponse.json()
-
-    if (!webhookResult.success) {
+    if (error) {
+      console.error("❌ Erro ao simular no Supabase:", error)
       return NextResponse.json(
         {
           success: false,
-          error: "Falha ao processar webhook simulado",
-          details: webhookResult.error,
+          error: "Erro ao salvar simulação no banco",
         },
         { status: 500 },
       )
@@ -77,22 +57,21 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: `Pagamento ${shouldPay ? "confirmado" : "negado"} via simulação`,
+      message: "Pagamento simulado com sucesso",
       data: {
-        external_id: externalId,
-        status: shouldPay ? "paid" : "denied",
-        amount: 34.9,
+        external_id,
+        status: "paid",
+        amount: simulatedWebhookData.amount,
+        payment_date: simulatedWebhookData.payment_date,
         simulated: true,
-        webhook_processed: true,
       },
     })
   } catch (error) {
-    console.error("❌ Erro ao simular pagamento SuperPayBR:", error)
+    console.error("❌ Erro na simulação:", error)
     return NextResponse.json(
       {
         success: false,
         error: "Erro interno na simulação",
-        details: error instanceof Error ? error.message : "Erro desconhecido",
       },
       { status: 500 },
     )

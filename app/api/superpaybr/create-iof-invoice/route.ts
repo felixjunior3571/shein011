@@ -2,39 +2,33 @@ import { type NextRequest, NextResponse } from "next/server"
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("📊 Criando fatura IOF SuperPayBR...")
+    console.log("🏦 === CRIANDO FATURA IOF SUPERPAYBR ===")
 
     const body = await request.json()
-    const { customerData, shippingMethod } = body
+    const { customerData, loanAmount } = body
 
-    if (!customerData || !shippingMethod) {
+    if (!customerData?.name || !customerData?.cpf || !loanAmount) {
       return NextResponse.json(
         {
           success: false,
-          error: "Dados do cliente e método de envio são obrigatórios",
+          error: "Dados obrigatórios: customerData (name, cpf) e loanAmount",
         },
         { status: 400 },
       )
     }
 
-    // Calcular valor do IOF baseado no método de envio
-    const iofAmounts = {
-      sedex: 34.9,
-      express: 49.9,
-      pac: 24.9,
-    }
+    const externalId = `IOF_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    const iofAmount = Math.round(loanAmount * 0.0038 * 100) / 100 // IOF 0.38%
 
-    const iofAmount = iofAmounts[shippingMethod as keyof typeof iofAmounts] || 34.9
-    const externalId = `SHEIN_IOF_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`
-
-    console.log("📄 Criando fatura IOF:", {
+    console.log("📋 Criando fatura IOF:", {
       externalId,
-      amount: iofAmount,
-      shippingMethod,
+      loanAmount,
+      iofAmount,
+      customer: customerData.name,
     })
 
-    // Usar o endpoint de criação de fatura padrão
-    const createResponse = await fetch(`${request.nextUrl.origin}/api/superpaybr/create-invoice`, {
+    // Usar o endpoint principal de criação
+    const invoiceResponse = await fetch(`${request.nextUrl.origin}/api/superpaybr/create-invoice`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -43,42 +37,43 @@ export async function POST(request: NextRequest) {
         amount: iofAmount,
         customerData,
         externalId,
-        description: `Taxa IOF - Envio ${shippingMethod.toUpperCase()}`,
+        description: `IOF sobre empréstimo de R$ ${loanAmount.toFixed(2)}`,
       }),
     })
 
-    const createResult = await createResponse.json()
+    const invoiceResult = await invoiceResponse.json()
 
-    if (!createResult.success) {
+    if (invoiceResult.success) {
+      console.log("✅ Fatura IOF criada:", invoiceResult.data.invoice_id)
+
+      return NextResponse.json({
+        success: true,
+        message: "Fatura IOF criada com sucesso",
+        data: {
+          ...invoiceResult.data,
+          type: "iof",
+          loan_amount: loanAmount,
+          iof_rate: 0.0038,
+          description: `IOF sobre empréstimo de R$ ${loanAmount.toFixed(2)}`,
+        },
+      })
+    } else {
+      console.error("❌ Erro ao criar fatura IOF:", invoiceResult.error)
       return NextResponse.json(
         {
           success: false,
           error: "Falha ao criar fatura IOF",
-          details: createResult.error,
+          details: invoiceResult.error,
         },
-        { status: createResponse.status },
+        { status: 500 },
       )
     }
-
-    console.log("✅ Fatura IOF criada com sucesso:", createResult.data.invoice_id)
-
-    return NextResponse.json({
-      success: true,
-      message: "Fatura IOF SuperPayBR criada com sucesso",
-      data: {
-        ...createResult.data,
-        type: "iof",
-        shipping_method: shippingMethod,
-        description: `Taxa IOF - Envio ${shippingMethod.toUpperCase()}`,
-      },
-    })
   } catch (error) {
-    console.error("❌ Erro ao criar fatura IOF SuperPayBR:", error)
+    console.error("❌ Erro na criação da fatura IOF:", error)
     return NextResponse.json(
       {
         success: false,
-        error: "Erro interno ao criar fatura IOF",
-        details: error instanceof Error ? error.message : "Erro desconhecido",
+        error: "Erro interno na criação da fatura IOF",
       },
       { status: 500 },
     )
