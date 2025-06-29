@@ -5,12 +5,12 @@ const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("🎭 === SIMULANDO PAGAMENTO SUPERPAYBR ===")
+    console.log("🧪 === SIMULANDO PAGAMENTO SUPERPAYBR ===")
 
     const body = await request.json()
-    const { externalId, amount = 34.9 } = body
+    const { external_id, amount = 34.9, status = "paid" } = body
 
-    if (!externalId) {
+    if (!external_id) {
       return NextResponse.json(
         {
           success: false,
@@ -20,85 +20,99 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    console.log("🎯 Simulando pagamento:", { externalId, amount })
+    console.log("🧪 Simulando pagamento:", {
+      external_id,
+      amount,
+      status,
+    })
 
-    // Simular dados de webhook de pagamento aprovado
-    const simulatedWebhookData = {
-      invoice: {
-        id: externalId,
-        external_id: externalId,
-        status: 5, // SuperPayBR: 5 = Pago
-        amount: amount,
-        payment_date: new Date().toISOString(),
-        payment_method: "PIX",
-      },
+    // Determinar status baseado no parâmetro
+    let isPaid = false
+    let isDenied = false
+    let statusCode = 1
+
+    switch (status.toLowerCase()) {
+      case "paid":
+      case "pago":
+        isPaid = true
+        statusCode = 5
+        break
+      case "denied":
+      case "negado":
+        isDenied = true
+        statusCode = 3
+        break
+      default:
+        statusCode = 1 // Pendente
     }
 
-    // Processar como se fosse um webhook real
-    const webhookData = {
-      isPaid: true,
-      isDenied: false,
-      isRefunded: false,
-      isExpired: false,
-      isCanceled: false,
-      statusCode: 5,
-      statusName: "Pagamento Confirmado!",
+    // Salvar simulação no Supabase
+    const { data: insertData, error: insertError } = await supabase.from("superpaybr_payments").insert({
+      external_id: external_id,
+      status: status,
+      status_code: statusCode,
       amount: amount,
-      paymentDate: new Date().toISOString(),
-      rawData: simulatedWebhookData.invoice,
-    }
+      payment_date: new Date().toISOString(),
+      is_paid: isPaid,
+      is_denied: isDenied,
+      is_refunded: false,
+      is_expired: false,
+      is_canceled: false,
+      webhook_data: {
+        simulated: true,
+        external_id: external_id,
+        status: status,
+        amount: amount,
+      },
+      created_at: new Date().toISOString(),
+    })
 
-    // Salvar no Supabase
-    const { data: savedData, error: supabaseError } = await supabase
-      .from("payments")
-      .upsert(
+    if (insertError) {
+      console.error("❌ Erro ao salvar simulação:", insertError)
+      return NextResponse.json(
         {
-          external_id: externalId,
-          status: "Pagamento Confirmado!",
-          amount: amount,
-          is_paid: true,
-          is_denied: false,
-          is_expired: false,
-          is_canceled: false,
-          is_refunded: false,
-          payment_date: new Date().toISOString(),
-          webhook_data: simulatedWebhookData.invoice,
-          provider: "superpaybr",
-          updated_at: new Date().toISOString(),
+          success: false,
+          error: "Erro ao salvar simulação",
+          details: insertError.message,
         },
-        { onConflict: "external_id" },
+        { status: 500 },
       )
-      .select()
-
-    if (supabaseError) {
-      console.error("❌ Erro ao salvar simulação no Supabase:", supabaseError)
-    } else {
-      console.log("✅ Simulação salva no Supabase:", savedData)
     }
 
-    console.log("🎉 Pagamento simulado com sucesso!")
+    console.log("✅ Pagamento simulado com sucesso:", insertData)
 
     return NextResponse.json({
       success: true,
-      message: "Pagamento SuperPayBR simulado com sucesso",
+      message: "Pagamento simulado com sucesso",
       data: {
-        external_id: externalId,
-        status: "Pagamento Confirmado!",
-        is_paid: true,
+        external_id: external_id,
+        status: status,
+        status_code: statusCode,
         amount: amount,
-        payment_date: new Date().toISOString(),
+        is_paid: isPaid,
+        is_denied: isDenied,
         simulated: true,
       },
     })
   } catch (error) {
-    console.error("❌ Erro ao simular pagamento:", error)
+    console.error("❌ Erro na simulação:", error)
     return NextResponse.json(
       {
         success: false,
-        error: "Erro ao simular pagamento",
+        error: "Erro interno na simulação",
         details: error instanceof Error ? error.message : "Erro desconhecido",
       },
       { status: 500 },
     )
   }
+}
+
+export async function GET() {
+  return NextResponse.json(
+    {
+      success: false,
+      error: "Método GET não suportado. Use POST para simular pagamento.",
+    },
+    { status: 405 },
+  )
 }

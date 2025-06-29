@@ -1,12 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { createClient } from "@supabase/supabase-js"
-
-const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
-    const externalId = searchParams.get("externalId")
+    const externalId = searchParams.get("external_id")
 
     if (!externalId) {
       return NextResponse.json(
@@ -18,47 +15,139 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    console.log("📊 === STATUS PAGAMENTO SUPERPAYBR ===")
-    console.log("🆔 External ID:", externalId)
+    console.log("🔍 Consultando status SuperPayBR:", externalId)
 
-    // Consultar apenas Supabase (dados do webhook)
-    const { data: paymentData, error } = await supabase
-      .from("payments")
-      .select("*")
-      .eq("external_id", externalId)
-      .single()
+    // Credenciais SuperPayBR
+    const token = process.env.SUPERPAY_TOKEN
+    const secretKey = process.env.SUPERPAY_SECRET_KEY
+    const apiUrl = process.env.SUPERPAY_API_URL
 
-    if (error || !paymentData) {
-      console.log("❌ Pagamento não encontrado no Supabase")
+    if (!token || !secretKey || !apiUrl) {
       return NextResponse.json(
         {
           success: false,
-          error: "Pagamento não encontrado",
-          external_id: externalId,
+          error: "Credenciais SuperPayBR não configuradas",
+        },
+        { status: 500 },
+      )
+    }
+
+    // Fazer autenticação primeiro
+    const credentials = `${token}:${secretKey}`
+    const base64Credentials = Buffer.from(credentials).toString("base64")
+
+    let accessToken = null
+
+    try {
+      const authResponse = await fetch(`${apiUrl}/auth`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          Authorization: `Basic ${base64Credentials}`,
+        },
+        body: JSON.stringify({
+          grant_type: "client_credentials",
+        }),
+      })
+
+      if (authResponse.ok) {
+        const authData = await authResponse.json()
+        accessToken = authData.access_token || authData.token
+      }
+    } catch (error) {
+      console.log("❌ Erro na autenticação:", error)
+    }
+
+    if (!accessToken) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Falha na autenticação SuperPayBR",
+        },
+        { status: 401 },
+      )
+    }
+
+    // Consultar status do pagamento
+    const statusUrls = [
+      `${apiUrl}/payments/${externalId}`,
+      `${apiUrl}/invoices/${externalId}`,
+      `${apiUrl}/payment/status/${externalId}`,
+      `${apiUrl}/status/${externalId}`,
+    ]
+
+    let statusData = null
+
+    for (const statusUrl of statusUrls) {
+      try {
+        console.log(`🔄 Consultando: ${statusUrl}`)
+
+        const statusResponse = await fetch(statusUrl, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+        })
+
+        if (statusResponse.ok) {
+          statusData = await statusResponse.json()
+          console.log("✅ Status obtido:", statusData)
+          break
+        }
+      } catch (error) {
+        console.log(`❌ Erro em ${statusUrl}:`, error)
+      }
+    }
+
+    if (!statusData) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Não foi possível consultar o status do pagamento",
         },
         { status: 404 },
       )
     }
 
-    console.log("✅ Status encontrado:", {
-      status: paymentData.status,
-      is_paid: paymentData.is_paid,
-      amount: paymentData.amount,
-    })
+    // Processar dados de status
+    let isPaid = false
+    let isDenied = false
+    let status = "pending"
+
+    // Buscar status recursivamente
+    const findStatus = (obj: any): void => {
+      if (!obj || typeof obj !== "object") return
+
+      for (const [key, value] of Object.entries(obj)) {
+        if (key === "status" && typeof value === "string") {
+          status = value
+          const statusLower = value.toLowerCase()
+          if (statusLower.includes("paid") || statusLower.includes("pago")) {
+            isPaid = true
+          } else if (statusLower.includes("denied") || statusLower.includes("negado")) {
+            isDenied = true
+          }
+        }
+
+        if (typeof value === "object" && value !== null) {
+          findStatus(value)
+        }
+      }
+    }
+
+    findStatus(statusData)
 
     return NextResponse.json({
       success: true,
       data: {
         external_id: externalId,
-        status: paymentData.status,
-        is_paid: paymentData.is_paid,
-        is_denied: paymentData.is_denied,
-        is_expired: paymentData.is_expired,
-        is_canceled: paymentData.is_canceled,
-        is_refunded: paymentData.is_refunded,
-        amount: paymentData.amount,
-        payment_date: paymentData.payment_date,
-        updated_at: paymentData.updated_at,
+        status: status,
+        is_paid: isPaid,
+        is_denied: isDenied,
+        raw_data: statusData,
       },
     })
   } catch (error) {
@@ -66,10 +155,34 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       {
         success: false,
-        error: "Erro interno ao consultar status",
+        error: "Erro interno",
         details: error instanceof Error ? error.message : "Erro desconhecido",
       },
       { status: 500 },
     )
   }
+}
+
+export async function POST(request: NextRequest) {
+  const body = await request.json()
+  const externalId = body.external_id
+
+  if (!externalId) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: "External ID é obrigatório",
+      },
+      { status: 400 },
+    )
+  }
+
+  // Redirecionar para GET com query parameter
+  const url = new URL(request.url)
+  url.searchParams.set("external_id", externalId)
+
+  return fetch(url.toString(), {
+    method: "GET",
+    headers: request.headers,
+  })
 }

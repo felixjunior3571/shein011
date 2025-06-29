@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           success: false,
-          error: "Credenciais SuperPayBR não configuradas",
+          error: "Credenciais SuperPayBR não configuradas - IMPOSSÍVEL GERAR PIX REAL",
         },
         { status: 500 },
       )
@@ -64,52 +64,56 @@ export async function POST(request: NextRequest) {
 
     let accessToken = null
 
-    try {
-      const authResponse = await fetch(`${apiUrl}/auth`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-          Authorization: `Basic ${base64Credentials}`,
-        },
-        body: JSON.stringify({
-          grant_type: "client_credentials",
-        }),
-      })
+    // URLs de autenticação para tentar
+    const authUrls = [`${apiUrl}/auth`, `${apiUrl}/token`, `${apiUrl}/oauth/token`, `${apiUrl}/authenticate`]
 
-      if (authResponse.ok) {
-        const authData = await authResponse.json()
-        accessToken = authData.access_token || authData.token
-        console.log("✅ Access token obtido:", accessToken ? `${accessToken.substring(0, 20)}...` : "❌ NULO")
-      } else {
-        const errorText = await authResponse.text()
-        console.log("❌ Falha na autenticação:", errorText)
-        return NextResponse.json(
-          {
-            success: false,
-            error: "Falha na autenticação SuperPayBR",
-            details: errorText,
+    for (const authUrl of authUrls) {
+      try {
+        console.log(`🔑 Tentando autenticação em: ${authUrl}`)
+
+        const authResponse = await fetch(authUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+            Authorization: `Basic ${base64Credentials}`,
           },
-          { status: 401 },
-        )
+          body: JSON.stringify({
+            grant_type: "client_credentials",
+          }),
+        })
+
+        console.log(`📥 Resposta auth de ${authUrl}:`, {
+          status: authResponse.status,
+          statusText: authResponse.statusText,
+          ok: authResponse.ok,
+        })
+
+        if (authResponse.ok) {
+          const authData = await authResponse.json()
+          accessToken = authData.access_token || authData.token
+          console.log("✅ Access token obtido:", accessToken ? `${accessToken.substring(0, 20)}...` : "❌ NULO")
+
+          if (accessToken) {
+            break // Sair do loop se conseguiu o token
+          }
+        } else {
+          const errorText = await authResponse.text()
+          console.log(`❌ Falha auth em ${authUrl}:`, errorText)
+        }
+      } catch (error) {
+        console.log(`❌ Erro auth em ${authUrl}:`, error)
       }
-    } catch (error) {
-      console.log("❌ Erro na autenticação:", error)
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Erro na autenticação SuperPayBR",
-          details: error instanceof Error ? error.message : "Erro desconhecido",
-        },
-        { status: 500 },
-      )
     }
 
+    // SE NÃO CONSEGUIU ACCESS TOKEN, FALHAR COMPLETAMENTE
     if (!accessToken) {
+      console.error("❌ FALHA CRÍTICA: Não foi possível obter access token SuperPayBR")
       return NextResponse.json(
         {
           success: false,
-          error: "Access token não obtido",
+          error: "FALHA NA AUTENTICAÇÃO SUPERPAYBR - IMPOSSÍVEL GERAR PIX REAL",
+          details: "Access token não obtido com Basic Auth",
         },
         { status: 401 },
       )
@@ -152,7 +156,13 @@ export async function POST(request: NextRequest) {
     console.log("📤 Dados da fatura:", JSON.stringify(invoiceData, null, 2))
 
     // URLs para criação
-    const createUrls = [`${apiUrl}/invoices`, `${apiUrl}/payment`, `${apiUrl}/create`]
+    const createUrls = [
+      `${apiUrl}/invoices`,
+      `${apiUrl}/payment`,
+      `${apiUrl}/create`,
+      `${apiUrl}/pix`,
+      `${apiUrl}/invoice/create`,
+    ]
 
     let createSuccess = false
     let responseData = null
@@ -195,13 +205,14 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // SE NÃO CONSEGUIU CRIAR FATURA, FALHAR COMPLETAMENTE
     if (!createSuccess) {
-      console.error("❌ TODAS as tentativas falharam!")
+      console.error("❌ FALHA CRÍTICA: Não foi possível criar fatura SuperPayBR")
       console.error("❌ Último erro:", lastError)
       return NextResponse.json(
         {
           success: false,
-          error: "Falha ao criar fatura SuperPayBR em todas as URLs",
+          error: "FALHA AO CRIAR FATURA SUPERPAYBR - IMPOSSÍVEL GERAR PIX REAL",
           details: lastError,
           attempted_urls: createUrls,
         },
@@ -222,14 +233,14 @@ export async function POST(request: NextRequest) {
         const currentPath = path ? `${path}.${key}` : key
 
         // Buscar ID da fatura
-        if ((key === "id" || key === "invoice_id") && typeof value === "string" && !invoiceId) {
+        if ((key === "id" || key === "invoice_id" || key === "payment_id") && typeof value === "string" && !invoiceId) {
           invoiceId = value
           console.log(`🔍 Invoice ID encontrado: ${invoiceId}`)
         }
 
         // Buscar PIX payload
         if (
-          (key === "payload" || key === "pix_code" || key === "qrcode" || key === "pix_payload") &&
+          (key === "payload" || key === "pix_code" || key === "qrcode" || key === "pix_payload" || key === "code") &&
           typeof value === "string" &&
           value.length > 50
         ) {
@@ -239,7 +250,11 @@ export async function POST(request: NextRequest) {
 
         // Buscar QR Code image
         if (
-          (key === "qrcode_image" || key === "qr_code" || key === "image" || key === "qrcode_url") &&
+          (key === "qrcode_image" ||
+            key === "qr_code" ||
+            key === "image" ||
+            key === "qrcode_url" ||
+            key === "qr_image") &&
           typeof value === "string"
         ) {
           qrCodeImage = value
@@ -264,14 +279,14 @@ export async function POST(request: NextRequest) {
       qrCodeImage: qrCodeImage ? "✅ ENCONTRADO" : "❌ NÃO ENCONTRADO",
     })
 
-    // VALIDAR se temos dados PIX válidos
+    // SE NÃO TEM PIX PAYLOAD, FALHAR COMPLETAMENTE
     if (!pixPayload) {
-      console.error("❌ PIX payload não encontrado na resposta!")
+      console.error("❌ FALHA CRÍTICA: PIX payload não encontrado na resposta!")
       console.error("❌ Resposta completa:", JSON.stringify(responseData, null, 2))
       return NextResponse.json(
         {
           success: false,
-          error: "PIX payload não encontrado na resposta da API",
+          error: "PIX PAYLOAD NÃO ENCONTRADO - IMPOSSÍVEL GERAR PIX REAL",
           response_data: responseData,
         },
         { status: 500 },
@@ -310,19 +325,38 @@ export async function POST(request: NextRequest) {
       },
     }
 
-    console.log("✅ Fatura SuperPayBR criada com sucesso (MODO REAL + BASIC AUTH)!")
+    console.log("✅ FATURA SUPERPAYBR CRIADA COM SUCESSO (MODO REAL + BASIC AUTH)!")
     console.log("📋 Resposta formatada:", JSON.stringify(response, null, 2))
 
     return NextResponse.json(response)
   } catch (error) {
-    console.error("❌ Erro ao criar fatura SuperPayBR:", error)
+    console.error("❌ ERRO CRÍTICO ao criar fatura SuperPayBR:", error)
     return NextResponse.json(
       {
         success: false,
-        error: "Erro interno ao criar fatura SuperPayBR",
+        error: "ERRO INTERNO SUPERPAYBR - IMPOSSÍVEL GERAR PIX REAL",
         details: error instanceof Error ? error.message : "Erro desconhecido",
       },
       { status: 500 },
     )
   }
+}
+
+// Adicionar suporte para outros métodos HTTP
+export async function GET(request: NextRequest) {
+  return NextResponse.json(
+    {
+      success: false,
+      error: "Método GET não suportado. Use POST para criar fatura.",
+    },
+    { status: 405 },
+  )
+}
+
+export async function PUT(request: NextRequest) {
+  return POST(request)
+}
+
+export async function PATCH(request: NextRequest) {
+  return POST(request)
 }

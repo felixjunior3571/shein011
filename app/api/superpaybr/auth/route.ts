@@ -40,7 +40,13 @@ export async function GET() {
     })
 
     // URLs de autenticação
-    const authUrls = [`${apiUrl}/auth`, `${apiUrl}/token`, `${apiUrl}/oauth/token`]
+    const authUrls = [
+      `${apiUrl}/auth`,
+      `${apiUrl}/token`,
+      `${apiUrl}/oauth/token`,
+      `${apiUrl}/authenticate`,
+      `${apiUrl}/login`,
+    ]
 
     let authSuccess = false
     let authData = null
@@ -123,5 +129,13 @@ export async function GET() {
 }
 
 export async function POST() {
+  return GET()
+}
+
+export async function PUT() {
+  return GET()
+}
+
+export async function PATCH() {
   return GET()
 }
