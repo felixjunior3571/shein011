@@ -16,48 +16,42 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    console.log(`🔍 Gerando QR Code SuperPayBR para: ${externalId}`)
+    console.log(`🔍 Gerando QR Code de emergência SuperPayBR: ${externalId}`)
 
-    // Gerar PIX payload de emergência
     const validAmount = Number.parseFloat(amount)
-    const pixPayload = `00020126580014br.gov.bcb.pix2536pix.superpaybr.com/qr/v2/${externalId}520400005303986540${validAmount.toFixed(
+
+    // PIX payload de emergência
+    const emergencyPixPayload = `00020126580014br.gov.bcb.pix2536pix.superpaybr.com/qr/v2/${externalId}520400005303986540${validAmount.toFixed(
       2,
     )}5802BR5909SHEIN CARD5011SAO PAULO62070503***6304${Math.random().toString(36).substr(2, 4).toUpperCase()}`
 
     // Gerar QR Code via QuickChart
-    const qrCodeUrl = `https://quickchart.io/qr?text=${encodeURIComponent(pixPayload)}&size=300&format=png&margin=1`
+    const qrCodeUrl = `https://quickchart.io/qr?text=${encodeURIComponent(emergencyPixPayload)}&size=300&format=png&margin=1`
 
-    console.log("✅ QR Code SuperPayBR gerado com sucesso")
+    console.log("✅ QR Code de emergência gerado")
 
     return NextResponse.json({
       success: true,
       data: {
         external_id: externalId,
         pix: {
-          payload: pixPayload,
+          payload: emergencyPixPayload,
           image: qrCodeUrl,
           qr_code: qrCodeUrl,
         },
         amount: validAmount,
-        timestamp: new Date().toISOString(),
+        type: "emergency",
       },
     })
   } catch (error) {
     console.error("❌ Erro ao gerar QR Code SuperPayBR:", error)
+
     return NextResponse.json(
       {
         success: false,
-        error: error instanceof Error ? error.message : "Erro desconhecido",
+        error: error instanceof Error ? error.message : "Erro ao gerar QR Code",
       },
       { status: 500 },
     )
   }
-}
-
-export async function POST() {
-  return NextResponse.json({
-    success: true,
-    message: "Use GET para gerar QR Code",
-    timestamp: new Date().toISOString(),
-  })
 }

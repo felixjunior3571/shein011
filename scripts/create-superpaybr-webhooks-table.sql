@@ -1,11 +1,12 @@
 -- Criar tabela para webhooks SuperPayBR
 CREATE TABLE IF NOT EXISTS superpaybr_webhooks (
     id SERIAL PRIMARY KEY,
-    external_id VARCHAR(255) UNIQUE NOT NULL,
+    external_id VARCHAR(255) NOT NULL,
     invoice_id VARCHAR(255),
     token VARCHAR(255),
-    status_code INTEGER DEFAULT 1,
-    status_name VARCHAR(100) DEFAULT 'Aguardando Pagamento',
+    status_code INTEGER NOT NULL DEFAULT 1,
+    status_name VARCHAR(50) NOT NULL DEFAULT 'pending',
+    status_title VARCHAR(255) NOT NULL DEFAULT 'Aguardando Pagamento',
     status_description TEXT,
     amount DECIMAL(10,2) DEFAULT 0,
     payment_date TIMESTAMP,
@@ -30,6 +31,9 @@ CREATE INDEX IF NOT EXISTS idx_superpaybr_webhooks_token ON superpaybr_webhooks(
 CREATE INDEX IF NOT EXISTS idx_superpaybr_webhooks_status_code ON superpaybr_webhooks(status_code);
 CREATE INDEX IF NOT EXISTS idx_superpaybr_webhooks_is_paid ON superpaybr_webhooks(is_paid);
 CREATE INDEX IF NOT EXISTS idx_superpaybr_webhooks_received_at ON superpaybr_webhooks(received_at);
+CREATE INDEX IF NOT EXISTS idx_superpaybr_webhooks_status ON superpaybr_webhooks(status_code, status_name);
+CREATE INDEX IF NOT EXISTS idx_superpaybr_webhooks_payment_status ON superpaybr_webhooks(is_paid, is_denied, is_expired);
+CREATE INDEX IF NOT EXISTS idx_superpaybr_webhooks_created_at ON superpaybr_webhooks(created_at);
 
 -- Trigger para atualizar updated_at
 CREATE OR REPLACE FUNCTION update_superpaybr_webhooks_updated_at()
@@ -38,9 +42,9 @@ BEGIN
     NEW.updated_at = NOW();
     RETURN NEW;
 END;
-$$ language 'plpgsql';
+$$ LANGUAGE plpgsql;
 
-CREATE TRIGGER update_superpaybr_webhooks_updated_at
+CREATE TRIGGER trigger_update_superpaybr_webhooks_updated_at
     BEFORE UPDATE ON superpaybr_webhooks
     FOR EACH ROW
     EXECUTE FUNCTION update_superpaybr_webhooks_updated_at();
@@ -52,7 +56,9 @@ INSERT INTO superpaybr_webhooks (
     token,
     status_code,
     status_name,
+    status_title,
     amount,
+    payment_date,
     is_paid,
     client_name,
     client_email,
@@ -63,12 +69,46 @@ INSERT INTO superpaybr_webhooks (
     'TOKEN_TEST_001',
     5,
     'Pago',
+    'Pagamento Confirmado',
     34.90,
+    NOW(),
     TRUE,
     'Cliente Teste',
     'teste@exemplo.com',
     '{"event": {"type": "invoice.update"}, "invoices": {"status": {"code": 5, "title": "Pago"}}}'::jsonb
 ) ON CONFLICT (external_id) DO NOTHING;
+
+INSERT INTO superpaybr_webhooks (
+    external_id,
+    invoice_id,
+    status_code,
+    status_name,
+    status_title,
+    amount,
+    payment_date,
+    is_paid,
+    webhook_data
+) VALUES (
+    'SHEIN_TEST_123',
+    'INV_TEST_123',
+    2,
+    'paid',
+    'Pagamento Confirmado',
+    34.90,
+    NOW(),
+    TRUE,
+    '{"test": true, "source": "manual_insert"}'
+) ON CONFLICT (external_id) DO NOTHING;
+
+-- Verificar se a tabela foi criada corretamente
+SELECT 
+    table_name,
+    column_name,
+    data_type,
+    is_nullable
+FROM information_schema.columns 
+WHERE table_name = 'superpaybr_webhooks'
+ORDER BY ordinal_position;
 
 -- Comentários
 COMMENT ON TABLE superpaybr_webhooks IS 'Tabela para armazenar webhooks do SuperPayBR';

@@ -1,8 +1,8 @@
-import { type NextRequest, NextResponse } from "next/server"
+import { NextResponse } from "next/server"
 
-export async function POST(request: NextRequest) {
+export async function POST() {
   try {
-    console.log("🔐 === AUTENTICAÇÃO SUPERPAYBR ===")
+    console.log("🔐 Autenticando SuperPayBR...")
 
     const apiUrl = process.env.SUPERPAY_API_URL
     const token = process.env.SUPERPAY_TOKEN
@@ -19,9 +19,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    console.log("🌐 Autenticando com SuperPayBR...")
-    console.log("URL:", apiUrl)
-    console.log("Token:", token.substring(0, 10) + "...")
+    console.log("🌐 Enviando requisição de autenticação para SuperPayBR")
 
     const authResponse = await fetch(`${apiUrl}/v4/auth`, {
       method: "POST",
@@ -62,7 +60,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         success: false,
-        error: error instanceof Error ? error.message : "Erro desconhecido na autenticação",
+        error: error instanceof Error ? error.message : "Erro de autenticação desconhecido",
       },
       { status: 500 },
     )

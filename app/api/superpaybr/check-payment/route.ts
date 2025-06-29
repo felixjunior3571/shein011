@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { paymentConfirmations } from "../webhook/route"
+import { globalPaymentStorage } from "../webhook/route"
 
 export async function GET(request: NextRequest) {
   try {
@@ -16,48 +16,42 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    console.log(`🔍 Verificação rápida de pagamento SuperPayBR: ${externalId}`)
+    console.log(`⚡ Verificação rápida SuperPayBR: ${externalId}`)
 
-    // Consultar apenas memória global (mais rápido)
-    const paymentData = paymentConfirmations.get(externalId)
+    // Consultar apenas o armazenamento global (sem rate limit)
+    const cachedData = globalPaymentStorage.get(externalId)
 
-    if (paymentData && paymentData.isPaid) {
-      console.log(`✅ Pagamento confirmado: ${externalId}`)
+    if (cachedData) {
+      console.log("✅ Pagamento encontrado no cache")
       return NextResponse.json({
         success: true,
-        isPaid: true,
-        statusName: paymentData.statusName,
-        amount: paymentData.amount,
-        paymentDate: paymentData.paymentDate,
-        timestamp: paymentData.timestamp,
+        found: true,
+        is_paid: cachedData.is_paid,
+        status: cachedData.status.text,
+        amount: cachedData.amount,
+        payment_date: cachedData.payment_date,
       })
     }
 
-    console.log(`ℹ️ Pagamento não confirmado: ${externalId}`)
+    console.log("⚠️ Pagamento não encontrado no cache")
+
     return NextResponse.json({
       success: true,
-      isPaid: false,
-      statusName: "Aguardando Pagamento",
+      found: false,
+      is_paid: false,
+      status: "pending",
       amount: 0,
-      paymentDate: null,
-      timestamp: new Date().toISOString(),
+      payment_date: null,
     })
   } catch (error) {
-    console.error("❌ Erro ao verificar pagamento SuperPayBR:", error)
+    console.error("❌ Erro na verificação rápida SuperPayBR:", error)
+
     return NextResponse.json(
       {
         success: false,
-        error: error instanceof Error ? error.message : "Erro desconhecido",
+        error: error instanceof Error ? error.message : "Erro na verificação",
       },
       { status: 500 },
     )
   }
-}
-
-export async function POST() {
-  return NextResponse.json({
-    success: true,
-    message: "Use GET para verificar pagamento",
-    timestamp: new Date().toISOString(),
-  })
 }
