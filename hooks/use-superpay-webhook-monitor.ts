@@ -34,7 +34,7 @@ interface WebhookMonitorOptions {
 export function useSuperpayWebhookMonitor(options: WebhookMonitorOptions) {
   const {
     externalId,
-    checkInterval = 3000,
+    checkInterval = 3000, // 3 segundos (igual TryploPay)
     maxRetries = 3,
     onPaymentConfirmed,
     onPaymentDenied,
@@ -56,7 +56,7 @@ export function useSuperpayWebhookMonitor(options: WebhookMonitorOptions) {
     amount: 0,
     paymentDate: null,
     lastUpdate: new Date().toISOString(),
-    source: "supabase_only",
+    source: "webhook_monitor",
   })
 
   const [isMonitoring, setIsMonitoring] = useState(false)
@@ -75,14 +75,14 @@ export function useSuperpayWebhookMonitor(options: WebhookMonitorOptions) {
     [enableDebug],
   )
 
-  const checkPaymentStatus = useCallback(async () => {
+  const checkWebhookConfirmation = useCallback(async () => {
     if (!externalId) {
       log("❌ External ID não fornecido")
       return
     }
 
     try {
-      log(`🔍 Verificando status SuperPay: ${externalId}`)
+      log(`🔍 Verificando confirmação via webhook SuperPay para: ${externalId}`)
 
       const response = await fetch(`/api/superpay/payment-status?externalId=${encodeURIComponent(externalId)}`, {
         method: "GET",
@@ -96,47 +96,63 @@ export function useSuperpayWebhookMonitor(options: WebhookMonitorOptions) {
       }
 
       const result = await response.json()
-      log("📥 Resposta da API SuperPay:", result)
+      log("📊 Resultado da verificação webhook SuperPay:", result)
 
-      if (result.success && result.data) {
-        const newStatus = result.data
+      if (result.success && result.found) {
+        const { data } = result
+
+        const newStatus: PaymentStatus = {
+          isPaid: data.isPaid,
+          isDenied: data.isDenied,
+          isExpired: data.isExpired,
+          isCanceled: data.isCanceled,
+          isRefunded: data.isRefunded,
+          statusCode: data.statusCode,
+          statusName: data.statusName,
+          amount: data.amount,
+          paymentDate: data.paymentDate,
+          lastUpdate: new Date().toISOString(),
+          externalId: data.externalId,
+          invoiceId: data.invoiceId,
+          source: "webhook_confirmed",
+        }
+
         const statusKey = `${newStatus.isPaid}-${newStatus.isDenied}-${newStatus.isExpired}-${newStatus.isCanceled}-${newStatus.isRefunded}`
 
-        // Update state
         setPaymentStatus(newStatus)
         setError(null)
         setRetryCount(0)
 
-        // Check for status changes and trigger callbacks
+        // Verificar mudanças de status e executar callbacks
         if (statusKey !== lastStatusRef.current) {
           log(`🔄 Status SuperPay alterado: ${lastStatusRef.current} → ${statusKey}`)
           lastStatusRef.current = statusKey
 
           if (newStatus.isPaid && onPaymentConfirmed) {
-            log("🎉 Pagamento confirmado via webhook SuperPay!")
+            log("🎉 PAGAMENTO CONFIRMADO VIA WEBHOOK SUPERPAY!")
             onPaymentConfirmed(newStatus)
           } else if (newStatus.isDenied && onPaymentDenied) {
-            log("❌ Pagamento negado via webhook SuperPay!")
+            log("❌ PAGAMENTO NEGADO VIA WEBHOOK SUPERPAY!")
             onPaymentDenied(newStatus)
           } else if (newStatus.isExpired && onPaymentExpired) {
-            log("⏰ Pagamento vencido via webhook SuperPay!")
+            log("⏰ PAGAMENTO VENCIDO VIA WEBHOOK SUPERPAY!")
             onPaymentExpired(newStatus)
           } else if (newStatus.isCanceled && onPaymentCanceled) {
-            log("🚫 Pagamento cancelado via webhook SuperPay!")
+            log("🚫 PAGAMENTO CANCELADO VIA WEBHOOK SUPERPAY!")
             onPaymentCanceled(newStatus)
           } else if (newStatus.isRefunded && onPaymentRefunded) {
-            log("🔄 Pagamento estornado via webhook SuperPay!")
+            log("🔄 PAGAMENTO ESTORNADO VIA WEBHOOK SUPERPAY!")
             onPaymentRefunded(newStatus)
           }
         }
 
-        // Stop monitoring if payment is in final state
+        // Parar monitoramento se pagamento está em estado final
         if (newStatus.isPaid || newStatus.isDenied || newStatus.isExpired || newStatus.isCanceled) {
           log(`🛑 Parando monitoramento SuperPay - Status final: ${newStatus.statusName}`)
           setIsMonitoring(false)
         }
       } else {
-        log("⚠️ Pagamento SuperPay não encontrado ou erro na resposta")
+        log("⏳ Aguardando notificação da adquirente via webhook SuperPay...")
         setPaymentStatus((prev) => ({
           ...prev,
           lastUpdate: new Date().toISOString(),
@@ -144,7 +160,7 @@ export function useSuperpayWebhookMonitor(options: WebhookMonitorOptions) {
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Erro desconhecido"
-      log("❌ Erro ao verificar status SuperPay:", errorMessage)
+      log("❌ Erro ao verificar webhook SuperPay:", errorMessage)
 
       setRetryCount((prev) => prev + 1)
 
@@ -169,42 +185,7 @@ export function useSuperpayWebhookMonitor(options: WebhookMonitorOptions) {
     log,
   ])
 
-  // Start monitoring
-  const startMonitoring = useCallback(() => {
-    if (!externalId) {
-      log("❌ Não é possível iniciar monitoramento sem External ID")
-      return
-    }
-
-    if (isMonitoring) {
-      log("⚠️ Monitoramento SuperPay já está ativo")
-      return
-    }
-
-    log(`🚀 Iniciando monitoramento SuperPay: ${externalId} (intervalo: ${checkInterval}ms)`)
-    setIsMonitoring(true)
-    setError(null)
-    setRetryCount(0)
-
-    // Check immediately
-    checkPaymentStatus()
-
-    // Set up interval
-    intervalRef.current = setInterval(checkPaymentStatus, checkInterval)
-  }, [externalId, isMonitoring, checkInterval, checkPaymentStatus, log])
-
-  // Stop monitoring
-  const stopMonitoring = useCallback(() => {
-    log("🛑 Parando monitoramento SuperPay")
-    setIsMonitoring(false)
-
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current)
-      intervalRef.current = null
-    }
-  }, [log])
-
-  // Auto-start monitoring when externalId is available
+  // Iniciar monitoramento automaticamente quando externalId estiver disponível
   useEffect(() => {
     if (
       externalId &&
@@ -214,12 +195,25 @@ export function useSuperpayWebhookMonitor(options: WebhookMonitorOptions) {
       !paymentStatus.isExpired &&
       !paymentStatus.isCanceled
     ) {
-      startMonitoring()
+      log(`🚀 Iniciando monitoramento SuperPay para External ID: ${externalId}`)
+      log(`⏱️ Intervalo de verificação: ${checkInterval}ms`)
+
+      setIsMonitoring(true)
+      setError(null)
+      setRetryCount(0)
+
+      // Verificar imediatamente
+      checkWebhookConfirmation()
+
+      // Verificar a cada intervalo definido
+      intervalRef.current = setInterval(checkWebhookConfirmation, checkInterval)
     }
 
     return () => {
       if (intervalRef.current) {
+        log(`🛑 Parando monitoramento SuperPay`)
         clearInterval(intervalRef.current)
+        setIsMonitoring(false)
       }
     }
   }, [
@@ -229,24 +223,24 @@ export function useSuperpayWebhookMonitor(options: WebhookMonitorOptions) {
     paymentStatus.isDenied,
     paymentStatus.isExpired,
     paymentStatus.isCanceled,
-    startMonitoring,
+    checkInterval,
+    checkWebhookConfirmation,
+    log,
   ])
 
-  // Manual check function
+  // Função para verificação manual
   const checkNow = useCallback(() => {
     log("🔄 Verificação manual SuperPay solicitada")
-    checkPaymentStatus()
-  }, [checkPaymentStatus, log])
+    checkWebhookConfirmation()
+  }, [checkWebhookConfirmation, log])
 
   return {
     paymentStatus,
     isMonitoring,
     error,
     retryCount,
-    startMonitoring,
-    stopMonitoring,
     checkNow,
-    // Computed properties for easier access
+    // Propriedades computadas para acesso fácil
     isPaid: paymentStatus.isPaid,
     isDenied: paymentStatus.isDenied,
     isExpired: paymentStatus.isExpired,
