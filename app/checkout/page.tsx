@@ -6,6 +6,7 @@ import Image from "next/image"
 import { Copy, CheckCircle, Clock, AlertCircle } from "lucide-react"
 import { usePureWebhookMonitor } from "@/hooks/use-pure-webhook-monitor"
 import { useOptimizedTracking } from "@/hooks/use-optimized-tracking"
+import { SmartQRCode } from "@/components/smart-qr-code"
 
 interface InvoiceData {
   id: string
@@ -424,16 +425,10 @@ export default function SuperPayBRCheckoutPage() {
             <p className="text-sm text-gray-500">Frete {method} - Cartão SHEIN</p>
           </div>
 
-          {/* QR Code */}
+          {/* QR Code Inteligente */}
           <div className="text-center mb-6">
             <div className="bg-white p-4 rounded-lg border-2 border-gray-200 inline-block">
-              <Image
-                src={invoice?.pix.qr_code || "/placeholder.svg?height=200&width=200"}
-                alt="QR Code PIX"
-                width={200}
-                height={200}
-                className="mx-auto"
-              />
+              {invoice && <SmartQRCode invoice={invoice} width={200} height={200} className="mx-auto" />}
             </div>
             <p className="text-sm text-gray-600 mt-2">Escaneie o QR Code com seu app do banco</p>
           </div>
