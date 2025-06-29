@@ -1,70 +1,65 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 
-// Armazenamento global em memória para webhooks SuperPayBR
-const globalWebhookStorage = new Map<string, any>()
+// Armazenamento global em memória para evitar rate limits
+const webhookStorage = new Map<string, any>()
+
+export function getWebhookData(externalId: string) {
+  return webhookStorage.get(externalId) || null
+}
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("🔔 === WEBHOOK SUPERPAYBR RECEBIDO ===")
+    const body = await request.json()
+    console.log("🔔 Webhook SuperPayBR recebido:", JSON.stringify(body, null, 2))
 
-    const payload = await request.json()
-    console.log("📋 Payload completo:", JSON.stringify(payload, null, 2))
+    const externalId = body.external_id || body.data?.external_id
 
-    // Extrair dados do webhook SuperPayBR
+    if (!externalId) {
+      console.error("❌ External ID não encontrado no webhook")
+      return NextResponse.json({ success: false, error: "External ID obrigatório" }, { status: 400 })
+    }
+
+    // Processar dados do webhook
     const webhookData = {
-      id: payload.id || payload.invoice_id || payload.external_id,
-      external_id: payload.external_id || payload.id,
-      status: payload.status || {},
-      amount: payload.amount || payload.value || 0,
-      payment_date: payload.payment_date || payload.paid_at || new Date().toISOString(),
-      raw_payload: payload,
+      external_id: externalId,
+      status: body.status || body.data?.status || { code: 1, text: "pending", title: "Aguardando Pagamento" },
+      amount: body.amount || body.data?.amount || 0,
+      payment_date: body.payment_date || body.data?.payment_date,
+      timestamp: new Date().toISOString(),
+      raw_data: body,
     }
 
-    console.log("🔍 Dados extraídos do webhook:", {
-      id: webhookData.id,
-      external_id: webhookData.external_id,
-      status: webhookData.status,
-      amount: webhookData.amount,
-    })
+    // Salvar em memória global (acesso rápido, sem rate limit)
+    webhookStorage.set(externalId, webhookData)
+    console.log(`💾 Webhook salvo em memória: ${externalId}`)
 
-    // Salvar no armazenamento global
-    if (webhookData.external_id) {
-      globalWebhookStorage.set(webhookData.external_id, {
-        ...webhookData,
-        timestamp: new Date().toISOString(),
-        processed: true,
-      })
-      console.log("💾 Webhook salvo no armazenamento global:", webhookData.external_id)
-    }
-
-    // Salvar no Supabase como backup
+    // Backup no Supabase (assíncrono)
     try {
       const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
-      const { error: insertError } = await supabase.from("superpaybr_webhooks").insert({
-        external_id: webhookData.external_id,
-        webhook_data: webhookData,
-        status: webhookData.status?.text || "unknown",
+      await supabase.from("superpaybr_webhooks").upsert({
+        external_id: externalId,
+        status_code: webhookData.status.code,
+        status_text: webhookData.status.text,
+        status_title: webhookData.status.title,
         amount: webhookData.amount,
+        payment_date: webhookData.payment_date,
+        raw_data: webhookData.raw_data,
         created_at: new Date().toISOString(),
       })
 
-      if (insertError) {
-        console.log("⚠️ Erro ao salvar no Supabase:", insertError.message)
-      } else {
-        console.log("✅ Webhook salvo no Supabase")
-      }
+      console.log(`💾 Backup Supabase salvo: ${externalId}`)
     } catch (supabaseError) {
-      console.log("⚠️ Erro no Supabase:", supabaseError)
+      console.error("⚠️ Erro no backup Supabase:", supabaseError)
+      // Não falhar o webhook por erro de backup
     }
-
-    console.log("✅ Webhook SuperPayBR processado com sucesso")
 
     return NextResponse.json({
       success: true,
-      message: "Webhook processado",
-      external_id: webhookData.external_id,
+      message: "Webhook processado com sucesso",
+      external_id: externalId,
+      timestamp: webhookData.timestamp,
     })
   } catch (error) {
     console.error("❌ Erro ao processar webhook SuperPayBR:", error)
@@ -79,25 +74,10 @@ export async function POST(request: NextRequest) {
 }
 
 export async function GET() {
-  const webhookCount = globalWebhookStorage.size
-  const recentWebhooks = Array.from(globalWebhookStorage.entries())
-    .slice(-5)
-    .map(([key, value]) => ({
-      external_id: key,
-      timestamp: value.timestamp,
-      status: value.status?.text || "unknown",
-    }))
-
   return NextResponse.json({
     success: true,
-    message: "SuperPayBR Webhook endpoint ativo",
-    webhook_count: webhookCount,
-    recent_webhooks: recentWebhooks,
+    message: "Webhook SuperPayBR ativo",
+    stored_payments: webhookStorage.size,
     timestamp: new Date().toISOString(),
   })
-}
-
-// Função para consultar webhook por external_id
-export function getWebhookData(externalId: string) {
-  return globalWebhookStorage.get(externalId) || null
 }

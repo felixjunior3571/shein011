@@ -46,6 +46,8 @@ export function useSuperPayBRWebhookMonitor({
 
   const intervalRef = useRef<NodeJS.Timeout | null>(null)
   const callbackExecutedRef = useRef<Set<string>>(new Set())
+  const requestInProgressRef = useRef(false)
+  const abortControllerRef = useRef<AbortController | null>(null)
 
   const log = useCallback(
     (message: string, data?: any) => {
@@ -57,16 +59,34 @@ export function useSuperPayBRWebhookMonitor({
   )
 
   const checkPaymentStatus = useCallback(async () => {
-    if (!externalId) {
-      log("❌ External ID não fornecido")
+    if (!externalId || requestInProgressRef.current) {
       return
     }
 
     try {
+      requestInProgressRef.current = true
+
+      // Cancelar requisição anterior se existir
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort()
+      }
+
+      abortControllerRef.current = new AbortController()
+
       log("🔍 Verificando status do pagamento SuperPayBR:", externalId)
       setLastCheck(new Date())
 
-      const response = await fetch(`/api/superpaybr/payment-status?external_id=${externalId}`)
+      const response = await fetch(`/api/superpaybr/payment-status?external_id=${externalId}`, {
+        signal: abortControllerRef.current.signal,
+        headers: {
+          "Cache-Control": "no-cache",
+        },
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`)
+      }
+
       const data = await response.json()
 
       if (data.success && data.data) {
@@ -88,7 +108,7 @@ export function useSuperPayBRWebhookMonitor({
         setError(null)
 
         // Executar callbacks apenas uma vez por status
-        const callbackKey = `${externalId}_${newStatus.statusName}`
+        const callbackKey = `${externalId}_${newStatus.statusCode}_${newStatus.statusName}`
 
         if (!callbackExecutedRef.current.has(callbackKey)) {
           const callbackData: PaymentData = {
@@ -141,8 +161,15 @@ export function useSuperPayBRWebhookMonitor({
         setError(data.error || "Erro na consulta")
       }
     } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") {
+        log("🚫 Requisição cancelada")
+        return
+      }
+
       log("❌ Erro ao verificar status:", err)
       setError(err instanceof Error ? err.message : "Erro desconhecido")
+    } finally {
+      requestInProgressRef.current = false
     }
   }, [externalId, log, onPaymentConfirmed, onPaymentDenied, onPaymentExpired, onPaymentCanceled, onPaymentRefunded])
 
@@ -156,18 +183,28 @@ export function useSuperPayBRWebhookMonitor({
     log("🚀 Iniciando monitoramento SuperPayBR para:", externalId)
     setIsWaitingForWebhook(true)
     setError(null)
+    callbackExecutedRef.current.clear()
 
     // Verificação inicial
     checkPaymentStatus()
 
-    // Configurar intervalo de verificação (a cada 3 segundos)
-    intervalRef.current = setInterval(checkPaymentStatus, 3000)
+    // Configurar intervalo de verificação (a cada 10 segundos para evitar sobrecarga)
+    intervalRef.current = setInterval(checkPaymentStatus, 10000)
 
     return () => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current)
         intervalRef.current = null
       }
+
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort()
+        abortControllerRef.current = null
+      }
+
+      requestInProgressRef.current = false
+      setIsWaitingForWebhook(false)
+      log("🧹 Limpeza do monitoramento SuperPayBR concluída")
     }
   }, [externalId, checkPaymentStatus, log])
 
@@ -178,6 +215,13 @@ export function useSuperPayBRWebhookMonitor({
         clearInterval(intervalRef.current)
         intervalRef.current = null
       }
+
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort()
+        abortControllerRef.current = null
+      }
+
+      requestInProgressRef.current = false
     }
   }, [])
 

@@ -4,42 +4,31 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
     const externalId = searchParams.get("external_id")
-    const amount = searchParams.get("amount") || "34.90"
 
     if (!externalId) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "external_id é obrigatório",
-        },
-        { status: 400 },
-      )
+      return NextResponse.json({ success: false, error: "external_id é obrigatório" }, { status: 400 })
     }
 
-    console.log("🔍 Gerando QR Code SuperPayBR para:", externalId)
+    console.log(`🔍 Gerando QR Code de emergência SuperPayBR: ${externalId}`)
 
-    // Gerar PIX payload de emergência
-    const validAmount = Number.parseFloat(amount)
-    const pixPayload = `00020126580014br.gov.bcb.pix2536pix.superpaybr.com/qr/v2/${externalId}520400005303986540${validAmount.toFixed(
-      2,
-    )}5802BR5909SHEIN CARD5011SAO PAULO62070503***6304${Math.random().toString(36).substr(2, 4).toUpperCase()}`
+    // PIX payload de emergência
+    const emergencyPixPayload =
+      "00020101021226580014br.gov.bcb.pix2536pix-qr.mercadopago.com/instore/o/v2/b8d7f1c5-8b2a-4c3d-9e1f-2a3b4c5d6e7f5204000053039865802BR5925SHEIN CARTAO DE CREDITO6009SAO PAULO62070503***6304A1B2"
 
-    // Gerar QR Code via QuickChart
-    const qrCodeUrl = `https://quickchart.io/qr?text=${encodeURIComponent(pixPayload)}&size=250&format=png&margin=1`
-
-    console.log("✅ QR Code SuperPayBR gerado com sucesso")
+    const qrCodeUrl = `https://quickchart.io/qr?text=${encodeURIComponent(emergencyPixPayload)}&size=300`
 
     return NextResponse.json({
       success: true,
-      external_id: externalId,
-      amount: validAmount,
-      pix: {
-        payload: pixPayload,
-        qr_code: qrCodeUrl,
-        image: qrCodeUrl,
+      data: {
+        external_id: externalId,
+        pix: {
+          payload: emergencyPixPayload,
+          image: qrCodeUrl,
+          qr_code: qrCodeUrl,
+        },
+        type: "emergency",
+        message: "QR Code de emergência gerado",
       },
-      type: "emergency",
-      timestamp: new Date().toISOString(),
     })
   } catch (error) {
     console.error("❌ Erro ao gerar QR Code SuperPayBR:", error)
@@ -47,17 +36,8 @@ export async function GET(request: NextRequest) {
       {
         success: false,
         error: error instanceof Error ? error.message : "Erro desconhecido",
-        external_id: request.nextUrl.searchParams.get("external_id"),
       },
       { status: 500 },
     )
   }
-}
-
-export async function POST() {
-  return NextResponse.json({
-    success: true,
-    message: "Use GET para obter QR Code",
-    timestamp: new Date().toISOString(),
-  })
 }
