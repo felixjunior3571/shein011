@@ -109,10 +109,10 @@ export async function POST(request: NextRequest) {
     const statusDescription = invoice.status?.description
     const amount = invoice.prices?.total || 0
 
-    console.log("🔍 PROCESSANDO WEBHOOK SUPERPAYBR:")
+    // ✅ LOGS PARA DEBUG
+    console.log("🔔 WEBHOOK SUPERPAY RECEBIDO 🔔")
     console.log(`Status Code: ${statusCode}`)
     console.log(`External ID: ${externalId}`)
-    console.log(`Invoice ID: ${invoiceId}`)
     console.log(`Valor: R$ ${amount.toFixed(2)}`)
     console.log(`Status: ${statusTitle}`)
 

@@ -5,36 +5,23 @@ const paymentConfirmations = new Map<string, any>()
 
 export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url)
+    const searchParams = request.nextUrl.searchParams
 
     // ✅ BUSCAR POR MÚLTIPLAS CHAVES
-    const keys = ["external_id", "externalId", "invoice_id", "invoiceId", "token"]
+    const keys = ["externalId", "invoiceId", "token"]
     let found = null
-    let searchKey = null
 
     for (const key of keys) {
       const value = searchParams.get(key)
-      if (value) {
-        // Tentar buscar diretamente
-        if (paymentConfirmations.has(value)) {
-          found = paymentConfirmations.get(value)
-          searchKey = value
-          break
-        }
-
-        // Tentar buscar com prefixo token_
-        if (key === "token" && paymentConfirmations.has(`token_${value}`)) {
-          found = paymentConfirmations.get(`token_${value}`)
-          searchKey = `token_${value}`
-          break
-        }
+      if (value && paymentConfirmations.has(value)) {
+        found = paymentConfirmations.get(value)
+        break
       }
     }
 
     console.log("🔍 Consultando status SuperPayBR:", {
       searchParams: Object.fromEntries(searchParams.entries()),
       found: !!found,
-      searchKey,
       confirmations_total: paymentConfirmations.size,
     })
 
@@ -51,9 +38,6 @@ export async function GET(request: NextRequest) {
       success: true,
       found: !!found,
       data: found || null,
-      search_key: searchKey,
-      total_confirmations: paymentConfirmations.size,
-      timestamp: new Date().toISOString(),
     })
   } catch (error) {
     console.error("❌ Erro ao consultar status SuperPayBR:", error)
