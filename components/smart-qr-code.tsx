@@ -1,9 +1,8 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import Image from "next/image"
 import { AlertCircle, RefreshCw, CheckCircle } from "lucide-react"
-import { processQRCodeData, logQRCodeEvent, generateFallbackQRCode } from "@/lib/qrcode-utils"
 
 interface SmartQRCodeProps {
   invoice: {
@@ -26,120 +25,179 @@ export function SmartQRCode({ invoice, width = 200, height = 200, className = ""
   const [error, setError] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(1)
   const [source, setSource] = useState<string>("unknown")
+  const [hasStarted, setHasStarted] = useState(false)
 
-  useEffect(() => {
-    loadQRCode()
-  }, [invoice])
+  // Função para gerar QR Code de fallback
+  const generateFallbackQRCode = useCallback(
+    (pixCode: string): string => {
+      if (!pixCode) {
+        return "/placeholder.svg?height=200&width=200"
+      }
+      const encodedPixCode = encodeURIComponent(pixCode)
+      return `https://quickchart.io/qr?text=${encodedPixCode}&size=${width}`
+    },
+    [width],
+  )
 
-  const loadQRCode = async () => {
-    setLoading(true)
-    setError(null)
+  // Função para testar se uma URL de imagem é válida
+  const testImageUrl = useCallback((url: string, sourceType: string): Promise<boolean> => {
+    return new Promise((resolve) => {
+      const img = new window.Image()
 
-    logQRCodeEvent("load_start", {
-      invoiceId: invoice.id,
-      attempt,
-      availableUrls: {
-        qr_code: !!invoice.pix.qr_code,
-        image: !!invoice.pix.image,
-        payload: !!invoice.pix.payload,
-      },
+      const cleanup = () => {
+        img.onload = null
+        img.onerror = null
+      }
+
+      img.onload = () => {
+        cleanup()
+        console.log(`✅ QR Code carregado com sucesso (${sourceType}):`, url.substring(0, 100))
+        resolve(true)
+      }
+
+      img.onerror = () => {
+        cleanup()
+        console.log(`❌ Falha ao carregar QR Code (${sourceType}):`, url.substring(0, 100))
+        resolve(false)
+      }
+
+      // Timeout de 5 segundos
+      setTimeout(() => {
+        cleanup()
+        console.log(`⏰ Timeout ao carregar QR Code (${sourceType})`)
+        resolve(false)
+      }, 5000)
+
+      img.src = url
     })
+  }, [])
+
+  // Função principal para carregar QR Code
+  const loadQRCode = useCallback(async () => {
+    if (hasStarted && attempt > 5) {
+      console.log("❌ Máximo de tentativas excedido")
+      setError("Não foi possível carregar o QR Code")
+      setLoading(false)
+      return
+    }
+
+    setHasStarted(true)
+    console.log(`🔄 Tentativa ${attempt}/5 de carregar QR Code`)
 
     try {
       // Tentativa 1: URL direta do QR Code da fatura
-      if (invoice.pix.qr_code && attempt === 1) {
+      if (attempt === 1 && invoice.pix.qr_code) {
         console.log("🔄 Tentativa 1: URL direta do QR Code")
-        await testImageUrl(invoice.pix.qr_code, "direct_qr_code")
-        return
+        const isValid = await testImageUrl(invoice.pix.qr_code, "direct_qr_code")
+        if (isValid) {
+          setQrCodeUrl(invoice.pix.qr_code)
+          setSource("direct_qr_code")
+          setLoading(false)
+          return
+        }
       }
 
       // Tentativa 2: URL da imagem da fatura
-      if (invoice.pix.image && attempt <= 2) {
+      if (attempt === 2 && invoice.pix.image) {
         console.log("🔄 Tentativa 2: URL da imagem")
-        await testImageUrl(invoice.pix.image, "direct_image")
-        return
+        const isValid = await testImageUrl(invoice.pix.image, "direct_image")
+        if (isValid) {
+          setQrCodeUrl(invoice.pix.image)
+          setSource("direct_image")
+          setLoading(false)
+          return
+        }
       }
 
       // Tentativa 3: Buscar via API SuperPayBR
-      if (attempt <= 3) {
+      if (attempt === 3) {
         console.log("🔄 Tentativa 3: API SuperPayBR")
-        const response = await fetch(`/api/superpaybr/get-qrcode?invoiceId=${invoice.id}`)
-        const data = await response.json()
+        try {
+          const response = await fetch(`/api/superpaybr/get-qrcode?invoiceId=${invoice.id}`)
+          const data = await response.json()
 
-        if (data.success && data.data) {
-          const processed = processQRCodeData(data.data)
-          if (processed.qrCodeUrl) {
-            await testImageUrl(processed.qrCodeUrl, "superpaybr_api")
-            return
+          if (data.success && data.data) {
+            const apiQrCode = data.data.qr_code || data.data.image || data.data.url
+            if (apiQrCode) {
+              const isValid = await testImageUrl(apiQrCode, "superpaybr_api")
+              if (isValid) {
+                setQrCodeUrl(apiQrCode)
+                setSource("superpaybr_api")
+                setLoading(false)
+                return
+              }
+            }
           }
+        } catch (error) {
+          console.log("❌ Erro na API SuperPayBR:", error)
         }
       }
 
       // Tentativa 4: Gerar QR Code usando payload PIX
-      if (invoice.pix.payload && attempt <= 4) {
+      if (attempt === 4 && invoice.pix.payload) {
         console.log("🔄 Tentativa 4: QR Code gerado via payload")
         const generatedUrl = generateFallbackQRCode(invoice.pix.payload)
-        await testImageUrl(generatedUrl, "generated_from_payload")
-        return
+        const isValid = await testImageUrl(generatedUrl, "generated_from_payload")
+        if (isValid) {
+          setQrCodeUrl(generatedUrl)
+          setSource("generated_from_payload")
+          setLoading(false)
+          return
+        }
       }
 
       // Tentativa 5: QR Code de emergência
-      if (attempt <= 5) {
+      if (attempt === 5) {
         console.log("🔄 Tentativa 5: QR Code de emergência")
-        const emergencyUrl = `https://quickchart.io/qr?text=${encodeURIComponent("PIX temporariamente indisponível")}&size=${width}`
-        await testImageUrl(emergencyUrl, "emergency")
+        const emergencyText = "PIX temporariamente indisponível - Use o código PIX abaixo"
+        const emergencyUrl = `https://quickchart.io/qr?text=${encodeURIComponent(emergencyText)}&size=${width}`
+
+        // Para emergência, não testamos - apenas definimos
+        setQrCodeUrl(emergencyUrl)
+        setSource("emergency")
+        setLoading(false)
         return
       }
 
-      throw new Error("Todas as tentativas falharam")
+      // Se chegou aqui, incrementar tentativa
+      if (attempt < 5) {
+        setTimeout(() => {
+          setAttempt((prev) => prev + 1)
+        }, 1000)
+      }
     } catch (error) {
       console.error(`❌ Erro na tentativa ${attempt}:`, error)
-      logQRCodeEvent("load_error", {
-        attempt,
-        error: error instanceof Error ? error.message : error,
-      })
-
       if (attempt < 5) {
-        setAttempt((prev) => prev + 1)
-        setTimeout(() => loadQRCode(), 1000 * attempt) // Delay progressivo
+        setTimeout(() => {
+          setAttempt((prev) => prev + 1)
+        }, 1000)
       } else {
-        setError("Não foi possível carregar o QR Code")
+        setError("Erro ao carregar QR Code")
         setLoading(false)
       }
     }
-  }
+  }, [attempt, invoice, testImageUrl, generateFallbackQRCode, width, hasStarted])
 
-  const testImageUrl = async (url: string, sourceType: string): Promise<void> => {
-    return new Promise((resolve, reject) => {
-      const img = new window.Image()
+  // Efeito para iniciar o carregamento
+  useEffect(() => {
+    if (!hasStarted) {
+      loadQRCode()
+    }
+  }, [loadQRCode, hasStarted])
 
-      img.onload = () => {
-        console.log(`✅ QR Code carregado com sucesso (${sourceType}):`, url)
-        setQrCodeUrl(url)
-        setSource(sourceType)
-        setLoading(false)
-        logQRCodeEvent("load_success", { url, source: sourceType, attempt })
-        resolve()
-      }
-
-      img.onerror = () => {
-        console.log(`❌ Falha ao carregar QR Code (${sourceType}):`, url)
-        logQRCodeEvent("load_failed", { url, source: sourceType, attempt })
-        reject(new Error(`Falha ao carregar imagem: ${sourceType}`))
-      }
-
-      // Timeout de 10 segundos
-      setTimeout(() => {
-        reject(new Error(`Timeout ao carregar imagem: ${sourceType}`))
-      }, 10000)
-
-      img.src = url
-    })
-  }
+  // Efeito para continuar tentativas
+  useEffect(() => {
+    if (hasStarted && attempt > 1 && attempt <= 5 && loading) {
+      loadQRCode()
+    }
+  }, [attempt, hasStarted, loading, loadQRCode])
 
   const retry = () => {
     setAttempt(1)
-    loadQRCode()
+    setHasStarted(false)
+    setLoading(true)
+    setError(null)
+    setQrCodeUrl(null)
   }
 
   if (loading) {
@@ -183,8 +241,11 @@ export function SmartQRCode({ invoice, width = 200, height = 200, className = ""
         className="rounded-lg"
         onError={() => {
           console.log("❌ Erro ao renderizar imagem final")
-          setAttempt((prev) => prev + 1)
-          loadQRCode()
+          if (attempt < 5) {
+            setAttempt((prev) => prev + 1)
+          } else {
+            setError("Erro ao exibir QR Code")
+          }
         }}
       />
 
