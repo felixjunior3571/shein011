@@ -1,80 +1,65 @@
 "use client"
 
-import { useState, useEffect, useRef, useCallback } from "react"
+import { useEffect, useRef, useState } from "react"
 
 interface PaymentStatus {
   isPaid: boolean
   isDenied: boolean
+  isRefunded: boolean
   isExpired: boolean
   isCanceled: boolean
-  isRefunded: boolean
   statusCode: number
   statusName: string
-  statusTitle: string
-}
-
-interface PaymentData {
-  externalId: string
   amount: number
-  paymentDate?: string
-  statusName: string
+  paymentDate: string | null
+  timestamp: string
 }
 
-interface SuperPayBRWebhookMonitorOptions {
-  externalId: string | null
-  enableDebug?: boolean
-  onPaymentConfirmed?: (data: PaymentData) => void
-  onPaymentDenied?: (data: PaymentData) => void
-  onPaymentExpired?: (data: PaymentData) => void
-  onPaymentCanceled?: (data: PaymentData) => void
-  onPaymentRefunded?: (data: PaymentData) => void
+interface UseSuperpaybrWebhookMonitorProps {
+  externalId: string
+  onPaid?: () => void
+  onDenied?: () => void
+  onRefunded?: () => void
+  onExpired?: () => void
+  onCanceled?: () => void
+  onStatusChange?: (status: PaymentStatus) => void
+  enabled?: boolean
+  interval?: number
 }
 
 export function useSuperPayBRWebhookMonitor({
   externalId,
-  enableDebug = false,
-  onPaymentConfirmed,
-  onPaymentDenied,
-  onPaymentExpired,
-  onPaymentCanceled,
-  onPaymentRefunded,
-}: SuperPayBRWebhookMonitorOptions) {
+  onPaid,
+  onDenied,
+  onRefunded,
+  onExpired,
+  onCanceled,
+  onStatusChange,
+  enabled = true,
+  interval = 5000, // 5 segundos (otimizado)
+}: UseSuperpaybrWebhookMonitorProps) {
   const [status, setStatus] = useState<PaymentStatus | null>(null)
-  const [isWaitingForWebhook, setIsWaitingForWebhook] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [lastCheck, setLastCheck] = useState<Date | null>(null)
-
   const intervalRef = useRef<NodeJS.Timeout | null>(null)
-  const callbackExecutedRef = useRef<Set<string>>(new Set())
-  const requestInProgressRef = useRef(false)
+  const callbacksExecutedRef = useRef<Set<string>>(new Set())
   const abortControllerRef = useRef<AbortController | null>(null)
 
-  const log = useCallback(
-    (message: string, data?: any) => {
-      if (enableDebug) {
-        console.log(`[SuperPayBR Monitor] ${message}`, data || "")
-      }
-    },
-    [enableDebug],
-  )
-
-  const checkPaymentStatus = useCallback(async () => {
-    if (!externalId || requestInProgressRef.current) {
-      return
-    }
+  const checkPaymentStatus = async () => {
+    if (!externalId || !enabled) return
 
     try {
-      requestInProgressRef.current = true
+      setIsLoading(true)
+      setError(null)
 
-      // Cancelar requisição anterior se existir
+      // Cancelar requisição anterior
       if (abortControllerRef.current) {
         abortControllerRef.current.abort()
       }
 
       abortControllerRef.current = new AbortController()
 
-      log("🔍 Verificando status do pagamento SuperPayBR:", externalId)
-      setLastCheck(new Date())
+      console.log(`🔍 Verificando status SuperPayBR: ${externalId}`)
 
       const response = await fetch(`/api/superpaybr/payment-status?external_id=${externalId}`, {
         signal: abortControllerRef.current.signal,
@@ -84,115 +69,101 @@ export function useSuperPayBRWebhookMonitor({
       })
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`)
+        throw new Error(`Erro HTTP: ${response.status}`)
       }
 
       const data = await response.json()
 
-      if (data.success && data.data) {
-        const paymentData = data.data
-        log("📋 Dados do pagamento recebidos:", paymentData)
+      if (!data.success) {
+        throw new Error(data.error || "Erro ao verificar status")
+      }
 
-        const newStatus: PaymentStatus = {
-          isPaid: paymentData.is_paid || false,
-          isDenied: paymentData.is_denied || false,
-          isExpired: paymentData.is_expired || false,
-          isCanceled: paymentData.is_canceled || false,
-          isRefunded: paymentData.is_refunded || false,
-          statusCode: paymentData.status?.code || 1,
-          statusName: paymentData.status?.text || "pending",
-          statusTitle: paymentData.status?.title || "Aguardando Pagamento",
+      const newStatus: PaymentStatus = {
+        isPaid: data.isPaid,
+        isDenied: data.isDenied,
+        isRefunded: data.isRefunded,
+        isExpired: data.isExpired,
+        isCanceled: data.isCanceled,
+        statusCode: data.statusCode,
+        statusName: data.statusName,
+        amount: data.amount,
+        paymentDate: data.paymentDate,
+        timestamp: data.timestamp,
+      }
+
+      setStatus(newStatus)
+
+      // Executar callbacks apenas uma vez por status
+      const statusKey = `${externalId}_${newStatus.statusCode}`
+
+      if (!callbacksExecutedRef.current.has(statusKey)) {
+        console.log(`📊 Status SuperPayBR atualizado: ${newStatus.statusName}`)
+
+        if (newStatus.isPaid && onPaid) {
+          console.log("🎉 Executando callback de pagamento confirmado")
+          onPaid()
+        } else if (newStatus.isDenied && onDenied) {
+          console.log("❌ Executando callback de pagamento negado")
+          onDenied()
+        } else if (newStatus.isRefunded && onRefunded) {
+          console.log("↩️ Executando callback de pagamento estornado")
+          onRefunded()
+        } else if (newStatus.isExpired && onExpired) {
+          console.log("⏰ Executando callback de pagamento vencido")
+          onExpired()
+        } else if (newStatus.isCanceled && onCanceled) {
+          console.log("🚫 Executando callback de pagamento cancelado")
+          onCanceled()
         }
 
-        setStatus(newStatus)
-        setError(null)
-
-        // Executar callbacks apenas uma vez por status
-        const callbackKey = `${externalId}_${newStatus.statusCode}_${newStatus.statusName}`
-
-        if (!callbackExecutedRef.current.has(callbackKey)) {
-          const callbackData: PaymentData = {
-            externalId,
-            amount: paymentData.amount || 0,
-            paymentDate: paymentData.payment_date,
-            statusName: newStatus.statusName,
-          }
-
-          if (newStatus.isPaid && onPaymentConfirmed) {
-            log("✅ Pagamento confirmado - executando callback")
-            onPaymentConfirmed(callbackData)
-            callbackExecutedRef.current.add(callbackKey)
-          } else if (newStatus.isDenied && onPaymentDenied) {
-            log("❌ Pagamento negado - executando callback")
-            onPaymentDenied(callbackData)
-            callbackExecutedRef.current.add(callbackKey)
-          } else if (newStatus.isExpired && onPaymentExpired) {
-            log("⏰ Pagamento expirado - executando callback")
-            onPaymentExpired(callbackData)
-            callbackExecutedRef.current.add(callbackKey)
-          } else if (newStatus.isCanceled && onPaymentCanceled) {
-            log("🚫 Pagamento cancelado - executando callback")
-            onPaymentCanceled(callbackData)
-            callbackExecutedRef.current.add(callbackKey)
-          } else if (newStatus.isRefunded && onPaymentRefunded) {
-            log("↩️ Pagamento estornado - executando callback")
-            onPaymentRefunded(callbackData)
-            callbackExecutedRef.current.add(callbackKey)
-          }
+        if (onStatusChange) {
+          onStatusChange(newStatus)
         }
 
-        // Parar monitoramento em status final
+        callbacksExecutedRef.current.add(statusKey)
+
+        // Parar monitoramento se status final
         if (
           newStatus.isPaid ||
           newStatus.isDenied ||
+          newStatus.isRefunded ||
           newStatus.isExpired ||
-          newStatus.isCanceled ||
-          newStatus.isRefunded
+          newStatus.isCanceled
         ) {
-          log("🛑 Status final atingido, parando monitoramento")
-          setIsWaitingForWebhook(false)
+          console.log("✅ Status final atingido, parando monitoramento SuperPayBR")
           if (intervalRef.current) {
             clearInterval(intervalRef.current)
             intervalRef.current = null
           }
         }
-      } else {
-        log("⚠️ Resposta inválida da API:", data)
-        setError(data.error || "Erro na consulta")
       }
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {
-        log("🚫 Requisição cancelada")
-        return
+        return // Requisição cancelada, não é erro
       }
 
-      log("❌ Erro ao verificar status:", err)
-      setError(err instanceof Error ? err.message : "Erro desconhecido")
+      const errorMessage = err instanceof Error ? err.message : "Erro desconhecido"
+      console.error("❌ Erro no monitoramento SuperPayBR:", errorMessage)
+      setError(errorMessage)
     } finally {
-      requestInProgressRef.current = false
+      setIsLoading(false)
     }
-  }, [externalId, log, onPaymentConfirmed, onPaymentDenied, onPaymentExpired, onPaymentCanceled, onPaymentRefunded])
+  }
 
-  // Iniciar monitoramento quando external_id estiver disponível
   useEffect(() => {
-    if (!externalId) {
-      log("⚠️ External ID não fornecido, aguardando...")
-      return
-    }
+    if (!enabled || !externalId) return
 
-    log("🚀 Iniciando monitoramento SuperPayBR para:", externalId)
-    setIsWaitingForWebhook(true)
-    setError(null)
-    callbackExecutedRef.current.clear()
+    console.log(`🚀 Iniciando monitoramento SuperPayBR: ${externalId}`)
 
     // Verificação inicial
     checkPaymentStatus()
 
-    // Configurar intervalo de verificação (a cada 10 segundos para evitar sobrecarga)
-    intervalRef.current = setInterval(checkPaymentStatus, 10000)
+    // Configurar intervalo
+    intervalRef.current = setInterval(checkPaymentStatus, interval)
 
     return () => {
       if (intervalRef.current) {
+        console.log(`🛑 Parando monitoramento SuperPayBR: ${externalId}`)
         clearInterval(intervalRef.current)
         intervalRef.current = null
       }
@@ -201,35 +172,13 @@ export function useSuperPayBRWebhookMonitor({
         abortControllerRef.current.abort()
         abortControllerRef.current = null
       }
-
-      requestInProgressRef.current = false
-      setIsWaitingForWebhook(false)
-      log("🧹 Limpeza do monitoramento SuperPayBR concluída")
     }
-  }, [externalId, checkPaymentStatus, log])
-
-  // Cleanup ao desmontar
-  useEffect(() => {
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current)
-        intervalRef.current = null
-      }
-
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort()
-        abortControllerRef.current = null
-      }
-
-      requestInProgressRef.current = false
-    }
-  }, [])
+  }, [externalId, enabled, interval])
 
   return {
     status,
-    isWaitingForWebhook,
+    isLoading,
     error,
-    lastCheck,
     checkPaymentStatus,
   }
 }

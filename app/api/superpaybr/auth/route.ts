@@ -1,8 +1,8 @@
-import { NextResponse } from "next/server"
+import { type NextRequest, NextResponse } from "next/server"
 
-export async function POST() {
+export async function POST(request: NextRequest) {
   try {
-    console.log("🔐 Iniciando autenticação SuperPayBR...")
+    console.log("🔐 === AUTENTICAÇÃO SUPERPAYBR ===")
 
     const apiUrl = process.env.SUPERPAY_API_URL
     const token = process.env.SUPERPAY_TOKEN
@@ -19,11 +19,16 @@ export async function POST() {
       )
     }
 
+    console.log("🌐 Autenticando com SuperPayBR...")
+    console.log("URL:", apiUrl)
+    console.log("Token:", token.substring(0, 10) + "...")
+
     const authResponse = await fetch(`${apiUrl}/v4/auth`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
+        "User-Agent": "SHEIN-Card-System/1.0",
       },
       body: JSON.stringify({
         token: token,
@@ -31,15 +36,16 @@ export async function POST() {
       }),
     })
 
+    console.log("📥 Resposta da autenticação:", {
+      status: authResponse.status,
+      statusText: authResponse.statusText,
+      ok: authResponse.ok,
+    })
+
     if (!authResponse.ok) {
-      console.error("❌ Falha na autenticação SuperPayBR:", authResponse.status)
-      return NextResponse.json(
-        {
-          success: false,
-          error: `Erro de autenticação: ${authResponse.status}`,
-        },
-        { status: authResponse.status },
-      )
+      const errorText = await authResponse.text()
+      console.error("❌ Erro na autenticação SuperPayBR:", errorText)
+      throw new Error(`Erro de autenticação: ${authResponse.status} - ${errorText}`)
     }
 
     const authData = await authResponse.json()
@@ -48,16 +54,25 @@ export async function POST() {
     return NextResponse.json({
       success: true,
       access_token: authData.access_token,
-      expires_in: authData.expires_in,
+      token_type: authData.token_type || "Bearer",
+      expires_in: authData.expires_in || 3600,
     })
   } catch (error) {
     console.error("❌ Erro na autenticação SuperPayBR:", error)
     return NextResponse.json(
       {
         success: false,
-        error: error instanceof Error ? error.message : "Erro desconhecido",
+        error: error instanceof Error ? error.message : "Erro desconhecido na autenticação",
       },
       { status: 500 },
     )
   }
+}
+
+export async function GET() {
+  return NextResponse.json({
+    success: true,
+    message: "SuperPayBR Auth endpoint ativo",
+    timestamp: new Date().toISOString(),
+  })
 }
