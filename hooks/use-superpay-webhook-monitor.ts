@@ -56,7 +56,7 @@ export function useSuperpayWebhookMonitor({
       setLastCheck(new Date())
 
       if (enableDebug) {
-        console.log("🔍 Verificando confirmação webhook SuperPayBR:", {
+        console.log("🔍 Verificando confirmação webhook SuperPay:", {
           externalId,
           invoiceId,
           token,
@@ -113,14 +113,14 @@ export function useSuperpayWebhookMonitor({
       } else {
         setIsWaitingForWebhook(true)
         if (enableDebug) {
-          console.log("⏳ Aguardando confirmação via webhook SuperPayBR...")
+          console.log("⏳ Aguardando confirmação via webhook SuperPay...")
         }
       }
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Erro desconhecido SuperPayBR"
+      const errorMessage = err instanceof Error ? err.message : "Erro desconhecido SuperPay"
       setError(errorMessage)
       if (enableDebug) {
-        console.error("❌ Erro ao verificar webhook SuperPayBR:", errorMessage)
+        console.error("❌ Erro ao verificar webhook SuperPay:", errorMessage)
       }
     }
   }, [
@@ -141,7 +141,7 @@ export function useSuperpayWebhookMonitor({
     if (!externalId || paymentStatus === "confirmed") return
 
     if (enableDebug) {
-      console.log("🚀 Iniciando monitoramento webhook SuperPayBR:", {
+      console.log("🚀 Iniciando monitoramento webhook SuperPay:", {
         externalId,
         invoiceId,
         token,
@@ -162,7 +162,7 @@ export function useSuperpayWebhookMonitor({
         intervalRef.current = null
       }
       if (enableDebug) {
-        console.log("🛑 Monitoramento SuperPayBR limpo")
+        console.log("🛑 Monitoramento SuperPay limpo")
       }
     }
   }, [externalId, paymentStatus, checkWebhookConfirmation, enableDebug])

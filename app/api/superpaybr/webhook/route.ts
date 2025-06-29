@@ -84,7 +84,7 @@ function savePaymentConfirmation(externalId: string, invoiceId: string, data: an
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("🔔 WEBHOOK SUPERPAYBR RECEBIDO 🔔")
+    console.log("🔔 === WEBHOOK SUPERPAYBR RECEBIDO ===")
 
     const payload: SuperPayWebhookPayload = await request.json()
     console.log("📋 Payload completo:", JSON.stringify(payload, null, 2))
@@ -245,5 +245,5 @@ export async function GET() {
   })
 }
 
-// ✅ ENDPOINT PARA CONSULTAR CONFIRMAÇÕES (SEM RATE LIMIT)
+// ✅ EXPORTAR PARA CONSULTA
 export { paymentConfirmations, realtimeEvents }
