@@ -1,4 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
+import { createClient } from "@supabase/supabase-js"
+
+const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
 export async function GET(request: NextRequest) {
   try {
@@ -6,76 +9,66 @@ export async function GET(request: NextRequest) {
     const externalId = searchParams.get("externalId")
 
     if (!externalId) {
-      return NextResponse.json({ success: false, error: "External ID is required" }, { status: 400 })
+      return NextResponse.json({ success: false, error: "External ID é obrigatório" }, { status: 400 })
     }
 
-    console.log("🔍 [SuperPayBR Check] Consultando pagamento para:", externalId)
+    console.log(`🔍 [SuperPayBR Check] Consultando pagamento para: ${externalId}`)
 
-    // Buscar no Supabase (dados do webhook)
-    try {
-      const { createClient } = await import("@supabase/supabase-js")
-      const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+    // Buscar no Supabase (dados do webhook) - SEM POLLING na API externa
+    const { data, error } = await supabase
+      .from("payments")
+      .select("*")
+      .eq("external_id", externalId)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle()
 
-      const { data, error } = await supabase
-        .from("payment_webhooks")
-        .select("*")
-        .eq("external_id", externalId)
-        .eq("gateway", "SuperPayBR")
-        .order("received_at", { ascending: false })
-        .limit(1)
-        .single()
+    if (error) {
+      console.error("❌ [SuperPayBR Check] Erro ao consultar Supabase:", error)
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Erro ao consultar banco de dados",
+          details: error.message,
+        },
+        { status: 500 },
+      )
+    }
 
-      if (error && error.code !== "PGRST116") {
-        console.error("❌ [SuperPayBR Check] Erro ao consultar Supabase:", error)
-        throw error
-      }
+    if (data) {
+      console.log("✅ [SuperPayBR Check] Status encontrado no webhook:", {
+        external_id: data.external_id,
+        status: data.status_text,
+        is_paid: data.is_paid,
+        amount: data.amount,
+        updated_at: data.updated_at,
+      })
 
-      if (data) {
-        console.log("✅ [SuperPayBR Check] Status encontrado no webhook:", {
-          external_id: data.external_id,
-          status: data.status_name,
-          is_paid: data.is_paid,
-          amount: data.amount,
-        })
-
-        const paymentStatus = {
+      return NextResponse.json({
+        success: true,
+        found: true,
+        data: {
           isPaid: data.is_paid,
           isDenied: data.is_denied,
           isRefunded: data.is_refunded,
           isExpired: data.is_expired,
           isCanceled: data.is_canceled,
           statusCode: data.status_code,
-          statusName: data.status_name,
-          statusTitle: data.status_title,
+          statusText: data.status_text,
           amount: data.amount,
           paymentDate: data.payment_date,
-          gateway: data.gateway,
-        }
-
-        return NextResponse.json({
-          success: true,
-          found: true,
-          data: paymentStatus,
-          source: "webhook",
-          receivedAt: data.received_at,
-        })
-      } else {
-        console.log("⏳ [SuperPayBR Check] Nenhum webhook recebido ainda para:", externalId)
-
-        return NextResponse.json({
-          success: true,
-          found: false,
-          message: "No webhook received yet",
-          externalId,
-        })
-      }
-    } catch (dbError) {
-      console.error("❌ [SuperPayBR Check] Erro na consulta ao banco:", dbError)
+          updatedAt: data.updated_at,
+        },
+        source: "webhook",
+      })
+    } else {
+      console.log(`⏳ [SuperPayBR Check] Nenhum webhook recebido ainda para: ${externalId}`)
 
       return NextResponse.json({
-        success: false,
-        error: "Database error",
-        message: "Unable to check payment status",
+        success: true,
+        found: false,
+        message: "Aguardando webhook de confirmação",
+        externalId,
       })
     }
   } catch (error) {
@@ -84,8 +77,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       {
         success: false,
-        error: "Internal server error",
-        message: error instanceof Error ? error.message : "Unknown error",
+        error: "Erro interno do servidor",
+        details: error instanceof Error ? error.message : "Erro desconhecido",
       },
       { status: 500 },
     )

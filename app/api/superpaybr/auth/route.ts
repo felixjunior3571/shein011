@@ -1,76 +1,85 @@
-import { type NextRequest, NextResponse } from "next/server"
+import { NextResponse } from "next/server"
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
-    console.log("=== AUTENTICAÇÃO SUPERPAYBR ===")
+    console.log("🔐 Iniciando autenticação SuperPayBR...")
 
     const token = process.env.SUPERPAYBR_TOKEN
     const secretKey = process.env.SUPERPAYBR_SECRET_KEY
+    const apiUrl = process.env.SUPERPAYBR_API_URL
 
-    if (!token || !secretKey) {
-      console.log("❌ Credenciais SuperPayBR não encontradas")
+    if (!token || !secretKey || !apiUrl) {
+      console.error("❌ Variáveis de ambiente SuperPayBR não configuradas")
       return NextResponse.json(
         {
           success: false,
-          error: "Credenciais SuperPayBR não configuradas",
+          error: "Configuração SuperPayBR incompleta",
+          missing: {
+            token: !token,
+            secretKey: !secretKey,
+            apiUrl: !apiUrl,
+          },
         },
         { status: 500 },
       )
     }
 
-    console.log("🔑 Fazendo autenticação SuperPayBR...")
-    console.log("Token:", token.substring(0, 10) + "...")
-    console.log("Secret:", secretKey.substring(0, 20) + "...")
+    console.log("🔑 Fazendo autenticação com SuperPayBR...")
 
-    // Criar Basic Auth header
-    const credentials = Buffer.from(`${token}:${secretKey}`).toString("base64")
-
-    const authResponse = await fetch("https://api.superpaybr.com/auth", {
-      method: "GET",
+    const authResponse = await fetch(`${apiUrl}/v4/auth`, {
+      method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Basic ${credentials}`,
-        scope: "invoice.write, customer.write, webhook.write",
+        Authorization: `Basic ${secretKey}`,
       },
+      body: JSON.stringify({
+        grant_type: "client_credentials",
+      }),
     })
 
-    console.log("📥 Resposta SuperPayBR Auth:", {
-      status: authResponse.status,
-      statusText: authResponse.statusText,
-      ok: authResponse.ok,
-    })
-
-    if (authResponse.ok) {
-      const authData = await authResponse.json()
-      console.log("✅ Autenticação SuperPayBR bem-sucedida!")
-      console.log("Account ID:", authData.account)
-      console.log("Working:", authData.working)
-      console.log("Expires:", new Date(authData.expires_in * 1000).toLocaleString())
-
-      return NextResponse.json({
-        success: true,
-        data: authData,
-      })
-    } else {
+    if (!authResponse.ok) {
       const errorText = await authResponse.text()
-      console.log("❌ Erro na autenticação SuperPayBR:", authResponse.status, errorText)
+      console.error("❌ Erro na autenticação SuperPayBR:", {
+        status: authResponse.status,
+        statusText: authResponse.statusText,
+        error: errorText,
+      })
 
       return NextResponse.json(
         {
           success: false,
-          error: `Erro na autenticação: ${authResponse.status} - ${errorText}`,
+          error: `Falha na autenticação SuperPayBR: ${authResponse.status} - ${authResponse.statusText}`,
+          details: errorText,
         },
         { status: authResponse.status },
       )
     }
+
+    const authData = await authResponse.json()
+    console.log("✅ Autenticação SuperPayBR bem-sucedida")
+
+    return NextResponse.json({
+      success: true,
+      message: "Autenticação SuperPayBR realizada com sucesso",
+      data: {
+        access_token: authData.access_token,
+        token_type: authData.token_type,
+        expires_in: authData.expires_in,
+      },
+    })
   } catch (error) {
-    console.log("❌ Erro na autenticação SuperPayBR:", error)
+    console.error("❌ Erro na autenticação SuperPayBR:", error)
     return NextResponse.json(
       {
         success: false,
-        error: "Erro interno na autenticação",
+        error: "Erro interno na autenticação SuperPayBR",
+        details: error instanceof Error ? error.message : "Erro desconhecido",
       },
       { status: 500 },
     )
   }
+}
+
+export async function POST() {
+  return GET()
 }
