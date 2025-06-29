@@ -1,103 +1,71 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 
-const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!)
+const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
 export async function POST(request: NextRequest) {
   try {
     console.log("🔔 === WEBHOOK SUPERPAYBR RECEBIDO ===")
 
     const webhookData = await request.json()
-    console.log("📥 Dados do webhook:", JSON.stringify(webhookData, null, 2))
+    console.log("📥 Dados webhook:", JSON.stringify(webhookData, null, 2))
 
-    // Extrair informações do webhook
-    const eventType = webhookData.event || webhookData.type || "unknown"
-    const invoiceId = webhookData.invoice_id || webhookData.id || webhookData.payment_id
-    const status = webhookData.status || webhookData.payment_status
-    const amount = webhookData.amount || webhookData.value
-    const externalId = webhookData.external_id || webhookData.reference
+    // Extrair dados do webhook
+    const invoiceId = webhookData.invoice_id || webhookData.id || webhookData.external_id
+    const status = webhookData.status || webhookData.payment_status || "unknown"
+    const amount = webhookData.amount || webhookData.value || 0
+    const paymentMethod = webhookData.payment_method || "pix"
 
-    console.log("📋 Dados extraídos:", {
-      eventType,
-      invoiceId,
-      status,
-      amount,
-      externalId,
-    })
+    // Salvar no Supabase
+    const { data, error } = await supabase.from("superpaybr_payments").upsert(
+      {
+        invoice_id: invoiceId,
+        external_id: webhookData.external_id || invoiceId,
+        status: status,
+        amount: amount,
+        payment_method: paymentMethod,
+        webhook_data: webhookData,
+        updated_at: new Date().toISOString(),
+      },
+      {
+        onConflict: "invoice_id",
+      },
+    )
 
-    // Salvar webhook no Supabase
-    const { data: webhookRecord, error: webhookError } = await supabase
-      .from("superpaybr_payments")
-      .upsert(
+    if (error) {
+      console.error("❌ Erro ao salvar webhook no Supabase:", error)
+      return NextResponse.json(
         {
-          invoice_id: invoiceId,
-          external_id: externalId,
-          status: status,
-          amount: amount,
-          event_type: eventType,
-          webhook_data: webhookData,
-          processed_at: new Date().toISOString(),
+          success: false,
+          error: "Erro ao processar webhook",
+          details: error.message,
         },
-        {
-          onConflict: "invoice_id",
-        },
+        { status: 500 },
       )
-      .select()
-
-    if (webhookError) {
-      console.error("❌ Erro ao salvar webhook no Supabase:", webhookError)
-    } else {
-      console.log("✅ Webhook salvo no Supabase:", webhookRecord)
     }
 
-    // Broadcast atualização em tempo real
-    const { error: broadcastError } = await supabase.from("payment_updates").insert({
+    // Broadcast atualização
+    await supabase.from("payment_updates").insert({
       invoice_id: invoiceId,
-      external_id: externalId,
       status: status,
-      event_type: eventType,
       amount: amount,
       timestamp: new Date().toISOString(),
     })
 
-    if (broadcastError) {
-      console.error("❌ Erro ao fazer broadcast:", broadcastError)
-    } else {
-      console.log("📡 Broadcast enviado com sucesso")
-    }
-
-    // Processar diferentes tipos de eventos
-    switch (eventType) {
-      case "payment.approved":
-      case "invoice.paid":
-        console.log("✅ Pagamento aprovado!")
-        break
-      case "payment.cancelled":
-      case "invoice.cancelled":
-        console.log("❌ Pagamento cancelado!")
-        break
-      case "payment.pending":
-      case "invoice.pending":
-        console.log("⏳ Pagamento pendente...")
-        break
-      default:
-        console.log("ℹ️ Evento não reconhecido:", eventType)
-    }
+    console.log("✅ Webhook SuperPayBR processado com sucesso")
 
     return NextResponse.json({
       success: true,
       message: "Webhook processado com sucesso",
-      event_type: eventType,
       invoice_id: invoiceId,
       status: status,
-      processed_at: new Date().toISOString(),
     })
   } catch (error) {
-    console.error("❌ Erro ao processar webhook SuperPayBR:", error)
+    console.error("❌ Erro no webhook SuperPayBR:", error)
     return NextResponse.json(
       {
         success: false,
-        error: "Erro ao processar webhook SuperPayBR",
+        error: "Erro interno no webhook",
         details: error instanceof Error ? error.message : "Erro desconhecido",
       },
       { status: 500 },
