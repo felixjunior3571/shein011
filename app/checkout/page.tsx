@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import Image from "next/image"
-import { Copy, CheckCircle, Clock, AlertCircle } from "lucide-react"
+import { Copy, CheckCircle, Clock, AlertCircle, Bug } from "lucide-react"
 import { usePureWebhookMonitor } from "@/hooks/use-pure-webhook-monitor"
 import { useOptimizedTracking } from "@/hooks/use-optimized-tracking"
 
@@ -31,6 +31,31 @@ interface InvoiceData {
   external_id?: string
 }
 
+interface DebugInfo {
+  qrCodeAttempts: Array<{
+    attempt: number
+    source: string
+    url: string
+    success: boolean
+    error?: string
+    timestamp: string
+  }>
+  invoiceCreation: {
+    success: boolean
+    data?: any
+    error?: string
+    timestamp: string
+  }
+  apiCalls: Array<{
+    endpoint: string
+    method: string
+    status: number
+    response?: any
+    error?: string
+    timestamp: string
+  }>
+}
+
 export default function SuperPayBRCheckoutPage() {
   const [loading, setLoading] = useState(true)
   const [invoice, setInvoice] = useState<InvoiceData | null>(null)
@@ -38,6 +63,12 @@ export default function SuperPayBRCheckoutPage() {
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [externalId, setExternalId] = useState<string | null>(null)
+  const [debugMode, setDebugMode] = useState(false)
+  const [debugInfo, setDebugInfo] = useState<DebugInfo>({
+    qrCodeAttempts: [],
+    invoiceCreation: { success: false, timestamp: new Date().toISOString() },
+    apiCalls: [],
+  })
 
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -64,6 +95,7 @@ export default function SuperPayBRCheckoutPage() {
     enableDebug: process.env.NODE_ENV === "development",
     onPaymentConfirmed: (data) => {
       console.log("🎉 PAGAMENTO CONFIRMADO VIA WEBHOOK SUPERPAYBR!")
+      addDebugLog("webhook", "POST", 200, { event: "payment_confirmed", data })
 
       // Track conversion
       trackConversion("payment_confirmed", data.amount)
@@ -81,13 +113,53 @@ export default function SuperPayBRCheckoutPage() {
     },
     onPaymentDenied: (data) => {
       console.log("❌ PAGAMENTO NEGADO VIA WEBHOOK SUPERPAYBR!")
+      addDebugLog("webhook", "POST", 200, { event: "payment_denied", data })
       track("payment_denied", { amount: data.amount, reason: data.statusName })
     },
     onPaymentExpired: (data) => {
       console.log("⏰ PAGAMENTO VENCIDO VIA WEBHOOK SUPERPAYBR!")
+      addDebugLog("webhook", "POST", 200, { event: "payment_expired", data })
       track("payment_expired", { amount: data.amount })
     },
   })
+
+  // Função para adicionar logs de debug
+  const addDebugLog = (endpoint: string, method: string, status: number, response?: any, error?: string) => {
+    const logEntry = {
+      endpoint,
+      method,
+      status,
+      response,
+      error,
+      timestamp: new Date().toISOString(),
+    }
+
+    setDebugInfo((prev) => ({
+      ...prev,
+      apiCalls: [...prev.apiCalls, logEntry],
+    }))
+
+    console.log(`[DEBUG API] ${method} ${endpoint}:`, logEntry)
+  }
+
+  // Função para adicionar tentativas de QR Code
+  const addQRCodeAttempt = (attempt: number, source: string, url: string, success: boolean, error?: string) => {
+    const attemptLog = {
+      attempt,
+      source,
+      url: url.length > 100 ? url.substring(0, 100) + "..." : url,
+      success,
+      error,
+      timestamp: new Date().toISOString(),
+    }
+
+    setDebugInfo((prev) => ({
+      ...prev,
+      qrCodeAttempts: [...prev.qrCodeAttempts, attemptLog],
+    }))
+
+    console.log(`[DEBUG QR] Tentativa ${attempt} (${source}):`, attemptLog)
+  }
 
   // Track page view on mount
   useEffect(() => {
@@ -145,11 +217,44 @@ export default function SuperPayBRCheckoutPage() {
           amount: Number.parseFloat(amount),
           type: invoice.type,
         })
+
+        // Debug QR Code após criar fatura
+        debugQRCode(capturedExternalId)
       } else {
         console.error("❌ Não foi possível obter external_id SuperPayBR!")
       }
     }
   }, [invoice, track, amount])
+
+  const debugQRCode = async (invoiceId: string) => {
+    try {
+      console.log("🐛 Iniciando debug do QR Code para invoice:", invoiceId)
+
+      const debugResponse = await fetch(`/api/debug/qrcode?invoiceId=${invoiceId}`)
+      const debugData = await debugResponse.json()
+
+      console.log("🐛 Resultado do debug QR Code:", debugData)
+      addDebugLog("/api/debug/qrcode", "GET", debugResponse.status, debugData)
+
+      // Analisar cada tentativa de QR Code
+      if (debugData.tests) {
+        debugData.tests.forEach((test: any, index: number) => {
+          if (test.name.includes("URL imagem")) {
+            addQRCodeAttempt(
+              index + 1,
+              "SuperPayBR API",
+              test.details?.url || "URL não disponível",
+              test.passed,
+              test.passed ? undefined : test.details?.error || "Falha na validação",
+            )
+          }
+        })
+      }
+    } catch (error) {
+      console.error("❌ Erro no debug do QR Code:", error)
+      addDebugLog("/api/debug/qrcode", "GET", 500, null, error instanceof Error ? error.message : "Erro desconhecido")
+    }
+  }
 
   const createInvoice = async () => {
     try {
@@ -195,6 +300,7 @@ export default function SuperPayBRCheckoutPage() {
       })
 
       const data = await response.json()
+      addDebugLog("/api/superpaybr/create-invoice", "POST", response.status, data)
 
       if (data.success) {
         setInvoice(data.data)
@@ -206,6 +312,16 @@ export default function SuperPayBRCheckoutPage() {
         )
         console.log(`👤 Cliente: ${cpfData.nome || "N/A"}`)
 
+        // Atualizar debug info
+        setDebugInfo((prev) => ({
+          ...prev,
+          invoiceCreation: {
+            success: true,
+            data: data.data,
+            timestamp: new Date().toISOString(),
+          },
+        }))
+
         // Track successful invoice creation
         track("invoice_created", {
           external_id: data.data.external_id,
@@ -213,12 +329,50 @@ export default function SuperPayBRCheckoutPage() {
           type: data.data.type,
           customer_name: cpfData.nome,
         })
+
+        // Debug do QR Code imediatamente após criar a fatura
+        console.log("🔍 Analisando QR Code da fatura criada:")
+        console.log("QR Code URL:", data.data.pix?.qr_code)
+        console.log("PIX Payload:", data.data.pix?.payload)
+        console.log("Image URL:", data.data.pix?.image)
+
+        // Tentar carregar QR Code
+        if (data.data.pix?.qr_code) {
+          addQRCodeAttempt(1, "Invoice Response", data.data.pix.qr_code, true)
+        } else if (data.data.pix?.image) {
+          addQRCodeAttempt(1, "Invoice Response (image)", data.data.pix.image, true)
+        } else {
+          addQRCodeAttempt(
+            1,
+            "Invoice Response",
+            "Nenhuma URL encontrada",
+            false,
+            "QR Code URL não encontrada na resposta",
+          )
+        }
       } else {
+        setDebugInfo((prev) => ({
+          ...prev,
+          invoiceCreation: {
+            success: false,
+            error: data.error,
+            timestamp: new Date().toISOString(),
+          },
+        }))
         throw new Error(data.error || "Erro ao criar fatura SuperPayBR")
       }
     } catch (error) {
       console.log("❌ Erro ao criar fatura SuperPayBR:", error)
       setError("Erro ao gerar PIX SuperPayBR. Tente novamente.")
+
+      setDebugInfo((prev) => ({
+        ...prev,
+        invoiceCreation: {
+          success: false,
+          error: error instanceof Error ? error.message : "Erro desconhecido",
+          timestamp: new Date().toISOString(),
+        },
+      }))
 
       // Track error
       track("invoice_creation_error", {
@@ -264,6 +418,8 @@ export default function SuperPayBRCheckoutPage() {
     setInvoice(emergencyInvoice)
     setError(null)
     console.log(`✅ PIX de emergência SuperPayBR criado - Valor: R$ ${totalAmount.toFixed(2)}`)
+
+    addQRCodeAttempt(99, "Emergency PIX", emergencyInvoice.pix.qr_code, true)
 
     // Track emergency PIX creation
     track("emergency_pix_created", {
@@ -375,6 +531,53 @@ export default function SuperPayBRCheckoutPage() {
             <h1 className="text-2xl font-bold mb-2">Pagamento PIX</h1>
           </div>
 
+          {/* Debug Toggle (apenas em desenvolvimento) */}
+          {process.env.NODE_ENV === "development" && (
+            <div className="mb-4">
+              <button
+                onClick={() => setDebugMode(!debugMode)}
+                className="flex items-center space-x-2 text-sm text-gray-600 hover:text-gray-800"
+              >
+                <Bug className="w-4 h-4" />
+                <span>{debugMode ? "Ocultar" : "Mostrar"} Debug</span>
+              </button>
+            </div>
+          )}
+
+          {/* Debug Panel */}
+          {debugMode && (
+            <div className="mb-6 p-4 bg-gray-100 rounded-lg text-xs">
+              <h3 className="font-bold mb-2">🐛 Debug Info</h3>
+
+              <div className="mb-3">
+                <h4 className="font-semibold">Criação da Fatura:</h4>
+                <p className={`${debugInfo.invoiceCreation.success ? "text-green-600" : "text-red-600"}`}>
+                  {debugInfo.invoiceCreation.success ? "✅ Sucesso" : "❌ Falha"}
+                  {debugInfo.invoiceCreation.error && `: ${debugInfo.invoiceCreation.error}`}
+                </p>
+              </div>
+
+              <div className="mb-3">
+                <h4 className="font-semibold">Tentativas QR Code ({debugInfo.qrCodeAttempts.length}):</h4>
+                {debugInfo.qrCodeAttempts.map((attempt, index) => (
+                  <div key={index} className={`text-xs ${attempt.success ? "text-green-600" : "text-red-600"}`}>
+                    {attempt.success ? "✅" : "❌"} #{attempt.attempt} - {attempt.source}
+                    {attempt.error && ` (${attempt.error})`}
+                  </div>
+                ))}
+              </div>
+
+              <div>
+                <h4 className="font-semibold">Chamadas API ({debugInfo.apiCalls.length}):</h4>
+                {debugInfo.apiCalls.slice(-3).map((call, index) => (
+                  <div key={index} className={`text-xs ${call.status < 400 ? "text-green-600" : "text-red-600"}`}>
+                    {call.status < 400 ? "✅" : "❌"} {call.method} {call.endpoint} ({call.status})
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Mensagem de Atenção */}
           <div className="bg-yellow-100 border-l-4 border-yellow-500 rounded-lg p-4 mb-6">
             <div className="flex items-start">
@@ -433,9 +636,37 @@ export default function SuperPayBRCheckoutPage() {
                 width={200}
                 height={200}
                 className="mx-auto"
+                onError={(e) => {
+                  console.log("❌ Erro ao carregar QR Code:", invoice?.pix.qr_code)
+                  addQRCodeAttempt(
+                    debugInfo.qrCodeAttempts.length + 1,
+                    "Image Load Error",
+                    invoice?.pix.qr_code || "URL não disponível",
+                    false,
+                    "Falha ao carregar imagem",
+                  )
+                }}
+                onLoad={() => {
+                  console.log("✅ QR Code carregado com sucesso:", invoice?.pix.qr_code)
+                  addQRCodeAttempt(
+                    debugInfo.qrCodeAttempts.length + 1,
+                    "Image Load Success",
+                    invoice?.pix.qr_code || "URL não disponível",
+                    true,
+                  )
+                }}
               />
             </div>
             <p className="text-sm text-gray-600 mt-2">Escaneie o QR Code com seu app do banco</p>
+
+            {/* Debug info do QR Code */}
+            {debugMode && invoice && (
+              <div className="mt-2 text-xs text-gray-500">
+                <p>QR URL: {invoice.pix.qr_code?.substring(0, 50)}...</p>
+                <p>Tipo: {invoice.type}</p>
+                <p>ID: {invoice.id}</p>
+              </div>
+            )}
           </div>
 
           {/* Código PIX */}
