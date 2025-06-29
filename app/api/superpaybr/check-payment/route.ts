@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 
-const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!)
 
 export async function GET(request: NextRequest) {
   try {
@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
     console.log("🔍 Verificando pagamento SuperPayBR:", externalId)
 
     // Buscar no Supabase
-    const { data: payment, error } = await supabase
+    const { data, error } = await supabase
       .from("superpaybr_payments")
       .select("*")
       .eq("external_id", externalId)
@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    if (!payment) {
+    if (!data) {
       return NextResponse.json({
         success: true,
         data: {
@@ -51,25 +51,25 @@ export async function GET(request: NextRequest) {
       })
     }
 
+    console.log("✅ Pagamento encontrado:", data)
+
     return NextResponse.json({
       success: true,
       data: {
         external_id: externalId,
         found: true,
-        payment_id: payment.payment_id,
-        status: {
-          code: payment.status_code,
-          name: payment.status_name,
-          is_paid: payment.is_paid,
-          is_denied: payment.is_denied,
-          is_refunded: payment.is_refunded,
-          is_expired: payment.is_expired,
-          is_canceled: payment.is_canceled,
-        },
-        amount: payment.amount,
-        payment_date: payment.payment_date,
-        created_at: payment.created_at,
-        updated_at: payment.updated_at,
+        invoice_id: data.invoice_id,
+        status_code: data.status_code,
+        status_name: data.status_name,
+        amount: data.amount,
+        is_paid: data.is_paid,
+        is_denied: data.is_denied,
+        is_refunded: data.is_refunded,
+        is_expired: data.is_expired,
+        is_canceled: data.is_canceled,
+        payment_date: data.payment_date,
+        processed_at: data.processed_at,
+        created_at: data.created_at,
       },
     })
   } catch (error) {

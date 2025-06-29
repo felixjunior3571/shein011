@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 
-const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!)
 
 export async function GET(request: NextRequest) {
   try {
@@ -18,79 +18,89 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    console.log("📊 Consultando status do pagamento SuperPayBR:", externalId)
+    console.log("📊 Verificando status detalhado SuperPayBR:", externalId)
 
-    // Buscar no Supabase
-    const { data: payment, error } = await supabase
+    // Buscar no Supabase com histórico
+    const { data: payments, error } = await supabase
       .from("superpaybr_payments")
       .select("*")
       .eq("external_id", externalId)
-      .order("updated_at", { ascending: false })
-      .limit(1)
-      .single()
+      .order("created_at", { ascending: false })
 
-    if (error && error.code !== "PGRST116") {
-      console.error("❌ Erro ao consultar status:", error)
+    if (error) {
+      console.error("❌ Erro ao buscar status:", error)
       return NextResponse.json(
         {
           success: false,
-          error: "Erro ao consultar status do pagamento",
+          error: "Erro ao verificar status",
           details: error.message,
         },
         { status: 500 },
       )
     }
 
-    if (!payment) {
+    if (!payments || payments.length === 0) {
       return NextResponse.json({
         success: true,
         data: {
           external_id: externalId,
-          status: "pending",
-          message: "Aguardando confirmação do pagamento",
-          is_paid: false,
-          is_denied: false,
-          is_refunded: false,
-          is_expired: false,
-          is_canceled: false,
+          found: false,
+          status: "not_found",
+          message: "Nenhum registro encontrado",
+          history: [],
         },
       })
     }
 
-    // Determinar status principal
-    let mainStatus = "pending"
-    if (payment.is_paid) mainStatus = "paid"
-    else if (payment.is_denied) mainStatus = "denied"
-    else if (payment.is_refunded) mainStatus = "refunded"
-    else if (payment.is_expired) mainStatus = "expired"
-    else if (payment.is_canceled) mainStatus = "canceled"
+    const latestPayment = payments[0]
+    console.log("✅ Status encontrado:", latestPayment)
+
+    // Buscar atualizações recentes
+    const { data: updates, error: updatesError } = await supabase
+      .from("payment_updates")
+      .select("*")
+      .eq("external_id", externalId)
+      .order("created_at", { ascending: false })
+      .limit(10)
+
+    const history = updates || []
 
     return NextResponse.json({
       success: true,
       data: {
         external_id: externalId,
-        payment_id: payment.payment_id,
-        status: mainStatus,
-        status_code: payment.status_code,
-        status_name: payment.status_name,
-        is_paid: payment.is_paid,
-        is_denied: payment.is_denied,
-        is_refunded: payment.is_refunded,
-        is_expired: payment.is_expired,
-        is_canceled: payment.is_canceled,
-        amount: payment.amount,
-        payment_date: payment.payment_date,
-        created_at: payment.created_at,
-        updated_at: payment.updated_at,
-        last_check: new Date().toISOString(),
+        found: true,
+        current_status: {
+          invoice_id: latestPayment.invoice_id,
+          status_code: latestPayment.status_code,
+          status_name: latestPayment.status_name,
+          amount: latestPayment.amount,
+          is_paid: latestPayment.is_paid,
+          is_denied: latestPayment.is_denied,
+          is_refunded: latestPayment.is_refunded,
+          is_expired: latestPayment.is_expired,
+          is_canceled: latestPayment.is_canceled,
+          payment_date: latestPayment.payment_date,
+          processed_at: latestPayment.processed_at,
+          created_at: latestPayment.created_at,
+        },
+        history: history.map((update) => ({
+          update_data: update.update_data,
+          created_at: update.created_at,
+        })),
+        summary: {
+          total_updates: history.length,
+          last_update: history[0]?.created_at || latestPayment.processed_at,
+          is_final_status: latestPayment.is_paid || latestPayment.is_denied || latestPayment.is_expired,
+        },
       },
     })
   } catch (error) {
-    console.error("❌ Erro ao consultar status SuperPayBR:", error)
+    console.error("❌ Erro ao verificar status SuperPayBR:", error)
     return NextResponse.json(
       {
         success: false,
-        error: "Erro interno ao consultar status",
+        error: "Erro interno ao verificar status",
         details: error instanceof Error ? error.message : "Erro desconhecido",
       },
       { status: 500 },

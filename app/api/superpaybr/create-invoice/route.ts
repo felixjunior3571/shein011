@@ -1,8 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server"
+import { getSuperPayAccessToken } from "@/lib/superpaybr-auth"
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("💰 === CRIANDO FATURA SUPERPAYBR (BASIC AUTH) ===")
+    console.log("💰 === CRIANDO FATURA SUPERPAYBR (MODO REAL) ===")
 
     const body = await request.json()
     console.log("📥 Dados recebidos:", JSON.stringify(body, null, 2))
@@ -40,91 +41,12 @@ export async function POST(request: NextRequest) {
       shipping: method,
     })
 
-    // Credenciais SuperPayBR
-    const token = process.env.SUPERPAY_TOKEN
-    const secretKey = process.env.SUPERPAY_SECRET_KEY
-    const apiUrl = process.env.SUPERPAY_API_URL
+    // Obter access token de forma segura
+    const accessToken = await getSuperPayAccessToken()
 
-    if (!token || !secretKey || !apiUrl) {
-      console.error("❌ Credenciais SuperPayBR não configuradas")
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Credenciais SuperPayBR não configuradas - IMPOSSÍVEL GERAR PIX REAL",
-        },
-        { status: 500 },
-      )
-    }
-
-    // PASSO 1: Fazer autenticação Basic Auth
-    console.log("🔐 Fazendo autenticação Basic Auth...")
-
-    const credentials = `${token}:${secretKey}`
-    const base64Credentials = Buffer.from(credentials).toString("base64")
-
-    let accessToken = null
-
-    // URLs de autenticação para tentar
-    const authUrls = [`${apiUrl}/auth`, `${apiUrl}/token`, `${apiUrl}/oauth/token`, `${apiUrl}/authenticate`]
-
-    for (const authUrl of authUrls) {
-      try {
-        console.log(`🔑 Tentando autenticação em: ${authUrl}`)
-
-        const authResponse = await fetch(authUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json",
-            Authorization: `Basic ${base64Credentials}`,
-          },
-          body: JSON.stringify({
-            grant_type: "client_credentials",
-          }),
-        })
-
-        console.log(`📥 Resposta auth de ${authUrl}:`, {
-          status: authResponse.status,
-          statusText: authResponse.statusText,
-          ok: authResponse.ok,
-        })
-
-        if (authResponse.ok) {
-          const authData = await authResponse.json()
-          accessToken = authData.access_token || authData.token
-          console.log("✅ Access token obtido:", accessToken ? `${accessToken.substring(0, 20)}...` : "❌ NULO")
-
-          if (accessToken) {
-            break // Sair do loop se conseguiu o token
-          }
-        } else {
-          const errorText = await authResponse.text()
-          console.log(`❌ Falha auth em ${authUrl}:`, errorText)
-        }
-      } catch (error) {
-        console.log(`❌ Erro auth em ${authUrl}:`, error)
-      }
-    }
-
-    // SE NÃO CONSEGUIU ACCESS TOKEN, FALHAR COMPLETAMENTE
-    if (!accessToken) {
-      console.error("❌ FALHA CRÍTICA: Não foi possível obter access token SuperPayBR")
-      return NextResponse.json(
-        {
-          success: false,
-          error: "FALHA NA AUTENTICAÇÃO SUPERPAYBR - IMPOSSÍVEL GERAR PIX REAL",
-          details: "Access token não obtido com Basic Auth",
-        },
-        { status: 401 },
-      )
-    }
-
-    // PASSO 2: Criar fatura com Bearer token
-    console.log("💳 Criando fatura com Bearer token...")
-
-    // Preparar dados da fatura SuperPayBR
+    // Preparar dados da fatura SuperPayBR v4
     const invoiceData = {
-      client: {
+      customer: {
         name: cpfData.nome || body.customerData?.name || "Cliente SHEIN",
         document: (cpfData.cpf || body.customerData?.cpf || "00000000000").replace(/\D/g, ""),
         email: userEmail || "cliente@shein.com",
@@ -132,95 +54,67 @@ export async function POST(request: NextRequest) {
         address: {
           street: deliveryAddress.street || "Rua Principal",
           number: deliveryAddress.number || "123",
-          neighborhood: deliveryAddress.neighborhood || "Centro",
+          district: deliveryAddress.neighborhood || "Centro",
           city: deliveryAddress.city || "São Paulo",
           state: deliveryAddress.state || "SP",
-          zipcode: (deliveryAddress.zipcode || "01001000").replace(/\D/g, ""),
+          postal_code: (deliveryAddress.zipcode || "01001000").replace(/\D/g, ""),
           complement: deliveryAddress.complement || "",
         },
-        ip: request.headers.get("x-forwarded-for") || "127.0.0.1",
       },
-      payment: {
-        external_id: externalId,
-        type: "pix",
-        due_date: new Date(Date.now() + 30 * 60 * 1000).toISOString().split("T")[0],
-        description: body.description || `Frete ${method} - Cartão SHEIN`,
-        amount: amount,
-        webhook_url: process.env.SUPERPAY_WEBHOOK_URL,
-        return_url: `${request.nextUrl.origin}/checkout/success`,
-        cancel_url: `${request.nextUrl.origin}/checkout`,
+      amount: amount,
+      description: body.description || `Frete ${method} - Cartão SHEIN`,
+      external_id: externalId,
+      payment_method: "pix",
+      due_date: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+      webhook_url: process.env.SUPERPAY_WEBHOOK_URL,
+      return_url: `${request.nextUrl.origin}/checkout/success`,
+      cancel_url: `${request.nextUrl.origin}/checkout`,
+      metadata: {
+        shipping_method: method,
+        product: "Cartão SHEIN",
+        source: "checkout",
       },
     }
 
-    console.log("🚀 Enviando para SuperPayBR API com Bearer token...")
+    console.log("🚀 Enviando para SuperPayBR API v4...")
     console.log("📤 Dados da fatura:", JSON.stringify(invoiceData, null, 2))
 
-    // URLs para criação
-    const createUrls = [
-      `${apiUrl}/invoices`,
-      `${apiUrl}/payment`,
-      `${apiUrl}/create`,
-      `${apiUrl}/pix`,
-      `${apiUrl}/invoice/create`,
-    ]
+    // Criar fatura usando endpoint v4
+    const createResponse = await fetch("https://api.superpaybr.com/v4/invoices", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(invoiceData),
+    })
 
-    let createSuccess = false
-    let responseData = null
-    let lastError = null
+    console.log("📥 Resposta SuperPayBR v4:", {
+      status: createResponse.status,
+      statusText: createResponse.statusText,
+      ok: createResponse.ok,
+    })
 
-    for (const createUrl of createUrls) {
-      try {
-        console.log(`🔄 Tentando criar fatura em: ${createUrl}`)
-
-        const createResponse = await fetch(createUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json",
-            Authorization: `Bearer ${accessToken}`,
-          },
-          body: JSON.stringify(invoiceData),
-        })
-
-        console.log(`📥 Resposta de ${createUrl}:`, {
-          status: createResponse.status,
-          statusText: createResponse.statusText,
-          ok: createResponse.ok,
-        })
-
-        if (createResponse.ok) {
-          responseData = await createResponse.json()
-          console.log("✅ Fatura criada com sucesso!")
-          console.log("📋 Resposta completa:", JSON.stringify(responseData, null, 2))
-          createSuccess = true
-          break
-        } else {
-          const errorText = await createResponse.text()
-          console.log(`❌ Falha em ${createUrl}:`, errorText)
-          lastError = errorText
-        }
-      } catch (error) {
-        console.log(`❌ Erro de rede em ${createUrl}:`, error)
-        lastError = error
-      }
-    }
-
-    // SE NÃO CONSEGUIU CRIAR FATURA, FALHAR COMPLETAMENTE
-    if (!createSuccess) {
-      console.error("❌ FALHA CRÍTICA: Não foi possível criar fatura SuperPayBR")
-      console.error("❌ Último erro:", lastError)
+    if (!createResponse.ok) {
+      const errorText = await createResponse.text()
+      console.error("❌ Falha ao criar fatura SuperPayBR v4:", errorText)
       return NextResponse.json(
         {
           success: false,
-          error: "FALHA AO CRIAR FATURA SUPERPAYBR - IMPOSSÍVEL GERAR PIX REAL",
-          details: lastError,
-          attempted_urls: createUrls,
+          error: "FALHA AO CRIAR FATURA SUPERPAYBR V4",
+          details: errorText,
+          status: createResponse.status,
         },
         { status: 500 },
       )
     }
 
-    // Extrair dados PIX da resposta
+    const responseData = await createResponse.json()
+    console.log("✅ Fatura criada com sucesso!")
+    console.log("📋 Resposta completa:", JSON.stringify(responseData, null, 2))
+
+    // Extrair dados PIX da resposta v4
     let pixPayload = ""
     let qrCodeImage = ""
     let invoiceId = ""
@@ -325,16 +219,16 @@ export async function POST(request: NextRequest) {
       },
     }
 
-    console.log("✅ FATURA SUPERPAYBR CRIADA COM SUCESSO (MODO REAL + BASIC AUTH)!")
-    console.log("📋 Resposta formatada:", JSON.stringify(response, null, 2))
+    console.log("✅ FATURA SUPERPAYBR V4 CRIADA COM SUCESSO (MODO REAL)!")
+    console.log("📋 External ID:", externalId)
 
     return NextResponse.json(response)
   } catch (error) {
-    console.error("❌ ERRO CRÍTICO ao criar fatura SuperPayBR:", error)
+    console.error("❌ ERRO CRÍTICO ao criar fatura SuperPayBR v4:", error)
     return NextResponse.json(
       {
         success: false,
-        error: "ERRO INTERNO SUPERPAYBR - IMPOSSÍVEL GERAR PIX REAL",
+        error: "ERRO INTERNO SUPERPAYBR V4 - IMPOSSÍVEL GERAR PIX REAL",
         details: error instanceof Error ? error.message : "Erro desconhecido",
       },
       { status: 500 },
@@ -342,21 +236,14 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// Adicionar suporte para outros métodos HTTP
 export async function GET(request: NextRequest) {
   return NextResponse.json(
     {
       success: false,
       error: "Método GET não suportado. Use POST para criar fatura.",
+      help: "Envie uma requisição POST com os dados da fatura no body.",
+      endpoint: "https://api.superpaybr.com/v4/invoices",
     },
     { status: 405 },
   )
-}
-
-export async function PUT(request: NextRequest) {
-  return POST(request)
-}
-
-export async function PATCH(request: NextRequest) {
-  return POST(request)
 }

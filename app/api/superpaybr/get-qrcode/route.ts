@@ -2,7 +2,7 @@ import { type NextRequest, NextResponse } from "next/server"
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("🔲 === GERANDO QR CODE SUPERPAYBR ===")
+    console.log("🔳 === GERANDO QR CODE SUPERPAYBR ===")
 
     const body = await request.json()
     const pixPayload = body.pix_payload || body.payload
@@ -17,23 +17,18 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    console.log("📱 Gerando QR Code para PIX payload:", pixPayload.substring(0, 50) + "...")
+    console.log("📱 Gerando QR Code para payload:", pixPayload.slice(0, 20) + "...")
 
-    // Gerar QR Code via QuickChart
+    // Gerar QR Code usando QuickChart
     const qrCodeUrl = `https://quickchart.io/qr?text=${encodeURIComponent(pixPayload)}&size=300&format=png&margin=1`
 
-    // Alternativas de QR Code
-    const alternatives = [
-      `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(pixPayload)}`,
-      `https://chart.googleapis.com/chart?chs=300x300&cht=qr&chl=${encodeURIComponent(pixPayload)}`,
-    ]
+    console.log("✅ QR Code gerado:", qrCodeUrl)
 
     return NextResponse.json({
       success: true,
       data: {
-        pix_payload: pixPayload,
         qr_code_url: qrCodeUrl,
-        alternatives: alternatives,
+        pix_payload: pixPayload,
         generated_at: new Date().toISOString(),
       },
     })
@@ -42,7 +37,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         success: false,
-        error: "Erro interno ao gerar QR Code",
+        error: "Erro ao gerar QR Code",
         details: error instanceof Error ? error.message : "Erro desconhecido",
       },
       { status: 500 },
@@ -58,17 +53,31 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       {
         success: false,
-        error: "PIX payload é obrigatório via query parameter 'payload'",
+        error: "PIX payload é obrigatório como parâmetro 'payload'",
       },
       { status: 400 },
     )
   }
 
-  return POST(
-    new NextRequest(request.url, {
-      method: "POST",
-      body: JSON.stringify({ pix_payload: pixPayload }),
-      headers: { "Content-Type": "application/json" },
-    }),
-  )
+  try {
+    const qrCodeUrl = `https://quickchart.io/qr?text=${encodeURIComponent(pixPayload)}&size=300&format=png&margin=1`
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        qr_code_url: qrCodeUrl,
+        pix_payload: pixPayload,
+        generated_at: new Date().toISOString(),
+      },
+    })
+  } catch (error) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Erro ao gerar QR Code",
+        details: error instanceof Error ? error.message : "Erro desconhecido",
+      },
+      { status: 500 },
+    )
+  }
 }
