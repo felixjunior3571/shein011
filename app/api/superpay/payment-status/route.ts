@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 
+// Supabase client
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
 export async function GET(request: NextRequest) {
@@ -10,10 +11,11 @@ export async function GET(request: NextRequest) {
     const invoiceId = searchParams.get("invoiceId")
     const token = searchParams.get("token")
 
-    console.log("🔍 CONSULTA DE STATUS DE PAGAMENTO SUPERPAY (SUPABASE ONLY):")
-    console.log(`- External ID: ${externalId}`)
-    console.log(`- Invoice ID: ${invoiceId}`)
-    console.log(`- Token: ${token}`)
+    console.log("🔍 Consultando status SuperPay no Supabase:", {
+      externalId,
+      invoiceId,
+      token,
+    })
 
     if (!externalId && !invoiceId && !token) {
       return NextResponse.json(
@@ -25,116 +27,196 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Buscar APENAS NO SUPABASE
-    let confirmation = null
-    let searchKey = ""
+    // Build query for Supabase ONLY
+    let query = supabase
+      .from("payment_webhooks")
+      .select("*")
+      .eq("gateway", "superpay")
+      .order("processed_at", { ascending: false })
 
-    try {
-      let query = supabase.from("payment_webhooks").select("*").eq("gateway", "superpay")
-
-      if (externalId) {
-        query = query.eq("external_id", externalId)
-        searchKey = `externalId_${externalId}`
-      } else if (invoiceId) {
-        query = query.eq("invoice_id", invoiceId)
-        searchKey = `invoiceId_${invoiceId}`
-      } else if (token) {
-        // Para token, buscar no webhook_data
-        query = query.contains("webhook_data", { token })
-        searchKey = `token_${token}`
-      }
-
-      const { data, error } = await query.single()
-
-      if (!error && data) {
-        confirmation = {
-          externalId: data.external_id,
-          invoiceId: data.invoice_id,
-          status: data.is_paid
-            ? "confirmed"
-            : data.is_denied
-              ? "denied"
-              : data.is_expired
-                ? "expired"
-                : data.is_canceled
-                  ? "canceled"
-                  : "pending",
-          statusCode: data.status_code,
-          statusName: data.status_name,
-          amount: data.amount,
-          paymentDate: data.payment_date,
-          payId: data.webhook_data?.invoices?.payment?.payId || null,
-          gateway: data.gateway,
-          type: data.webhook_data?.invoices?.type || null,
-          token: data.webhook_data?.invoices?.token || null,
-          isPaid: data.is_paid,
-          isRefunded: data.status_code === 9,
-          isDenied: data.is_denied,
-          isExpired: data.is_expired,
-          isCanceled: data.is_canceled,
-          processed: true,
-          timestamp: data.processed_at,
-        }
-        console.log("✅ CONFIRMAÇÃO ENCONTRADA NO SUPABASE")
-      } else {
-        console.log("❌ Erro ao consultar Supabase ou dados não encontrados:", error)
-      }
-    } catch (supabaseError) {
-      console.log("❌ Erro ao conectar com Supabase:", supabaseError)
+    // Add search conditions
+    if (externalId) {
+      query = query.eq("external_id", externalId)
+    } else if (invoiceId) {
+      query = query.eq("invoice_id", invoiceId)
+    } else if (token) {
+      query = query.or(`external_id.eq.${token},invoice_id.eq.${token}`)
     }
 
-    console.log(`🔍 Resultado da busca para "${searchKey}":`, confirmation ? "ENCONTRADO" : "NÃO ENCONTRADO")
+    const { data: records, error } = await query.limit(1)
 
-    if (!confirmation) {
+    if (error) {
+      console.error("❌ Erro na consulta Supabase:", error)
+      throw error
+    }
+
+    const record = records?.[0]
+
+    if (!record) {
+      console.log("❌ Pagamento SuperPay não encontrado no Supabase")
       return NextResponse.json({
         success: true,
         found: false,
-        message: "Nenhuma confirmação encontrada para os parâmetros fornecidos",
-        searched_for: { externalId, invoiceId, token },
-        note: "Aguardando notificação da adquirente via webhook",
-        storage: "supabase_only",
-        timestamp: new Date().toISOString(),
+        data: {
+          isPaid: false,
+          isDenied: false,
+          isExpired: false,
+          isCanceled: false,
+          isRefunded: false,
+          statusCode: null,
+          statusName: "Não encontrado",
+          amount: 0,
+          paymentDate: null,
+          lastUpdate: new Date().toISOString(),
+          source: "supabase_only",
+        },
       })
     }
 
-    console.log("✅ CONFIRMAÇÃO ENCONTRADA NO SUPABASE:")
-    console.log(JSON.stringify(confirmation, null, 2))
+    console.log("✅ Pagamento SuperPay encontrado no Supabase:", {
+      id: record.id,
+      external_id: record.external_id,
+      status: record.status_name,
+      is_paid: record.is_paid,
+    })
 
-    return NextResponse.json({
+    // Return standardized response
+    const response = {
       success: true,
       found: true,
-      message: "Confirmação encontrada no Supabase",
       data: {
-        externalId: confirmation.externalId,
-        invoiceId: confirmation.invoiceId,
-        status: confirmation.status,
-        statusCode: confirmation.statusCode,
-        statusName: confirmation.statusName,
-        amount: confirmation.amount,
-        paymentDate: confirmation.paymentDate,
-        payId: confirmation.payId,
-        gateway: confirmation.gateway,
-        type: confirmation.type,
-        token: confirmation.token,
-        isPaid: confirmation.isPaid,
-        isRefunded: confirmation.isRefunded,
-        isDenied: confirmation.isDenied,
-        isExpired: confirmation.isExpired,
-        isCanceled: confirmation.isCanceled,
-        processed: confirmation.processed,
-        timestamp: confirmation.timestamp,
+        isPaid: record.is_paid || false,
+        isDenied: record.is_denied || false,
+        isExpired: record.is_expired || false,
+        isCanceled: record.is_canceled || false,
+        isRefunded: record.is_refunded || false,
+        statusCode: record.status_code,
+        statusName: record.status_name,
+        amount: record.amount || 0,
+        paymentDate: record.payment_date,
+        lastUpdate: record.processed_at,
+        externalId: record.external_id,
+        invoiceId: record.invoice_id,
+        webhookData: record.webhook_data,
+        source: "supabase_only",
       },
-      searched_with: searchKey,
-      storage: "supabase_only",
-      timestamp: new Date().toISOString(),
+    }
+
+    console.log("📤 Resposta da consulta SuperPay:", {
+      external_id: response.data.externalId,
+      is_paid: response.data.isPaid,
+      status: response.data.statusName,
+      source: response.data.source,
     })
+
+    return NextResponse.json(response)
   } catch (error) {
-    console.error("Erro ao consultar status:", error)
+    console.error("❌ Erro na API de status SuperPay:", error)
+
     return NextResponse.json(
       {
         success: false,
         error: "Erro interno do servidor",
-        message: (error as Error).message,
+        message: error instanceof Error ? error.message : "Erro desconhecido",
+        timestamp: new Date().toISOString(),
+      },
+      { status: 500 },
+    )
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json()
+    const { externalIds } = body
+
+    if (!Array.isArray(externalIds) || externalIds.length === 0) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Array de externalIds é obrigatório",
+        },
+        { status: 400 },
+      )
+    }
+
+    console.log("🔍 Consulta em lote SuperPay no Supabase:", externalIds)
+
+    // Query multiple records from Supabase ONLY
+    const { data: records, error } = await supabase
+      .from("payment_webhooks")
+      .select("*")
+      .eq("gateway", "superpay")
+      .in("external_id", externalIds)
+      .order("processed_at", { ascending: false })
+
+    if (error) {
+      console.error("❌ Erro na consulta em lote Supabase:", error)
+      throw error
+    }
+
+    // Map results
+    const results = externalIds.map((externalId) => {
+      const record = records?.find((r) => r.external_id === externalId)
+
+      if (!record) {
+        return {
+          externalId,
+          found: false,
+          isPaid: false,
+          isDenied: false,
+          isExpired: false,
+          isCanceled: false,
+          isRefunded: false,
+          statusCode: null,
+          statusName: "Não encontrado",
+          amount: 0,
+          paymentDate: null,
+          lastUpdate: new Date().toISOString(),
+          source: "supabase_only",
+        }
+      }
+
+      return {
+        externalId: record.external_id,
+        found: true,
+        isPaid: record.is_paid || false,
+        isDenied: record.is_denied || false,
+        isExpired: record.is_expired || false,
+        isCanceled: record.is_canceled || false,
+        isRefunded: record.is_refunded || false,
+        statusCode: record.status_code,
+        statusName: record.status_name,
+        amount: record.amount || 0,
+        paymentDate: record.payment_date,
+        lastUpdate: record.processed_at,
+        invoiceId: record.invoice_id,
+        source: "supabase_only",
+      }
+    })
+
+    console.log(
+      `✅ Consulta em lote SuperPay concluída: ${results.filter((r) => r.found).length}/${externalIds.length} encontrados`,
+    )
+
+    return NextResponse.json({
+      success: true,
+      data: results,
+      summary: {
+        total: externalIds.length,
+        found: results.filter((r) => r.found).length,
+        paid: results.filter((r) => r.isPaid).length,
+        source: "supabase_only",
+      },
+    })
+  } catch (error) {
+    console.error("❌ Erro na consulta em lote SuperPay:", error)
+
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Erro interno do servidor",
+        message: error instanceof Error ? error.message : "Erro desconhecido",
         timestamp: new Date().toISOString(),
       },
       { status: 500 },
