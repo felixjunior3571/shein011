@@ -1,69 +1,137 @@
-import { NextResponse } from "next/server"
+import { type NextRequest, NextResponse } from "next/server"
 
-export async function POST() {
+// Cache de token para evitar múltiplas autenticações
+let tokenCache: { token: string; expires: number } | null = null
+
+export async function POST(request: NextRequest) {
   try {
-    console.log("=== AUTENTICAÇÃO SUPERPAYBR ===")
+    console.log("🔐 === INICIANDO AUTENTICAÇÃO SUPERPAYBR ===")
 
-    const token = process.env.SUPERPAYBR_TOKEN
-    const secretKey = process.env.SUPERPAYBR_SECRET_KEY
-
-    if (!token || !secretKey) {
-      console.log("❌ Credenciais SuperPayBR não encontradas")
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Credenciais SuperPayBR não configuradas",
-        },
-        { status: 500 },
-      )
+    // Verificar cache de token
+    if (tokenCache && tokenCache.expires > Date.now()) {
+      console.log("✅ Token SuperPayBR válido em cache")
+      return NextResponse.json({
+        success: true,
+        access_token: tokenCache.token,
+        message: "Token SuperPayBR obtido do cache",
+        expires_in: Math.floor((tokenCache.expires - Date.now()) / 1000),
+      })
     }
 
-    console.log("🔐 Fazendo autenticação SuperPayBR...")
+    // Verificar variáveis de ambiente
+    const token = process.env.SUPERPAYBR_TOKEN
+    const secretKey = process.env.SUPERPAYBR_SECRET_KEY
+    const apiUrl = process.env.SUPERPAYBR_API_URL
 
-    // Criar Basic Auth header
-    const credentials = Buffer.from(`${token}:${secretKey}`).toString("base64")
+    console.log("📋 Verificando credenciais SuperPayBR:", {
+      token: token ? `${token.substring(0, 10)}...` : "❌ Não configurado",
+      secretKey: secretKey ? `${secretKey.substring(0, 10)}...` : "❌ Não configurado",
+      apiUrl: apiUrl || "❌ Não configurado",
+    })
 
-    const authResponse = await fetch("https://api.superpaybr.com/auth", {
+    if (!token || !secretKey || !apiUrl) {
+      throw new Error("Credenciais SuperPayBR não configuradas")
+    }
+
+    // Preparar dados de autenticação
+    const authData = {
+      token: token,
+      secret: secretKey,
+    }
+
+    console.log("📤 Enviando requisição de autenticação SuperPayBR...")
+
+    // Fazer requisição de autenticação
+    const authResponse = await fetch(`${apiUrl}/v4/auth`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Basic ${credentials}`,
         Accept: "application/json",
+        "User-Agent": "SHEIN-Card-System/1.0",
       },
-      body: JSON.stringify({
-        scope: "invoice.write customer.write webhook.write",
-      }),
+      body: JSON.stringify(authData),
     })
 
-    console.log("📥 Resposta autenticação SuperPayBR:", {
+    console.log("📥 Resposta da autenticação SuperPayBR:", {
       status: authResponse.status,
       statusText: authResponse.statusText,
       ok: authResponse.ok,
     })
 
     if (authResponse.ok) {
-      const authData = await authResponse.json()
+      const authResult = await authResponse.json()
       console.log("✅ Autenticação SuperPayBR bem-sucedida!")
+
+      // Extrair token da resposta
+      const accessToken = authResult.access_token || authResult.token || authResult.data?.access_token
+
+      if (!accessToken) {
+        throw new Error("Token de acesso não encontrado na resposta SuperPayBR")
+      }
+
+      // Salvar no cache por 50 minutos
+      tokenCache = {
+        token: accessToken,
+        expires: Date.now() + 50 * 60 * 1000, // 50 minutos
+      }
+
+      console.log("💾 Token SuperPayBR salvo em cache por 50 minutos")
 
       return NextResponse.json({
         success: true,
-        data: authData,
+        access_token: accessToken,
         message: "Autenticação SuperPayBR realizada com sucesso",
+        expires_in: 3000, // 50 minutos em segundos
+        account: authResult.account || authResult.data?.account || {},
       })
     } else {
       const errorText = await authResponse.text()
-      console.log("❌ Erro na autenticação SuperPayBR:", authResponse.status, errorText)
+      console.error("❌ Erro na autenticação SuperPayBR:", {
+        status: authResponse.status,
+        error: errorText,
+      })
 
-      return NextResponse.json(
-        {
-          success: false,
-          error: `Erro SuperPayBR ${authResponse.status}: ${errorText}`,
-        },
-        { status: authResponse.status },
-      )
+      // Tentar método alternativo se der 401
+      if (authResponse.status === 401) {
+        console.log("🔄 Tentando método de autenticação alternativo...")
+
+        const altAuthResponse = await fetch(`${apiUrl}/v4/auth`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+            Authorization: `Basic ${Buffer.from(`${token}:${secretKey}`).toString("base64")}`,
+            "User-Agent": "SHEIN-Card-System/1.0",
+          },
+        })
+
+        if (altAuthResponse.ok) {
+          const altAuthResult = await altAuthResponse.json()
+          const altAccessToken = altAuthResult.access_token || altAuthResult.token || altAuthResult.data?.access_token
+
+          if (altAccessToken) {
+            tokenCache = {
+              token: altAccessToken,
+              expires: Date.now() + 50 * 60 * 1000,
+            }
+
+            console.log("✅ Autenticação SuperPayBR alternativa bem-sucedida!")
+
+            return NextResponse.json({
+              success: true,
+              access_token: altAccessToken,
+              message: "Autenticação SuperPayBR alternativa realizada com sucesso",
+              expires_in: 3000,
+              method: "alternative",
+            })
+          }
+        }
+      }
+
+      throw new Error(`Erro SuperPayBR ${authResponse.status}: ${errorText}`)
     }
   } catch (error) {
-    console.log("❌ Erro na autenticação SuperPayBR:", error)
+    console.error("❌ Erro ao autenticar SuperPayBR:", error)
     return NextResponse.json(
       {
         success: false,
@@ -79,5 +147,7 @@ export async function GET() {
     success: true,
     message: "SuperPayBR Auth endpoint ativo",
     timestamp: new Date().toISOString(),
+    cache_status: tokenCache ? "active" : "empty",
+    cache_expires: tokenCache ? new Date(tokenCache.expires).toISOString() : null,
   })
 }

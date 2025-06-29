@@ -9,7 +9,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: "External ID is required" }, { status: 400 })
     }
 
-    console.log("🔍 Consultando status do pagamento para:", externalId)
+    console.log("🔍 Consultando status do pagamento TryploPay para:", externalId)
 
     // Buscar no Supabase (dados do webhook)
     try {
@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
       }
 
       if (data) {
-        console.log("✅ Status encontrado no webhook:", data)
+        console.log("✅ Status encontrado no webhook TryploPay:", data)
 
         const paymentStatus = {
           isPaid: data.is_paid,
@@ -53,7 +53,7 @@ export async function GET(request: NextRequest) {
           receivedAt: data.received_at,
         })
       } else {
-        console.log("⏳ Nenhum webhook recebido ainda para:", externalId)
+        console.log("⏳ Nenhum webhook TryploPay recebido ainda para:", externalId)
 
         return NextResponse.json({
           success: true,
@@ -72,7 +72,7 @@ export async function GET(request: NextRequest) {
       })
     }
   } catch (error) {
-    console.error("❌ Erro geral na consulta de status:", error)
+    console.error("❌ Erro geral na consulta de status TryploPay:", error)
 
     return NextResponse.json(
       {

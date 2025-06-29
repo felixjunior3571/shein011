@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 
 interface PaymentStatus {
   isPaid: boolean
@@ -38,6 +38,9 @@ export function useSuperPayBRWebhookMonitor({
   const [error, setError] = useState<string | null>(null)
   const [lastCheck, setLastCheck] = useState<Date | null>(null)
 
+  const intervalRef = useRef<NodeJS.Timeout | null>(null)
+  const callbacksExecutedRef = useRef<Set<string>>(new Set())
+
   const checkPaymentStatus = useCallback(async () => {
     if (!externalId) return
 
@@ -49,7 +52,8 @@ export function useSuperPayBRWebhookMonitor({
         console.log("🔍 Verificando status SuperPayBR:", externalId)
       }
 
-      const response = await fetch(`/api/superpaybr/check-payment?external_id=${externalId}`)
+      // CONSULTAR APENAS MEMÓRIA (igual TryploPay - sem rate limit)
+      const response = await fetch(`/api/superpaybr/payment-status?external_id=${externalId}`)
       const data = await response.json()
 
       if (data.success) {
@@ -67,44 +71,55 @@ export function useSuperPayBRWebhookMonitor({
 
         setStatus(paymentStatus)
 
-        // Executar callbacks baseados no status
-        if (paymentStatus.isPaid && onPaymentConfirmed) {
-          if (enableDebug) {
-            console.log("✅ SuperPayBR: Pagamento confirmado!")
+        // Executar callbacks apenas uma vez por status
+        const callbackKey = `${externalId}_${paymentStatus.statusCode}`
+
+        if (!callbacksExecutedRef.current.has(callbackKey)) {
+          if (paymentStatus.isPaid && onPaymentConfirmed) {
+            onPaymentConfirmed(paymentStatus)
+            callbacksExecutedRef.current.add(callbackKey)
+            if (enableDebug) console.log("✅ Callback de pagamento confirmado executado")
+          } else if (paymentStatus.isDenied && onPaymentDenied) {
+            onPaymentDenied(paymentStatus)
+            callbacksExecutedRef.current.add(callbackKey)
+            if (enableDebug) console.log("❌ Callback de pagamento negado executado")
+          } else if (paymentStatus.isExpired && onPaymentExpired) {
+            onPaymentExpired(paymentStatus)
+            callbacksExecutedRef.current.add(callbackKey)
+            if (enableDebug) console.log("⏰ Callback de pagamento vencido executado")
+          } else if (paymentStatus.isCanceled && onPaymentCanceled) {
+            onPaymentCanceled(paymentStatus)
+            callbacksExecutedRef.current.add(callbackKey)
+            if (enableDebug) console.log("🚫 Callback de pagamento cancelado executado")
+          } else if (paymentStatus.isRefunded && onPaymentRefunded) {
+            onPaymentRefunded(paymentStatus)
+            callbacksExecutedRef.current.add(callbackKey)
+            if (enableDebug) console.log("↩️ Callback de pagamento estornado executado")
           }
-          onPaymentConfirmed(paymentStatus)
-        } else if (paymentStatus.isDenied && onPaymentDenied) {
-          if (enableDebug) {
-            console.log("❌ SuperPayBR: Pagamento negado!")
-          }
-          onPaymentDenied(paymentStatus)
-        } else if (paymentStatus.isExpired && onPaymentExpired) {
-          if (enableDebug) {
-            console.log("⏰ SuperPayBR: Pagamento vencido!")
-          }
-          onPaymentExpired(paymentStatus)
-        } else if (paymentStatus.isCanceled && onPaymentCanceled) {
-          if (enableDebug) {
-            console.log("🚫 SuperPayBR: Pagamento cancelado!")
-          }
-          onPaymentCanceled(paymentStatus)
-        } else if (paymentStatus.isRefunded && onPaymentRefunded) {
-          if (enableDebug) {
-            console.log("↩️ SuperPayBR: Pagamento estornado!")
-          }
-          onPaymentRefunded(paymentStatus)
         }
 
-        setIsWaitingForWebhook(!paymentStatus.isPaid && !paymentStatus.isDenied && !paymentStatus.isExpired)
+        // Parar monitoramento se pagamento foi finalizado
+        if (
+          paymentStatus.isPaid ||
+          paymentStatus.isDenied ||
+          paymentStatus.isExpired ||
+          paymentStatus.isCanceled ||
+          paymentStatus.isRefunded
+        ) {
+          setIsWaitingForWebhook(false)
+          if (intervalRef.current) {
+            clearInterval(intervalRef.current)
+            intervalRef.current = null
+          }
+          if (enableDebug) console.log("🛑 Monitoramento SuperPayBR finalizado")
+        }
       } else {
-        throw new Error(data.error || "Erro ao verificar status SuperPayBR")
+        setError(data.error || "Erro ao verificar status SuperPayBR")
       }
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Erro desconhecido SuperPayBR"
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Erro desconhecido"
       setError(errorMessage)
-      if (enableDebug) {
-        console.error("❌ Erro ao verificar SuperPayBR:", errorMessage)
-      }
+      if (enableDebug) console.error("❌ Erro ao verificar status SuperPayBR:", errorMessage)
     }
   }, [
     externalId,
@@ -116,28 +131,37 @@ export function useSuperPayBRWebhookMonitor({
     onPaymentRefunded,
   ])
 
-  // Verificar status periodicamente apenas se não foi pago
+  // Iniciar monitoramento quando externalId estiver disponível
   useEffect(() => {
-    if (!externalId || status?.isPaid) return
+    if (!externalId) return
+
+    if (enableDebug) {
+      console.log("🚀 Iniciando monitoramento SuperPayBR para:", externalId)
+    }
+
+    setIsWaitingForWebhook(true)
+    callbacksExecutedRef.current.clear()
 
     // Verificação inicial
     checkPaymentStatus()
 
-    // Verificar a cada 5 segundos se ainda não foi pago
-    const interval = setInterval(() => {
-      if (!status?.isPaid) {
-        checkPaymentStatus()
-      }
-    }, 5000)
+    // Verificar a cada 3 segundos (igual TryploPay)
+    intervalRef.current = setInterval(checkPaymentStatus, 3000)
 
-    return () => clearInterval(interval)
-  }, [externalId, status?.isPaid, checkPaymentStatus])
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current)
+        intervalRef.current = null
+      }
+      setIsWaitingForWebhook(false)
+      if (enableDebug) console.log("🛑 Limpeza do monitoramento SuperPayBR")
+    }
+  }, [externalId, checkPaymentStatus, enableDebug])
 
   return {
     status,
     isWaitingForWebhook,
     error,
     lastCheck,
-    checkPaymentStatus,
   }
 }

