@@ -1,115 +1,107 @@
-import { NextResponse } from "next/server"
+import { type NextRequest, NextResponse } from "next/server"
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    console.log("🔧 Testando conexão SuperPayBR...")
+    console.log("=== TESTE DE CONEXÃO SUPERPAYBR ===")
 
-    // Verificar variáveis de ambiente
-    const apiUrl = process.env.SUPERPAY_API_URL
-    const token = process.env.SUPERPAY_TOKEN
-    const secretKey = process.env.SUPERPAY_SECRET_KEY
-    const webhookUrl = process.env.SUPERPAY_WEBHOOK_URL
+    const results = {
+      auth: null,
+      status: null,
+      qrcode_test: null,
+      credentials: {
+        token: process.env.SUPERPAYBR_TOKEN ? "✅ Configurado" : "❌ Não configurado",
+        secret: process.env.SUPERPAYBR_SECRET_KEY ? "✅ Configurado" : "❌ Não configurado",
+      },
+      endpoints: {
+        auth: "https://api.superpaybr.com/auth",
+        invoices: "https://api.superpaybr.com/v4/invoices",
+        qrcode: "https://api.superpaybr.com/invoices/qrcode/{ID}",
+        status: "https://api.superpaybr.com/status",
+      },
+    }
 
-    console.log("📋 Configurações:")
-    console.log("- API URL:", apiUrl ? "✅ Configurada" : "❌ Não configurada")
-    console.log("- Token:", token ? "✅ Configurado" : "❌ Não configurado")
-    console.log("- Secret Key:", secretKey ? "✅ Configurada" : "❌ Não configurada")
-    console.log("- Webhook URL:", webhookUrl ? "✅ Configurada" : "❌ Não configurada")
+    // Teste 1: Autenticação
+    try {
+      console.log("🔑 Testando autenticação...")
+      const authResponse = await fetch(`${request.nextUrl.origin}/api/superpaybr/auth`)
+      const authResult = await authResponse.json()
 
-    if (!apiUrl || !token || !secretKey) {
-      return NextResponse.json({
-        success: false,
-        error: "Configuração SuperPayBR incompleta",
-        details: {
-          hasApiUrl: !!apiUrl,
-          hasToken: !!token,
-          hasSecretKey: !!secretKey,
-          hasWebhookUrl: !!webhookUrl,
+      results.auth = {
+        success: authResult.success,
+        status: authResponse.status,
+        account: authResult.data?.account,
+        working: authResult.data?.working,
+        expires: authResult.data?.expires_in ? new Date(authResult.data.expires_in * 1000).toLocaleString() : null,
+        error: authResult.error,
+      }
+
+      console.log("✅ Teste de autenticação concluído")
+
+      // Teste 2: Status do token (se autenticação funcionou)
+      if (authResult.success) {
+        console.log("📊 Testando status do token...")
+        const accessToken = authResult.data.access_token
+
+        const statusResponse = await fetch("https://api.superpaybr.com/status", {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+        })
+
+        const statusResult = await statusResponse.json()
+        results.status = {
+          success: statusResponse.ok,
+          status: statusResponse.status,
+          token_status: statusResult.status,
+          expires: statusResult.expires_in ? new Date(statusResult.expires_in * 1000).toLocaleString() : null,
+          error: statusResponse.ok ? null : statusResult,
+        }
+
+        console.log("✅ Teste de status concluído")
+      }
+
+      // Teste 3: QR Code endpoint (teste público)
+      console.log("🔗 Testando endpoint de QR Code...")
+      const qrcodeResponse = await fetch("https://api.superpaybr.com/invoices/qrcode/TEST_ID", {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
         },
       })
-    }
 
-    // Testar autenticação
-    console.log("🔐 Testando autenticação...")
+      const qrcodeText = await qrcodeResponse.text()
+      results.qrcode_test = {
+        success: qrcodeResponse.ok,
+        status: qrcodeResponse.status,
+        response: qrcodeText.substring(0, 200) + (qrcodeText.length > 200 ? "..." : ""),
+        note: "Esperado 404 para ID de teste",
+      }
 
-    const authResponse = await fetch("/api/superpaybr/auth")
-    const authData = await authResponse.json()
-
-    if (!authData.success) {
-      return NextResponse.json({
+      console.log("✅ Teste de QR Code concluído")
+    } catch (error) {
+      console.log("❌ Erro nos testes:", error)
+      results.auth = {
         success: false,
-        error: "Falha na autenticação SuperPayBR",
-        details: authData.details,
-        step: "authentication",
-      })
+        error: error instanceof Error ? error.message : "Erro desconhecido",
+      }
     }
-
-    console.log("✅ Autenticação bem-sucedida!")
-
-    // Testar criação de fatura
-    console.log("🧾 Testando criação de fatura...")
-
-    const testInvoiceData = {
-      external_id: `TEST_${Date.now()}`,
-      amount: 1.0,
-      description: "Teste de conexão SuperPayBR",
-      customer: {
-        name: "Teste SuperPayBR",
-        email: "teste@superpaybr.com",
-        document: "00000000000",
-        phone: "11999999999",
-      },
-    }
-
-    const invoiceResponse = await fetch("/api/superpaybr/create-invoice", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(testInvoiceData),
-    })
-
-    const invoiceData = await invoiceResponse.json()
-
-    if (!invoiceData.success) {
-      return NextResponse.json({
-        success: false,
-        error: "Falha na criação de fatura SuperPayBR",
-        details: invoiceData.error,
-        step: "invoice_creation",
-      })
-    }
-
-    console.log("✅ Fatura criada com sucesso!")
 
     return NextResponse.json({
       success: true,
-      message: "Conexão SuperPayBR funcionando perfeitamente!",
-      tests: {
-        authentication: "✅ Passou",
-        invoice_creation: "✅ Passou",
-        mode: invoiceData.mode,
-      },
-      config: {
-        hasApiUrl: !!apiUrl,
-        hasToken: !!token,
-        hasSecretKey: !!secretKey,
-        hasWebhookUrl: !!webhookUrl,
-      },
-      test_invoice: {
-        external_id: invoiceData.external_id,
-        amount: invoiceData.amount,
-        mode: invoiceData.mode,
-      },
+      message: "Teste de conexão SuperPayBR concluído",
+      results,
+      timestamp: new Date().toISOString(),
     })
   } catch (error) {
-    console.error("❌ Erro no teste de conexão:", error)
-
-    return NextResponse.json({
-      success: false,
-      error: "Erro interno no teste de conexão",
-      details: error instanceof Error ? error.message : "Erro desconhecido",
-      step: "internal_error",
-    })
+    console.log("❌ Erro no teste de conexão SuperPayBR:", error)
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Erro interno no teste de conexão",
+      },
+      { status: 500 },
+    )
   }
 }

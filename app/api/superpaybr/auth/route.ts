@@ -1,123 +1,76 @@
-import { NextResponse } from "next/server"
+import { type NextRequest, NextResponse } from "next/server"
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    console.log("🔐 Testando autenticação SuperPayBR...")
+    console.log("=== AUTENTICAÇÃO SUPERPAYBR ===")
 
-    // Verificar variáveis de ambiente
-    const apiUrl = process.env.SUPERPAY_API_URL
-    const token = process.env.SUPERPAY_TOKEN
-    const secretKey = process.env.SUPERPAY_SECRET_KEY
+    const token = process.env.SUPERPAYBR_TOKEN
+    const secretKey = process.env.SUPERPAYBR_SECRET_KEY
 
-    if (!apiUrl || !token || !secretKey) {
-      return NextResponse.json({
-        success: false,
-        error: "Variáveis de ambiente SuperPayBR não configuradas",
-        details: {
-          hasApiUrl: !!apiUrl,
-          hasToken: !!token,
-          hasSecretKey: !!secretKey,
+    if (!token || !secretKey) {
+      console.log("❌ Credenciais SuperPayBR não encontradas")
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Credenciais SuperPayBR não configuradas",
         },
-      })
+        { status: 500 },
+      )
     }
 
-    console.log("✅ Variáveis de ambiente encontradas")
-    console.log("🌐 URL da API:", apiUrl)
+    console.log("🔑 Fazendo autenticação SuperPayBR...")
+    console.log("Token:", token.substring(0, 10) + "...")
+    console.log("Secret:", secretKey.substring(0, 20) + "...")
 
-    // Testar diferentes endpoints de autenticação
-    const authEndpoints = [
-      `${apiUrl}/auth`,
-      `${apiUrl}/authenticate`,
-      `${apiUrl}/login`,
-      `${apiUrl}/token`,
-      `${apiUrl}/api/auth`,
-      `${apiUrl}/v1/auth`,
-    ]
+    // Criar Basic Auth header
+    const credentials = Buffer.from(`${token}:${secretKey}`).toString("base64")
 
-    let authSuccess = false
-    let authResponse = null
-    let workingEndpoint = null
+    const authResponse = await fetch("https://api.superpaybr.com/auth", {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Basic ${credentials}`,
+        scope: "invoice.write, customer.write, webhook.write",
+      },
+    })
 
-    for (const endpoint of authEndpoints) {
-      try {
-        console.log(`🔍 Testando endpoint: ${endpoint}`)
+    console.log("📥 Resposta SuperPayBR Auth:", {
+      status: authResponse.status,
+      statusText: authResponse.statusText,
+      ok: authResponse.ok,
+    })
 
-        const response = await fetch(endpoint, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-            "X-API-Key": secretKey,
-          },
-          body: JSON.stringify({
-            token: token,
-            secret: secretKey,
-          }),
-        })
+    if (authResponse.ok) {
+      const authData = await authResponse.json()
+      console.log("✅ Autenticação SuperPayBR bem-sucedida!")
+      console.log("Account ID:", authData.account)
+      console.log("Working:", authData.working)
+      console.log("Expires:", new Date(authData.expires_in * 1000).toLocaleString())
 
-        console.log(`📊 Status: ${response.status}`)
-
-        if (response.ok) {
-          const data = await response.json()
-          console.log("✅ Autenticação bem-sucedida!")
-          authSuccess = true
-          authResponse = data
-          workingEndpoint = endpoint
-          break
-        } else {
-          console.log(`❌ Falhou: ${response.status} - ${response.statusText}`)
-        }
-      } catch (err) {
-        console.log(`❌ Erro no endpoint ${endpoint}:`, err)
-        continue
-      }
-    }
-
-    if (!authSuccess) {
-      // Tentar método GET simples
-      try {
-        console.log("🔍 Tentando método GET simples...")
-        const response = await fetch(`${apiUrl}/status`, {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "X-API-Key": secretKey,
-          },
-        })
-
-        if (response.ok) {
-          const data = await response.json()
-          console.log("✅ Conexão estabelecida via GET!")
-          authSuccess = true
-          authResponse = data
-          workingEndpoint = `${apiUrl}/status`
-        }
-      } catch (err) {
-        console.log("❌ Método GET também falhou:", err)
-      }
-    }
-
-    if (authSuccess) {
       return NextResponse.json({
         success: true,
-        message: "Autenticação SuperPayBR bem-sucedida",
-        endpoint: workingEndpoint,
-        response: authResponse,
+        data: authData,
       })
     } else {
-      return NextResponse.json({
-        success: false,
-        error: "Falha na autenticação SuperPayBR",
-        details: "Nenhum endpoint de autenticação funcionou",
-        testedEndpoints: authEndpoints,
-      })
+      const errorText = await authResponse.text()
+      console.log("❌ Erro na autenticação SuperPayBR:", authResponse.status, errorText)
+
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Erro na autenticação: ${authResponse.status} - ${errorText}`,
+        },
+        { status: authResponse.status },
+      )
     }
   } catch (error) {
-    console.error("❌ Erro na autenticação SuperPayBR:", error)
-    return NextResponse.json({
-      success: false,
-      error: "Erro interno na autenticação SuperPayBR",
-      details: error instanceof Error ? error.message : "Erro desconhecido",
-    })
+    console.log("❌ Erro na autenticação SuperPayBR:", error)
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Erro interno na autenticação",
+      },
+      { status: 500 },
+    )
   }
 }

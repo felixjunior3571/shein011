@@ -4,9 +4,8 @@ import { useState, useEffect, useRef } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import Image from "next/image"
 import { Copy, CheckCircle, Clock, AlertCircle } from "lucide-react"
+import { usePureWebhookMonitor } from "@/hooks/use-pure-webhook-monitor"
 import { useOptimizedTracking } from "@/hooks/use-optimized-tracking"
-// Importar o hook SuperPayBR
-import { useSuperPayBRWebhookMonitor } from "@/hooks/use-superpaybr-webhook-monitor"
 
 interface InvoiceData {
   id: string
@@ -54,13 +53,13 @@ export default function SuperPayBRCheckoutPage() {
     enableDebug: process.env.NODE_ENV === "development",
   })
 
-  // Substituir o hook atual por:
+  // PURE webhook monitoring (NO API CALLS!)
   const {
     status: paymentStatus,
     isWaitingForWebhook,
     error: webhookError,
     lastCheck: lastWebhookCheck,
-  } = useSuperPayBRWebhookMonitor({
+  } = usePureWebhookMonitor({
     externalId,
     enableDebug: process.env.NODE_ENV === "development",
     onPaymentConfirmed: (data) => {
@@ -124,8 +123,6 @@ export default function SuperPayBRCheckoutPage() {
   useEffect(() => {
     if (invoice) {
       console.log("🔍 Dados da fatura SuperPayBR recebida:", invoice)
-      console.log("🖼️ QR Code URL:", invoice.pix.qr_code)
-      console.log("📱 PIX Payload:", invoice.pix.payload ? "✅ PRESENTE" : "❌ AUSENTE")
 
       let capturedExternalId = null
 
@@ -147,7 +144,6 @@ export default function SuperPayBRCheckoutPage() {
           external_id: capturedExternalId,
           amount: Number.parseFloat(amount),
           type: invoice.type,
-          has_qr_code: !!invoice.pix.qr_code,
         })
       } else {
         console.error("❌ Não foi possível obter external_id SuperPayBR!")
@@ -240,20 +236,15 @@ export default function SuperPayBRCheckoutPage() {
     console.log("🚨 Criando PIX de emergência SuperPayBR...")
 
     const totalAmount = Number.parseFloat(amount)
-
-    // Gerar PIX payload de emergência mais realista
-    const emergencyPix = `00020126580014br.gov.bcb.pix2536pix.superpaybr.com/qr/v2/EMG${Date.now()}520400005303986540${totalAmount.toFixed(2)}5802BR5909SHEIN CARD5011SAO PAULO62070503***6304${Math.random().toString(36).substr(2, 4).toUpperCase()}`
-
-    // Gerar QR Code usando QuickChart
-    const qrCodeUrl = `https://quickchart.io/qr?text=${encodeURIComponent(emergencyPix)}&size=250&format=png&margin=1`
+    const emergencyPix = `00020101021226580014br.gov.bcb.pix2536emergency.superpaybr.com/qr/v2/EMERGENCY${Date.now()}520400005303986540${totalAmount.toFixed(2)}5802BR5909SHEIN5011SAO PAULO62070503***6304EMRG`
 
     const emergencyInvoice: InvoiceData = {
       id: `EMG_${Date.now()}`,
       invoice_id: `EMERGENCY_${Date.now()}`,
       pix: {
         payload: emergencyPix,
-        image: qrCodeUrl,
-        qr_code: qrCodeUrl,
+        image: "/placeholder.svg?height=250&width=250",
+        qr_code: `https://quickchart.io/qr?text=${encodeURIComponent(emergencyPix)}`,
       },
       status: {
         code: 1,
@@ -273,7 +264,6 @@ export default function SuperPayBRCheckoutPage() {
     setInvoice(emergencyInvoice)
     setError(null)
     console.log(`✅ PIX de emergência SuperPayBR criado - Valor: R$ ${totalAmount.toFixed(2)}`)
-    console.log(`🎯 QR Code URL: ${qrCodeUrl}`)
 
     // Track emergency PIX creation
     track("emergency_pix_created", {

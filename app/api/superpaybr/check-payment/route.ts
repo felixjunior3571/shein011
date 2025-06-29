@@ -3,56 +3,91 @@ import { type NextRequest, NextResponse } from "next/server"
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
-    const externalId = searchParams.get("external_id")
+    const externalId = searchParams.get("externalId")
 
     if (!externalId) {
-      return NextResponse.json({ success: false, error: "external_id é obrigatório" }, { status: 400 })
+      return NextResponse.json({ success: false, error: "External ID is required" }, { status: 400 })
     }
 
-    console.log(`🔍 Verificando pagamento SuperPayBR: ${externalId}`)
+    console.log("🔍 [SuperPayBR Check] Consultando pagamento para:", externalId)
 
-    // Redirecionar para o endpoint de status mais robusto
-    const statusResponse = await fetch(
-      `${request.nextUrl.origin}/api/superpaybr/payment-status?external_id=${externalId}`,
-    )
-    const statusData = await statusResponse.json()
+    // Buscar no Supabase (dados do webhook)
+    try {
+      const { createClient } = await import("@supabase/supabase-js")
+      const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
-    if (statusData.success) {
+      const { data, error } = await supabase
+        .from("payment_webhooks")
+        .select("*")
+        .eq("external_id", externalId)
+        .eq("gateway", "SuperPayBR")
+        .order("received_at", { ascending: false })
+        .limit(1)
+        .single()
+
+      if (error && error.code !== "PGRST116") {
+        console.error("❌ [SuperPayBR Check] Erro ao consultar Supabase:", error)
+        throw error
+      }
+
+      if (data) {
+        console.log("✅ [SuperPayBR Check] Status encontrado no webhook:", {
+          external_id: data.external_id,
+          status: data.status_name,
+          is_paid: data.is_paid,
+          amount: data.amount,
+        })
+
+        const paymentStatus = {
+          isPaid: data.is_paid,
+          isDenied: data.is_denied,
+          isRefunded: data.is_refunded,
+          isExpired: data.is_expired,
+          isCanceled: data.is_canceled,
+          statusCode: data.status_code,
+          statusName: data.status_name,
+          statusTitle: data.status_title,
+          amount: data.amount,
+          paymentDate: data.payment_date,
+          gateway: data.gateway,
+        }
+
+        return NextResponse.json({
+          success: true,
+          found: true,
+          data: paymentStatus,
+          source: "webhook",
+          receivedAt: data.received_at,
+        })
+      } else {
+        console.log("⏳ [SuperPayBR Check] Nenhum webhook recebido ainda para:", externalId)
+
+        return NextResponse.json({
+          success: true,
+          found: false,
+          message: "No webhook received yet",
+          externalId,
+        })
+      }
+    } catch (dbError) {
+      console.error("❌ [SuperPayBR Check] Erro na consulta ao banco:", dbError)
+
       return NextResponse.json({
-        success: true,
-        isPaid: statusData.isPaid,
-        isDenied: statusData.isDenied,
-        isRefunded: statusData.isRefunded,
-        isExpired: statusData.isExpired,
-        isCanceled: statusData.isCanceled,
-        statusCode: statusData.statusCode,
-        statusName: statusData.statusName,
-        amount: statusData.amount,
-        paymentDate: statusData.paymentDate,
-        timestamp: statusData.timestamp,
-        source: statusData.source,
+        success: false,
+        error: "Database error",
+        message: "Unable to check payment status",
       })
-    } else {
-      throw new Error(statusData.error || "Erro ao verificar status")
     }
   } catch (error) {
-    console.error("❌ Erro ao verificar pagamento SuperPayBR:", error)
+    console.error("❌ [SuperPayBR Check] Erro geral na consulta:", error)
 
     return NextResponse.json(
       {
         success: false,
-        error: error instanceof Error ? error.message : "Erro desconhecido",
-        timestamp: new Date().toISOString(),
+        error: "Internal server error",
+        message: error instanceof Error ? error.message : "Unknown error",
       },
       { status: 500 },
     )
   }
-}
-
-export async function POST() {
-  return NextResponse.json({
-    success: true,
-    message: "Use GET para verificar pagamento",
-    timestamp: new Date().toISOString(),
-  })
 }
