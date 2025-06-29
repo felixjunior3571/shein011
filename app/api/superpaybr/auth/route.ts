@@ -1,83 +1,69 @@
 import { NextResponse } from "next/server"
 
-// ⚠️ CACHE de autenticação para evitar múltiplas requisições
-let authCache: { token: string; expiresAt: number } | null = null
-
-export async function GET() {
+export async function POST() {
   try {
-    // ⚠️ VERIFICAR cache primeiro
-    if (authCache && Date.now() < authCache.expiresAt) {
-      console.log("📦 Retornando token do cache SuperPayBR")
-      return NextResponse.json({
-        success: true,
-        token: authCache.token,
-        cached: true,
-      })
+    console.log("=== AUTENTICAÇÃO SUPERPAYBR ===")
+
+    const token = process.env.SUPERPAYBR_TOKEN
+    const secretKey = process.env.SUPERPAYBR_SECRET_KEY
+
+    if (!token || !secretKey) {
+      console.log("❌ Credenciais SuperPayBR não encontradas")
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Credenciais SuperPayBR não configuradas",
+        },
+        { status: 500 },
+      )
     }
 
-    console.log("🔐 Autenticando com SuperPayBR...")
+    console.log("🔐 Fazendo autenticação SuperPayBR...")
 
-    const authUrl = `${process.env.SUPERPAYBR_API_URL}/auth`
-    const authData = {
-      email: "contato@sheincard.com.br",
-      password: process.env.SUPERPAYBR_SECRET_KEY,
-    }
+    // Criar Basic Auth header
+    const credentials = Buffer.from(`${token}:${secretKey}`).toString("base64")
 
-    console.log("🌐 URL de autenticação:", authUrl)
-
-    // ⚠️ TIMEOUT para evitar requisições travadas
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 8000) // 8 segundos
-
-    const response = await fetch(authUrl, {
+    const authResponse = await fetch("https://api.superpaybr.com/auth", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        Authorization: `Basic ${credentials}`,
         Accept: "application/json",
-        Authorization: `Bearer ${process.env.SUPERPAYBR_TOKEN}`,
       },
-      body: JSON.stringify(authData),
-      signal: controller.signal,
+      body: JSON.stringify({
+        scope: "invoice.write customer.write webhook.write",
+      }),
     })
 
-    clearTimeout(timeoutId)
+    console.log("📥 Resposta autenticação SuperPayBR:", {
+      status: authResponse.status,
+      statusText: authResponse.statusText,
+      ok: authResponse.ok,
+    })
 
-    const responseText = await response.text()
-    console.log("📥 Resposta SuperPayBR Auth:", responseText.substring(0, 200))
+    if (authResponse.ok) {
+      const authData = await authResponse.json()
+      console.log("✅ Autenticação SuperPayBR bem-sucedida!")
 
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-    }
-
-    let data
-    try {
-      data = JSON.parse(responseText)
-    } catch (parseError) {
-      throw new Error(`Erro ao parsear JSON: ${responseText}`)
-    }
-
-    if (data.success && data.data?.token) {
-      // ⚠️ SALVAR no cache por 45 minutos
-      authCache = {
-        token: data.data.token,
-        expiresAt: Date.now() + 45 * 60 * 1000, // 45 minutos
-      }
-
-      console.log("✅ Autenticação SuperPayBR bem-sucedida")
       return NextResponse.json({
         success: true,
-        token: data.data.token,
-        cached: false,
+        data: authData,
+        message: "Autenticação SuperPayBR realizada com sucesso",
       })
     } else {
-      throw new Error(data.message || "Token não encontrado na resposta")
+      const errorText = await authResponse.text()
+      console.log("❌ Erro na autenticação SuperPayBR:", authResponse.status, errorText)
+
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Erro SuperPayBR ${authResponse.status}: ${errorText}`,
+        },
+        { status: authResponse.status },
+      )
     }
   } catch (error) {
-    console.error("❌ Erro na autenticação SuperPayBR:", error)
-
-    // ⚠️ LIMPAR cache em caso de erro
-    authCache = null
-
+    console.log("❌ Erro na autenticação SuperPayBR:", error)
     return NextResponse.json(
       {
         success: false,
@@ -86,4 +72,12 @@ export async function GET() {
       { status: 500 },
     )
   }
+}
+
+export async function GET() {
+  return NextResponse.json({
+    success: true,
+    message: "SuperPayBR Auth endpoint ativo",
+    timestamp: new Date().toISOString(),
+  })
 }
