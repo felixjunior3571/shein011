@@ -1,97 +1,84 @@
-import { type NextRequest, NextResponse } from "next/server"
+import { NextResponse } from "next/server"
 
-export async function POST(request: NextRequest) {
+export async function GET() {
   try {
-    console.log("🧪 Testando conexão SuperPayBR...")
+    console.log("=== TESTANDO CONEXÃO SUPERPAYBR ===")
 
-    // Verificar variáveis de ambiente
-    const apiUrl = process.env.SUPERPAY_API_URL
-    const token = process.env.SUPERPAY_TOKEN
-    const secretKey = process.env.SUPERPAY_SECRET_KEY
+    const token = process.env.SUPERPAYBR_TOKEN
+    const secretKey = process.env.SUPERPAYBR_SECRET_KEY
 
-    if (!apiUrl) {
-      return NextResponse.json({
-        success: false,
-        error: "SUPERPAY_API_URL não configurada",
-        missing: ["SUPERPAY_API_URL"],
-      })
+    if (!token || !secretKey) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Credenciais SuperPayBR não configuradas",
+          missing: {
+            token: !token,
+            secret_key: !secretKey,
+          },
+        },
+        { status: 500 },
+      )
     }
 
-    if (!token) {
-      return NextResponse.json({
-        success: false,
-        error: "SUPERPAY_TOKEN não configurado",
-        missing: ["SUPERPAY_TOKEN"],
-      })
-    }
+    console.log("🔐 Testando autenticação SuperPayBR...")
 
-    if (!secretKey) {
-      return NextResponse.json({
-        success: false,
-        error: "SUPERPAY_SECRET_KEY não configurado",
-        missing: ["SUPERPAY_SECRET_KEY"],
-      })
-    }
+    // Criar Basic Auth header
+    const credentials = Buffer.from(`${token}:${secretKey}`).toString("base64")
 
-    console.log("✅ Variáveis de ambiente configuradas")
-
-    // Testar autenticação
-    const authResponse = await fetch(`${request.nextUrl.origin}/api/superpaybr/auth`, {
+    const authResponse = await fetch("https://api.superpaybr.com/auth", {
       method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Basic ${credentials}`,
+        Accept: "application/json",
+      },
+      body: JSON.stringify({
+        scope: "invoice.write customer.write webhook.write",
+      }),
     })
 
-    if (!authResponse.ok) {
-      const errorData = await authResponse.json()
+    console.log("📥 Resposta teste SuperPayBR:", {
+      status: authResponse.status,
+      statusText: authResponse.statusText,
+      ok: authResponse.ok,
+    })
+
+    if (authResponse.ok) {
+      const authData = await authResponse.json()
+      console.log("✅ Conexão SuperPayBR funcionando!")
+
       return NextResponse.json({
-        success: false,
-        error: "Falha na autenticação SuperPayBR",
-        details: errorData,
-      })
-    }
-
-    const authData = await authResponse.json()
-
-    if (!authData.access_token) {
-      return NextResponse.json({
-        success: false,
-        error: "Token de acesso não obtido",
-        auth_response: authData,
-      })
-    }
-
-    console.log("✅ Autenticação SuperPayBR bem-sucedida")
-
-    return NextResponse.json({
-      success: true,
-      message: "Conexão SuperPayBR testada com sucesso",
-      config: {
-        api_url: apiUrl,
-        has_token: !!token,
-        has_secret: !!secretKey,
-      },
-      auth: {
         success: true,
-        token_type: authData.token_type,
-        expires_in: authData.expires_in,
-      },
-      timestamp: new Date().toISOString(),
-    })
+        message: "Conexão SuperPayBR funcionando perfeitamente!",
+        data: {
+          token_type: authData.token_type,
+          expires_in: authData.expires_in,
+          scope: authData.scope,
+        },
+        timestamp: new Date().toISOString(),
+      })
+    } else {
+      const errorText = await authResponse.text()
+      console.log("❌ Erro na conexão SuperPayBR:", authResponse.status, errorText)
+
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Erro SuperPayBR ${authResponse.status}: ${errorText}`,
+          status_code: authResponse.status,
+        },
+        { status: authResponse.status },
+      )
+    }
   } catch (error) {
-    console.error("❌ Erro no teste de conexão SuperPayBR:", error)
+    console.log("❌ Erro ao testar conexão SuperPayBR:", error)
     return NextResponse.json(
       {
         success: false,
-        error: error instanceof Error ? error.message : "Erro desconhecido",
+        error: error instanceof Error ? error.message : "Erro desconhecido ao testar conexão SuperPayBR",
       },
       { status: 500 },
     )
   }
-}
-
-export async function GET() {
-  return NextResponse.json({
-    success: true,
-    message: "SuperPayBR Test Connection endpoint ativo",
-    timestamp: new Date().toISOString(),
-  })
 }

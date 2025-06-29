@@ -1,85 +1,127 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { savePaymentConfirmation, type TryploPayWebhookPayload } from "@/lib/payment-storage"
+import { createClient } from "@supabase/supabase-js"
+
+const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("🔔 === WEBHOOK TRYPLOPAY RECEBIDO ===")
+    console.log("🔔 WEBHOOK TRYPLOPAY RECEBIDO!")
 
-    const payload: TryploPayWebhookPayload = await request.json()
-    console.log("📥 Payload recebido:", JSON.stringify(payload, null, 2))
+    const body = await request.json()
+    console.log("📦 Dados completos do webhook:", JSON.stringify(body, null, 2))
 
-    // Extrair dados do webhook TryploPay
-    const invoice = payload.invoices
-    const externalId = invoice.external_id
-    const invoiceId = invoice.id.toString()
-    const token = invoice.token
-    const statusCode = invoice.status.code
-    const statusTitle = invoice.status.title
-    const statusDescription = invoice.status.description
-    const amount = invoice.prices.total / 100 // TryploPay envia em centavos
-    const paymentDate = invoice.payment?.payDate || null
-
-    console.log("📊 Dados extraídos:")
-    console.log(`External ID: ${externalId}`)
-    console.log(`Invoice ID: ${invoiceId}`)
-    console.log(`Status Code: ${statusCode}`)
-    console.log(`Status: ${statusTitle}`)
-    console.log(`Valor: R$ ${amount.toFixed(2)}`)
-    console.log(`Data Pagamento: ${paymentDate || "N/A"}`)
-
-    // Salvar confirmação no armazenamento global
-    const confirmationData = savePaymentConfirmation(externalId, invoiceId, token, {
-      statusCode,
-      statusDescription,
+    // Extrair dados do webhook baseado na estrutura do TryploPay
+    const {
+      external_id,
+      invoice_id,
+      token,
+      status_code,
+      status_name,
+      status_description,
       amount,
-      paymentDate,
-      rawPayload: payload,
-    })
+      payment_date,
+      is_paid,
+      is_denied,
+      is_refunded,
+      is_expired,
+      is_canceled,
+    } = body
 
-    console.log("💾 Confirmação salva:", {
-      externalId: confirmationData.externalId,
-      isPaid: confirmationData.isPaid,
-      statusName: confirmationData.statusName,
-    })
-
-    // Salvar também no Supabase como backup
-    try {
-      const { createClient } = await import("@supabase/supabase-js")
-      const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
-
-      const { error } = await supabase.from("payment_webhooks").insert({
-        external_id: externalId,
-        invoice_id: invoiceId,
-        token: token,
-        status_code: statusCode,
-        status_name: statusTitle,
-        status_description: statusDescription,
-        amount: amount,
-        payment_date: paymentDate,
-        is_paid: confirmationData.isPaid,
-        is_denied: confirmationData.isDenied,
-        is_refunded: confirmationData.isRefunded,
-        is_expired: confirmationData.isExpired,
-        is_canceled: confirmationData.isCanceled,
-        raw_data: payload,
-        received_at: new Date().toISOString(),
-      })
-
-      if (error) {
-        console.error("❌ Erro ao salvar no Supabase:", error)
-      } else {
-        console.log("✅ Webhook salvo no Supabase")
-      }
-    } catch (dbError) {
-      console.error("❌ Erro de conexão com Supabase:", dbError)
+    if (!external_id) {
+      console.log("❌ External ID não encontrado no webhook")
+      return NextResponse.json({ success: false, error: "External ID required" }, { status: 400 })
     }
 
-    // Sempre retornar 200 OK para o webhook
-    return NextResponse.json({ received: true }, { status: 200 })
-  } catch (error) {
-    console.error("❌ Erro no processamento do webhook TryploPay:", error)
+    console.log(`🔍 Processando webhook para External ID: ${external_id}`)
 
-    // Mesmo com erro, retornar 200 para não reenviar o webhook
-    return NextResponse.json({ received: true, error: "processed" }, { status: 200 })
+    // Determinar status do pagamento
+    const paymentStatus = {
+      isPaid: is_paid || status_code === 2 || status_name === "paid",
+      isDenied: is_denied || status_code === 3 || status_name === "denied",
+      isRefunded: is_refunded || status_code === 4 || status_name === "refunded",
+      isExpired: is_expired || status_code === 5 || status_name === "expired",
+      isCanceled: is_canceled || status_code === 6 || status_name === "canceled",
+      statusCode: status_code,
+      statusName: status_name,
+      amount: amount,
+      paymentDate: payment_date,
+    }
+
+    // Salvar no Supabase
+    const { data, error } = await supabase
+      .from("payment_webhooks")
+      .upsert(
+        {
+          external_id,
+          invoice_id,
+          token,
+          status_code,
+          status_name,
+          status_description,
+          amount,
+          payment_date,
+          is_paid: paymentStatus.isPaid,
+          is_denied: paymentStatus.isDenied,
+          is_refunded: paymentStatus.isRefunded,
+          is_expired: paymentStatus.isExpired,
+          is_canceled: paymentStatus.isCanceled,
+          webhook_data: body,
+          received_at: new Date().toISOString(),
+        },
+        {
+          onConflict: "external_id",
+        },
+      )
+      .select()
+
+    if (error) {
+      console.error("❌ Erro ao salvar webhook no Supabase:", error)
+    } else {
+      console.log("✅ Webhook salvo no Supabase:", data)
+    }
+
+    // Log detalhado baseado no status
+    if (paymentStatus.isPaid) {
+      console.log(`🎉 PAGAMENTO CONFIRMADO! External ID: ${external_id}, Valor: R$ ${amount}`)
+    } else if (paymentStatus.isDenied) {
+      console.log(`❌ PAGAMENTO NEGADO! External ID: ${external_id}, Valor: R$ ${amount}`)
+    } else if (paymentStatus.isExpired) {
+      console.log(`⏰ PAGAMENTO VENCIDO! External ID: ${external_id}, Valor: R$ ${amount}`)
+    } else if (paymentStatus.isCanceled) {
+      console.log(`🚫 PAGAMENTO CANCELADO! External ID: ${external_id}, Valor: R$ ${amount}`)
+    } else if (paymentStatus.isRefunded) {
+      console.log(`🔄 PAGAMENTO ESTORNADO! External ID: ${external_id}, Valor: R$ ${amount}`)
+    } else {
+      console.log(`📋 Status atualizado: ${status_name} - External ID: ${external_id}`)
+    }
+
+    // Resposta de sucesso para o TryploPay
+    return NextResponse.json({
+      success: true,
+      message: "Webhook processed successfully",
+      external_id,
+      status: paymentStatus,
+      timestamp: new Date().toISOString(),
+    })
+  } catch (error) {
+    console.error("❌ Erro no processamento do webhook:", error)
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Internal server error",
+        message: error instanceof Error ? error.message : "Unknown error",
+        timestamp: new Date().toISOString(),
+      },
+      { status: 500 },
+    )
   }
+}
+
+// Método GET para verificar se o endpoint está funcionando
+export async function GET() {
+  return NextResponse.json({
+    message: "TryploPay Webhook Endpoint",
+    status: "active",
+    timestamp: new Date().toISOString(),
+  })
 }
