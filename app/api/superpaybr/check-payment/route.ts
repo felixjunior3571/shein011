@@ -1,75 +1,103 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { createClient } from "@supabase/supabase-js"
-
-const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!)
+import { getSuperPayAccessToken } from "@/lib/superpaybr-auth"
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
+    const invoiceId = searchParams.get("invoice_id")
     const externalId = searchParams.get("external_id")
 
-    if (!externalId) {
+    if (!invoiceId && !externalId) {
       return NextResponse.json(
         {
           success: false,
-          error: "External ID é obrigatório",
+          error: "invoice_id ou external_id é obrigatório",
         },
         { status: 400 },
       )
     }
 
-    console.log("🔍 Verificando pagamento SuperPayBR:", externalId)
+    console.log("🔍 === VERIFICANDO PAGAMENTO SUPERPAYBR ===")
+    console.log("📋 Parâmetros:", { invoiceId, externalId })
 
-    // Buscar no Supabase
-    const { data, error } = await supabase
-      .from("superpaybr_payments")
-      .select("*")
-      .eq("external_id", externalId)
-      .single()
+    // Obter access token
+    const accessToken = await getSuperPayAccessToken()
 
-    if (error && error.code !== "PGRST116") {
-      console.error("❌ Erro ao buscar pagamento:", error)
+    // URLs para verificar pagamento
+    const checkUrls = [
+      `https://api.superpaybr.com/v4/invoices/${invoiceId || externalId}`,
+      `https://api.superpaybr.com/invoices/${invoiceId || externalId}`,
+      `https://api.superpaybr.com/v4/payments/${invoiceId || externalId}`,
+      `https://api.superpaybr.com/payments/${invoiceId || externalId}`,
+    ]
+
+    let checkSuccess = false
+    let paymentData = null
+    let lastError = null
+
+    for (const checkUrl of checkUrls) {
+      try {
+        console.log(`🔄 Verificando em: ${checkUrl}`)
+
+        const checkResponse = await fetch(checkUrl, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+        })
+
+        console.log(`📥 Resposta de ${checkUrl}:`, {
+          status: checkResponse.status,
+          statusText: checkResponse.statusText,
+          ok: checkResponse.ok,
+        })
+
+        if (checkResponse.ok) {
+          paymentData = await checkResponse.json()
+          console.log("✅ Dados do pagamento obtidos!")
+          console.log("📋 Dados:", JSON.stringify(paymentData, null, 2))
+          checkSuccess = true
+          break
+        } else {
+          const errorText = await checkResponse.text()
+          console.log(`❌ Falha em ${checkUrl}:`, errorText)
+          lastError = errorText
+        }
+      } catch (error) {
+        console.log(`❌ Erro em ${checkUrl}:`, error)
+        lastError = error
+      }
+    }
+
+    if (!checkSuccess) {
       return NextResponse.json(
         {
           success: false,
-          error: "Erro ao verificar pagamento",
-          details: error.message,
+          error: "Não foi possível verificar o pagamento",
+          details: lastError,
+          attempted_urls: checkUrls,
         },
-        { status: 500 },
+        { status: 404 },
       )
     }
 
-    if (!data) {
-      return NextResponse.json({
-        success: true,
-        data: {
-          external_id: externalId,
-          found: false,
-          status: "not_found",
-          message: "Pagamento não encontrado",
-        },
-      })
-    }
-
-    console.log("✅ Pagamento encontrado:", data)
+    // Extrair status do pagamento
+    const status = paymentData.status || paymentData.payment_status || "unknown"
+    const amount = paymentData.amount || paymentData.value || 0
+    const isPaid = status === "paid" || status === "approved" || status === "completed"
 
     return NextResponse.json({
       success: true,
       data: {
+        invoice_id: invoiceId,
         external_id: externalId,
-        found: true,
-        invoice_id: data.invoice_id,
-        status_code: data.status_code,
-        status_name: data.status_name,
-        amount: data.amount,
-        is_paid: data.is_paid,
-        is_denied: data.is_denied,
-        is_refunded: data.is_refunded,
-        is_expired: data.is_expired,
-        is_canceled: data.is_canceled,
-        payment_date: data.payment_date,
-        processed_at: data.processed_at,
-        created_at: data.created_at,
+        status: status,
+        amount: amount,
+        is_paid: isPaid,
+        payment_data: paymentData,
+        checked_at: new Date().toISOString(),
       },
     })
   } catch (error) {
@@ -77,14 +105,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       {
         success: false,
-        error: "Erro interno ao verificar pagamento",
+        error: "Erro ao verificar pagamento SuperPayBR",
         details: error instanceof Error ? error.message : "Erro desconhecido",
       },
       { status: 500 },
     )
   }
-}
-
-export async function POST(request: NextRequest) {
-  return GET(request)
 }

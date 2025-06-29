@@ -1,34 +1,34 @@
 import { type NextRequest, NextResponse } from "next/server"
 
-export async function POST(request: NextRequest) {
+export async function GET(request: NextRequest) {
   try {
-    console.log("🔳 === GERANDO QR CODE SUPERPAYBR ===")
+    const { searchParams } = new URL(request.url)
+    const payload = searchParams.get("payload")
 
-    const body = await request.json()
-    const pixPayload = body.pix_payload || body.payload
-
-    if (!pixPayload) {
+    if (!payload) {
       return NextResponse.json(
         {
           success: false,
-          error: "PIX payload é obrigatório",
+          error: "Parâmetro 'payload' é obrigatório",
         },
         { status: 400 },
       )
     }
 
-    console.log("📱 Gerando QR Code para payload:", pixPayload.slice(0, 20) + "...")
+    console.log("🔲 === GERANDO QR CODE ===")
+    console.log("📋 Payload PIX:", payload.slice(0, 50) + "...")
 
     // Gerar QR Code usando QuickChart
-    const qrCodeUrl = `https://quickchart.io/qr?text=${encodeURIComponent(pixPayload)}&size=300&format=png&margin=1`
-
-    console.log("✅ QR Code gerado:", qrCodeUrl)
+    const qrCodeUrl = `https://quickchart.io/qr?text=${encodeURIComponent(payload)}&size=300&format=png&margin=1`
 
     return NextResponse.json({
       success: true,
       data: {
-        qr_code_url: qrCodeUrl,
-        pix_payload: pixPayload,
+        payload: payload,
+        qr_code: qrCodeUrl,
+        image: qrCodeUrl,
+        size: "300x300",
+        format: "png",
         generated_at: new Date().toISOString(),
       },
     })
@@ -45,32 +45,40 @@ export async function POST(request: NextRequest) {
   }
 }
 
-export async function GET(request: NextRequest) {
-  const { searchParams } = new URL(request.url)
-  const pixPayload = searchParams.get("payload")
-
-  if (!pixPayload) {
-    return NextResponse.json(
-      {
-        success: false,
-        error: "PIX payload é obrigatório como parâmetro 'payload'",
-      },
-      { status: 400 },
-    )
-  }
-
+export async function POST(request: NextRequest) {
   try {
-    const qrCodeUrl = `https://quickchart.io/qr?text=${encodeURIComponent(pixPayload)}&size=300&format=png&margin=1`
+    const body = await request.json()
+    const { payload } = body
+
+    if (!payload) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Campo 'payload' é obrigatório no body",
+        },
+        { status: 400 },
+      )
+    }
+
+    console.log("🔲 === GERANDO QR CODE (POST) ===")
+    console.log("📋 Payload PIX:", payload.slice(0, 50) + "...")
+
+    // Gerar QR Code usando QuickChart
+    const qrCodeUrl = `https://quickchart.io/qr?text=${encodeURIComponent(payload)}&size=300&format=png&margin=1`
 
     return NextResponse.json({
       success: true,
       data: {
-        qr_code_url: qrCodeUrl,
-        pix_payload: pixPayload,
+        payload: payload,
+        qr_code: qrCodeUrl,
+        image: qrCodeUrl,
+        size: "300x300",
+        format: "png",
         generated_at: new Date().toISOString(),
       },
     })
   } catch (error) {
+    console.error("❌ Erro ao gerar QR Code:", error)
     return NextResponse.json(
       {
         success: false,

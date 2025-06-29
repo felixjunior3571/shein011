@@ -6,33 +6,39 @@ const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
+    const invoiceId = searchParams.get("invoice_id")
     const externalId = searchParams.get("external_id")
 
-    if (!externalId) {
+    if (!invoiceId && !externalId) {
       return NextResponse.json(
         {
           success: false,
-          error: "External ID é obrigatório",
+          error: "invoice_id ou external_id é obrigatório",
         },
         { status: 400 },
       )
     }
 
-    console.log("📊 Verificando status detalhado SuperPayBR:", externalId)
+    console.log("📊 === CONSULTANDO STATUS PAGAMENTO ===")
+    console.log("📋 Parâmetros:", { invoiceId, externalId })
 
-    // Buscar no Supabase com histórico
-    const { data: payments, error } = await supabase
-      .from("superpaybr_payments")
-      .select("*")
-      .eq("external_id", externalId)
-      .order("created_at", { ascending: false })
+    // Consultar no Supabase
+    let query = supabase.from("superpaybr_payments").select("*")
+
+    if (invoiceId) {
+      query = query.eq("invoice_id", invoiceId)
+    } else if (externalId) {
+      query = query.eq("external_id", externalId)
+    }
+
+    const { data: payments, error } = await query.order("created_at", { ascending: false }).limit(1)
 
     if (error) {
-      console.error("❌ Erro ao buscar status:", error)
+      console.error("❌ Erro ao consultar Supabase:", error)
       return NextResponse.json(
         {
           success: false,
-          error: "Erro ao verificar status",
+          error: "Erro ao consultar status do pagamento",
           details: error.message,
         },
         { status: 500 },
@@ -40,74 +46,43 @@ export async function GET(request: NextRequest) {
     }
 
     if (!payments || payments.length === 0) {
-      return NextResponse.json({
-        success: true,
-        data: {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Pagamento não encontrado",
+          invoice_id: invoiceId,
           external_id: externalId,
-          found: false,
-          status: "not_found",
-          message: "Nenhum registro encontrado",
-          history: [],
         },
-      })
+        { status: 404 },
+      )
     }
 
-    const latestPayment = payments[0]
-    console.log("✅ Status encontrado:", latestPayment)
-
-    // Buscar atualizações recentes
-    const { data: updates, error: updatesError } = await supabase
-      .from("payment_updates")
-      .select("*")
-      .eq("external_id", externalId)
-      .order("created_at", { ascending: false })
-      .limit(10)
-
-    const history = updates || []
+    const payment = payments[0]
+    const isPaid = payment.status === "paid" || payment.status === "approved" || payment.status === "completed"
 
     return NextResponse.json({
       success: true,
       data: {
-        external_id: externalId,
-        found: true,
-        current_status: {
-          invoice_id: latestPayment.invoice_id,
-          status_code: latestPayment.status_code,
-          status_name: latestPayment.status_name,
-          amount: latestPayment.amount,
-          is_paid: latestPayment.is_paid,
-          is_denied: latestPayment.is_denied,
-          is_refunded: latestPayment.is_refunded,
-          is_expired: latestPayment.is_expired,
-          is_canceled: latestPayment.is_canceled,
-          payment_date: latestPayment.payment_date,
-          processed_at: latestPayment.processed_at,
-          created_at: latestPayment.created_at,
-        },
-        history: history.map((update) => ({
-          update_data: update.update_data,
-          created_at: update.created_at,
-        })),
-        summary: {
-          total_updates: history.length,
-          last_update: history[0]?.created_at || latestPayment.processed_at,
-          is_final_status: latestPayment.is_paid || latestPayment.is_denied || latestPayment.is_expired,
-        },
+        invoice_id: payment.invoice_id,
+        external_id: payment.external_id,
+        status: payment.status,
+        amount: payment.amount,
+        is_paid: isPaid,
+        event_type: payment.event_type,
+        created_at: payment.created_at,
+        processed_at: payment.processed_at,
+        webhook_data: payment.webhook_data,
       },
     })
   } catch (error) {
-    console.error("❌ Erro ao verificar status SuperPayBR:", error)
+    console.error("❌ Erro ao consultar status do pagamento:", error)
     return NextResponse.json(
       {
         success: false,
-        error: "Erro interno ao verificar status",
+        error: "Erro interno ao consultar status do pagamento",
         details: error instanceof Error ? error.message : "Erro desconhecido",
       },
       { status: 500 },
     )
   }
-}
-
-export async function POST(request: NextRequest) {
-  return GET(request)
 }
