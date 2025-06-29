@@ -145,3 +145,11 @@ export async function GET(request: NextRequest) {
     )
   }
 }
+
+export async function POST() {
+  return NextResponse.json({
+    success: true,
+    message: "Use GET para consultar status do pagamento",
+    timestamp: new Date().toISOString(),
+  })
+}

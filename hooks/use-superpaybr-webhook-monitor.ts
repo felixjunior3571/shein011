@@ -16,7 +16,7 @@ interface PaymentStatus {
 }
 
 interface UseSuperpaybrWebhookMonitorProps {
-  externalId: string
+  externalId: string | null
   onPaid?: () => void
   onDenied?: () => void
   onRefunded?: () => void
@@ -36,7 +36,7 @@ export function useSuperPayBRWebhookMonitor({
   onCanceled,
   onStatusChange,
   enabled = true,
-  interval = 5000, // 5 segundos (otimizado)
+  interval = 5000, // 5 segundos
 }: UseSuperpaybrWebhookMonitorProps) {
   const [status, setStatus] = useState<PaymentStatus | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -79,22 +79,22 @@ export function useSuperPayBRWebhookMonitor({
       }
 
       const newStatus: PaymentStatus = {
-        isPaid: data.isPaid,
-        isDenied: data.isDenied,
-        isRefunded: data.isRefunded,
-        isExpired: data.isExpired,
-        isCanceled: data.isCanceled,
-        statusCode: data.statusCode,
-        statusName: data.statusName,
-        amount: data.amount,
+        isPaid: data.isPaid || false,
+        isDenied: data.isDenied || false,
+        isRefunded: data.isRefunded || false,
+        isExpired: data.isExpired || false,
+        isCanceled: data.isCanceled || false,
+        statusCode: data.statusCode || 1,
+        statusName: data.statusName || "pending",
+        amount: data.amount || 0,
         paymentDate: data.paymentDate,
-        timestamp: data.timestamp,
+        timestamp: data.timestamp || new Date().toISOString(),
       }
 
       setStatus(newStatus)
 
       // Executar callbacks apenas uma vez por status
-      const statusKey = `${externalId}_${newStatus.statusCode}`
+      const statusKey = `${externalId}_${newStatus.statusCode}_${newStatus.statusName}`
 
       if (!callbacksExecutedRef.current.has(statusKey)) {
         console.log(`📊 Status SuperPayBR atualizado: ${newStatus.statusName}`)
