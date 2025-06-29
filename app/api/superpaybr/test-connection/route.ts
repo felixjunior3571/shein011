@@ -1,49 +1,45 @@
-import { NextResponse } from "next/server"
+import { type NextRequest, NextResponse } from "next/server"
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    console.log("🔍 === TESTE DE CONEXÃO SUPERPAYBR ===")
+    console.log("🔍 === TESTANDO CONEXÃO SUPERPAYBR ===")
 
+    // Verificar variáveis de ambiente
     const token = process.env.SUPERPAY_TOKEN
     const secretKey = process.env.SUPERPAY_SECRET_KEY
     const apiUrl = process.env.SUPERPAY_API_URL
+    const webhookUrl = process.env.SUPERPAY_WEBHOOK_URL
 
-    console.log("🔍 Verificando variáveis de ambiente:", {
-      token: token ? `${token.substring(0, 10)}...` : "❌ AUSENTE",
-      secretKey: secretKey ? `${secretKey.substring(0, 10)}...` : "❌ AUSENTE",
-      apiUrl: apiUrl || "❌ AUSENTE",
+    console.log("📋 Verificando variáveis de ambiente:", {
+      SUPERPAY_TOKEN: token ? "✅ CONFIGURADO" : "❌ AUSENTE",
+      SUPERPAY_SECRET_KEY: secretKey ? "✅ CONFIGURADO" : "❌ AUSENTE",
+      SUPERPAY_API_URL: apiUrl ? "✅ CONFIGURADO" : "❌ AUSENTE",
+      SUPERPAY_WEBHOOK_URL: webhookUrl ? "✅ CONFIGURADO" : "❌ AUSENTE",
     })
 
     if (!token || !secretKey || !apiUrl) {
       return NextResponse.json(
         {
           success: false,
-          error: "Variáveis de ambiente SuperPayBR não configuradas",
+          error: "Credenciais SuperPayBR não configuradas",
           missing: {
-            SUPERPAY_TOKEN: !token,
-            SUPERPAY_SECRET_KEY: !secretKey,
-            SUPERPAY_API_URL: !apiUrl,
+            token: !token,
+            secretKey: !secretKey,
+            apiUrl: !apiUrl,
           },
         },
         { status: 500 },
       )
     }
 
-    // Criar Basic Auth base64
+    // Testar autenticação
+    console.log("🔐 Testando autenticação Basic Auth...")
+
     const credentials = `${token}:${secretKey}`
     const base64Credentials = Buffer.from(credentials).toString("base64")
 
-    console.log("🔑 Testando Basic Auth:", `Basic ${base64Credentials.substring(0, 20)}...`)
-
     // URLs para testar
-    const testUrls = [
-      `${apiUrl}/auth`,
-      `${apiUrl}/token`,
-      `${apiUrl}/oauth/token`,
-      `${apiUrl}/authenticate`,
-      `${apiUrl}/ping`,
-      `${apiUrl}/health`,
-    ]
+    const testUrls = [`${apiUrl}/auth`, `${apiUrl}/token`, `${apiUrl}/health`, `${apiUrl}/status`]
 
     const results = []
 
@@ -63,56 +59,60 @@ export async function GET() {
           }),
         })
 
-        const responseText = await response.text()
-        let responseData = null
-
-        try {
-          responseData = JSON.parse(responseText)
-        } catch {
-          responseData = responseText
-        }
-
         const result = {
           url: testUrl,
           status: response.status,
           statusText: response.statusText,
           ok: response.ok,
           headers: Object.fromEntries(response.headers.entries()),
-          data: responseData,
+        }
+
+        if (response.ok) {
+          try {
+            const data = await response.json()
+            result.data = data
+            console.log(`✅ Sucesso em ${testUrl}:`, data)
+          } catch {
+            result.data = await response.text()
+          }
+        } else {
+          try {
+            result.error = await response.text()
+            console.log(`❌ Erro em ${testUrl}:`, result.error)
+          } catch {
+            result.error = "Erro ao ler resposta"
+          }
         }
 
         results.push(result)
-        console.log(`📥 Resultado ${testUrl}:`, result)
       } catch (error) {
-        const errorResult = {
+        console.log(`❌ Erro de rede em ${testUrl}:`, error)
+        results.push({
           url: testUrl,
-          error: error instanceof Error ? error.message : "Erro desconhecido",
-          type: "network_error",
-        }
-        results.push(errorResult)
-        console.log(`❌ Erro ${testUrl}:`, errorResult)
+          error: error instanceof Error ? error.message : "Erro de rede",
+          status: 0,
+        })
       }
     }
 
-    // Verificar se alguma URL funcionou
-    const successfulResults = results.filter((r) => "ok" in r && r.ok)
-    const hasValidAuth = successfulResults.some((r) => r.data && (r.data.access_token || r.data.token))
+    // Verificar se pelo menos uma URL funcionou
+    const hasSuccess = results.some((r) => r.ok)
 
     return NextResponse.json({
-      success: hasValidAuth,
-      message: hasValidAuth ? "✅ Conexão SuperPayBR estabelecida com sucesso!" : "❌ Falha na conexão SuperPayBR",
+      success: hasSuccess,
+      message: hasSuccess ? "Conexão SuperPayBR funcionando" : "Falha na conexão SuperPayBR",
       environment: {
-        token_configured: !!token,
-        secret_configured: !!secretKey,
-        api_url_configured: !!apiUrl,
-        basic_auth_header: `Basic ${base64Credentials.substring(0, 20)}...`,
+        token_preview: token ? `${token.substring(0, 10)}...` : "❌ AUSENTE",
+        secret_preview: secretKey ? `${secretKey.substring(0, 10)}...` : "❌ AUSENTE",
+        api_url: apiUrl,
+        webhook_url: webhookUrl,
       },
       test_results: results,
-      successful_urls: successfulResults.map((r) => r.url),
-      working_auth: hasValidAuth,
+      working_urls: results.filter((r) => r.ok).map((r) => r.url),
+      failed_urls: results.filter((r) => !r.ok).map((r) => r.url),
     })
   } catch (error) {
-    console.error("❌ Erro no teste de conexão:", error)
+    console.error("❌ Erro no teste de conexão SuperPayBR:", error)
     return NextResponse.json(
       {
         success: false,
@@ -124,6 +124,6 @@ export async function GET() {
   }
 }
 
-export async function POST() {
-  return GET()
+export async function POST(request: NextRequest) {
+  return GET(request)
 }

@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(
         {
           success: false,
-          error: "External ID é obrigatório",
+          error: "external_id é obrigatório",
         },
         { status: 400 },
       )
@@ -27,9 +27,8 @@ export async function GET(request: NextRequest) {
       .eq("external_id", externalId)
       .order("created_at", { ascending: false })
       .limit(1)
-      .single()
 
-    if (error && error.code !== "PGRST116") {
+    if (error) {
       console.error("❌ Erro ao buscar no Supabase:", error)
       return NextResponse.json(
         {
@@ -41,48 +40,43 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    if (!data) {
-      console.log("⏳ Pagamento não encontrado:", externalId)
+    if (!data || data.length === 0) {
+      console.log("⚠️ Pagamento não encontrado:", externalId)
       return NextResponse.json({
         success: true,
-        data: {
-          external_id: externalId,
-          status: "pending",
-          is_paid: false,
-          is_denied: false,
-          is_refunded: false,
-          is_expired: false,
-          is_canceled: false,
-          found: false,
-        },
+        found: false,
+        message: "Pagamento não encontrado",
+        external_id: externalId,
       })
     }
 
-    console.log("✅ Pagamento encontrado:", data)
+    const payment = data[0]
+    console.log("✅ Pagamento encontrado:", payment)
 
     return NextResponse.json({
       success: true,
-      data: {
-        external_id: data.external_id,
-        status: data.status,
-        status_code: data.status_code,
-        amount: data.amount,
-        payment_date: data.payment_date,
-        is_paid: data.is_paid,
-        is_denied: data.is_denied,
-        is_refunded: data.is_refunded,
-        is_expired: data.is_expired,
-        is_canceled: data.is_canceled,
-        found: true,
-        created_at: data.created_at,
+      found: true,
+      payment: {
+        external_id: payment.external_id,
+        invoice_id: payment.invoice_id,
+        status_code: payment.status_code,
+        status_name: payment.status_name,
+        amount: payment.amount,
+        payment_date: payment.payment_date,
+        is_paid: payment.is_paid,
+        is_denied: payment.is_denied,
+        is_expired: payment.is_expired,
+        is_canceled: payment.is_canceled,
+        is_refunded: payment.is_refunded,
+        created_at: payment.created_at,
       },
     })
   } catch (error) {
-    console.error("❌ Erro ao verificar pagamento:", error)
+    console.error("❌ Erro ao verificar pagamento SuperPayBR:", error)
     return NextResponse.json(
       {
         success: false,
-        error: "Erro interno",
+        error: "Erro interno ao verificar pagamento",
         details: error instanceof Error ? error.message : "Erro desconhecido",
       },
       { status: 500 },
@@ -91,25 +85,5 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const body = await request.json()
-  const externalId = body.external_id
-
-  if (!externalId) {
-    return NextResponse.json(
-      {
-        success: false,
-        error: "External ID é obrigatório",
-      },
-      { status: 400 },
-    )
-  }
-
-  // Redirecionar para GET com query parameter
-  const url = new URL(request.url)
-  url.searchParams.set("external_id", externalId)
-
-  return fetch(url.toString(), {
-    method: "GET",
-    headers: request.headers,
-  })
+  return GET(request)
 }

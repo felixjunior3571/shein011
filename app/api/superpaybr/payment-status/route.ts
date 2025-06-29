@@ -1,4 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
+import { createClient } from "@supabase/supabase-js"
+
+const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
 export async function GET(request: NextRequest) {
   try {
@@ -9,153 +12,82 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(
         {
           success: false,
-          error: "External ID é obrigatório",
+          error: "external_id é obrigatório",
         },
         { status: 400 },
       )
     }
 
-    console.log("🔍 Consultando status SuperPayBR:", externalId)
+    console.log("📊 Consultando status do pagamento SuperPayBR:", externalId)
 
-    // Credenciais SuperPayBR
-    const token = process.env.SUPERPAY_TOKEN
-    const secretKey = process.env.SUPERPAY_SECRET_KEY
-    const apiUrl = process.env.SUPERPAY_API_URL
+    // Buscar no Supabase
+    const { data, error } = await supabase
+      .from("superpaybr_payments")
+      .select("*")
+      .eq("external_id", externalId)
+      .order("created_at", { ascending: false })
+      .limit(1)
 
-    if (!token || !secretKey || !apiUrl) {
+    if (error) {
+      console.error("❌ Erro ao consultar Supabase:", error)
       return NextResponse.json(
         {
           success: false,
-          error: "Credenciais SuperPayBR não configuradas",
+          error: "Erro ao consultar status do pagamento",
+          details: error.message,
         },
         { status: 500 },
       )
     }
 
-    // Fazer autenticação primeiro
-    const credentials = `${token}:${secretKey}`
-    const base64Credentials = Buffer.from(credentials).toString("base64")
-
-    let accessToken = null
-
-    try {
-      const authResponse = await fetch(`${apiUrl}/auth`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-          Authorization: `Basic ${base64Credentials}`,
+    if (!data || data.length === 0) {
+      console.log("⚠️ Status não encontrado:", externalId)
+      return NextResponse.json({
+        success: true,
+        found: false,
+        status: {
+          isPaid: false,
+          isDenied: false,
+          isExpired: false,
+          isCanceled: false,
+          isRefunded: false,
+          statusCode: 0,
+          statusName: "Não encontrado",
         },
-        body: JSON.stringify({
-          grant_type: "client_credentials",
-        }),
+        external_id: externalId,
       })
-
-      if (authResponse.ok) {
-        const authData = await authResponse.json()
-        accessToken = authData.access_token || authData.token
-      }
-    } catch (error) {
-      console.log("❌ Erro na autenticação:", error)
     }
 
-    if (!accessToken) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Falha na autenticação SuperPayBR",
-        },
-        { status: 401 },
-      )
-    }
-
-    // Consultar status do pagamento
-    const statusUrls = [
-      `${apiUrl}/payments/${externalId}`,
-      `${apiUrl}/invoices/${externalId}`,
-      `${apiUrl}/payment/status/${externalId}`,
-      `${apiUrl}/status/${externalId}`,
-    ]
-
-    let statusData = null
-
-    for (const statusUrl of statusUrls) {
-      try {
-        console.log(`🔄 Consultando: ${statusUrl}`)
-
-        const statusResponse = await fetch(statusUrl, {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json",
-            Authorization: `Bearer ${accessToken}`,
-          },
-        })
-
-        if (statusResponse.ok) {
-          statusData = await statusResponse.json()
-          console.log("✅ Status obtido:", statusData)
-          break
-        }
-      } catch (error) {
-        console.log(`❌ Erro em ${statusUrl}:`, error)
-      }
-    }
-
-    if (!statusData) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Não foi possível consultar o status do pagamento",
-        },
-        { status: 404 },
-      )
-    }
-
-    // Processar dados de status
-    let isPaid = false
-    let isDenied = false
-    let status = "pending"
-
-    // Buscar status recursivamente
-    const findStatus = (obj: any): void => {
-      if (!obj || typeof obj !== "object") return
-
-      for (const [key, value] of Object.entries(obj)) {
-        if (key === "status" && typeof value === "string") {
-          status = value
-          const statusLower = value.toLowerCase()
-          if (statusLower.includes("paid") || statusLower.includes("pago")) {
-            isPaid = true
-          } else if (statusLower.includes("denied") || statusLower.includes("negado")) {
-            isDenied = true
-          }
-        }
-
-        if (typeof value === "object" && value !== null) {
-          findStatus(value)
-        }
-      }
-    }
-
-    findStatus(statusData)
+    const payment = data[0]
+    console.log("✅ Status encontrado:", {
+      external_id: payment.external_id,
+      is_paid: payment.is_paid,
+      status_name: payment.status_name,
+    })
 
     return NextResponse.json({
       success: true,
-      data: {
-        external_id: externalId,
-        status: status,
-        is_paid: isPaid,
-        is_denied: isDenied,
-        raw_data: statusData,
+      found: true,
+      status: {
+        isPaid: payment.is_paid,
+        isDenied: payment.is_denied,
+        isExpired: payment.is_expired,
+        isCanceled: payment.is_canceled,
+        isRefunded: payment.is_refunded,
+        statusCode: payment.status_code,
+        statusName: payment.status_name,
+        amount: payment.amount,
+        paymentDate: payment.payment_date,
+        lastUpdate: payment.created_at,
       },
+      external_id: externalId,
     })
   } catch (error) {
-    console.error("❌ Erro ao consultar status:", error)
+    console.error("❌ Erro ao consultar status SuperPayBR:", error)
     return NextResponse.json(
       {
         success: false,
-        error: "Erro interno",
+        error: "Erro interno ao consultar status",
         details: error instanceof Error ? error.message : "Erro desconhecido",
       },
       { status: 500 },
@@ -164,25 +96,5 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const body = await request.json()
-  const externalId = body.external_id
-
-  if (!externalId) {
-    return NextResponse.json(
-      {
-        success: false,
-        error: "External ID é obrigatório",
-      },
-      { status: 400 },
-    )
-  }
-
-  // Redirecionar para GET com query parameter
-  const url = new URL(request.url)
-  url.searchParams.set("external_id", externalId)
-
-  return fetch(url.toString(), {
-    method: "GET",
-    headers: request.headers,
-  })
+  return GET(request)
 }

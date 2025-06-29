@@ -14,88 +14,138 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           success: false,
-          error: "External ID é obrigatório",
+          error: "external_id é obrigatório",
         },
         { status: 400 },
       )
     }
 
-    console.log("🧪 Simulando pagamento:", {
-      external_id,
-      amount,
-      status,
-    })
+    console.log("🎯 Simulando pagamento:", { external_id, amount, status })
 
     // Determinar status baseado no parâmetro
-    let isPaid = false
+    let statusCode = 5 // Pago por padrão
+    let statusName = "Pagamento Confirmado!"
+    let isPaid = true
     let isDenied = false
-    let statusCode = 1
+    let isExpired = false
+    let isCanceled = false
+    let isRefunded = false
 
-    switch (status.toLowerCase()) {
+    switch (status) {
       case "paid":
-      case "pago":
-        isPaid = true
         statusCode = 5
+        statusName = "Pagamento Confirmado!"
+        isPaid = true
         break
       case "denied":
-      case "negado":
-        isDenied = true
         statusCode = 3
+        statusName = "Pagamento Negado"
+        isPaid = false
+        isDenied = true
         break
-      default:
-        statusCode = 1 // Pendente
+      case "expired":
+        statusCode = 6
+        statusName = "Pagamento Expirado"
+        isPaid = false
+        isExpired = true
+        break
+      case "canceled":
+        statusCode = 7
+        statusName = "Pagamento Cancelado"
+        isPaid = false
+        isCanceled = true
+        break
+      case "refunded":
+        statusCode = 8
+        statusName = "Pagamento Estornado"
+        isPaid = false
+        isRefunded = true
+        break
     }
 
     // Salvar simulação no Supabase
-    const { data: insertData, error: insertError } = await supabase.from("superpaybr_payments").insert({
-      external_id: external_id,
-      status: status,
-      status_code: statusCode,
-      amount: amount,
-      payment_date: new Date().toISOString(),
-      is_paid: isPaid,
-      is_denied: isDenied,
-      is_refunded: false,
-      is_expired: false,
-      is_canceled: false,
-      webhook_data: {
-        simulated: true,
+    try {
+      const { data, error } = await supabase.from("superpaybr_payments").insert({
         external_id: external_id,
-        status: status,
-        amount: amount,
-      },
-      created_at: new Date().toISOString(),
-    })
-
-    if (insertError) {
-      console.error("❌ Erro ao salvar simulação:", insertError)
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Erro ao salvar simulação",
-          details: insertError.message,
+        invoice_id: `SIM_${Date.now()}`,
+        status_code: statusCode,
+        status_name: statusName,
+        amount: Number.parseFloat(amount.toString()),
+        payment_date: new Date().toISOString(),
+        customer_name: "Cliente Simulado",
+        customer_email: "simulado@teste.com",
+        is_paid: isPaid,
+        is_denied: isDenied,
+        is_expired: isExpired,
+        is_canceled: isCanceled,
+        is_refunded: isRefunded,
+        raw_webhook_data: {
+          simulated: true,
+          external_id,
+          status,
+          amount,
+          timestamp: new Date().toISOString(),
         },
-        { status: 500 },
-      )
+        created_at: new Date().toISOString(),
+      })
+
+      if (error) {
+        console.error("❌ Erro ao salvar simulação:", error)
+      } else {
+        console.log("✅ Simulação salva no Supabase:", data)
+      }
+    } catch (supabaseError) {
+      console.error("❌ Erro de conexão Supabase:", supabaseError)
     }
 
-    console.log("✅ Pagamento simulado com sucesso:", insertData)
+    // Dados para o cliente
+    const clientData = {
+      isPaid,
+      isDenied,
+      isRefunded,
+      isExpired,
+      isCanceled,
+      statusCode,
+      statusName,
+      amount: Number.parseFloat(amount.toString()),
+      paymentDate: new Date().toISOString(),
+      lastUpdate: new Date().toISOString(),
+      simulated: true,
+    }
+
+    // Salvar dados para broadcast
+    try {
+      await supabase.from("payment_updates").insert({
+        external_id: external_id,
+        payment_data: clientData,
+        created_at: new Date().toISOString(),
+      })
+    } catch (broadcastError) {
+      console.log("⚠️ Erro no broadcast (não crítico):", broadcastError)
+    }
+
+    console.log(`✅ Pagamento SuperPayBR simulado: ${statusName}`)
 
     return NextResponse.json({
       success: true,
-      message: "Pagamento simulado com sucesso",
-      data: {
-        external_id: external_id,
-        status: status,
-        status_code: statusCode,
-        amount: amount,
-        is_paid: isPaid,
-        is_denied: isDenied,
-        simulated: true,
+      message: `Pagamento SuperPayBR simulado: ${statusName}`,
+      simulation: {
+        external_id,
+        status: {
+          isPaid,
+          isDenied,
+          isExpired,
+          isCanceled,
+          isRefunded,
+          statusCode,
+          statusName,
+        },
+        amount: Number.parseFloat(amount.toString()),
+        client_data: clientData,
       },
     })
   } catch (error) {
-    console.error("❌ Erro na simulação:", error)
+    console.error("❌ Erro na simulação SuperPayBR:", error)
     return NextResponse.json(
       {
         success: false,
@@ -107,7 +157,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   return NextResponse.json(
     {
       success: false,

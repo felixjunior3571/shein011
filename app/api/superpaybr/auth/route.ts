@@ -1,25 +1,20 @@
-import { NextResponse } from "next/server"
+import { type NextRequest, NextResponse } from "next/server"
 
-export async function GET() {
+export async function POST(request: NextRequest) {
   try {
-    console.log("🔐 === AUTENTICAÇÃO SUPERPAYBR (BASIC AUTH) ===")
+    console.log("🔐 === TESTANDO AUTENTICAÇÃO SUPERPAYBR ===")
 
+    // Credenciais SuperPayBR
     const token = process.env.SUPERPAY_TOKEN
     const secretKey = process.env.SUPERPAY_SECRET_KEY
     const apiUrl = process.env.SUPERPAY_API_URL
 
-    console.log("🔍 Verificando variáveis de ambiente:", {
-      token: token ? `${token.substring(0, 10)}...` : "❌ AUSENTE",
-      secretKey: secretKey ? `${secretKey.substring(0, 10)}...` : "❌ AUSENTE",
-      apiUrl: apiUrl || "❌ AUSENTE",
-    })
-
     if (!token || !secretKey || !apiUrl) {
-      console.error("❌ Variáveis de ambiente SuperPayBR não configuradas")
+      console.error("❌ Credenciais SuperPayBR não configuradas")
       return NextResponse.json(
         {
           success: false,
-          error: "Configuração SuperPayBR incompleta",
+          error: "Credenciais SuperPayBR não configuradas",
           missing: {
             token: !token,
             secretKey: !secretKey,
@@ -30,31 +25,28 @@ export async function GET() {
       )
     }
 
-    // Criar Basic Auth base64
+    console.log("📋 Credenciais encontradas:", {
+      token: token ? `${token.substring(0, 10)}...` : "❌ AUSENTE",
+      secretKey: secretKey ? `${secretKey.substring(0, 10)}...` : "❌ AUSENTE",
+      apiUrl: apiUrl || "❌ AUSENTE",
+    })
+
+    // Fazer autenticação Basic Auth
     const credentials = `${token}:${secretKey}`
     const base64Credentials = Buffer.from(credentials).toString("base64")
 
-    console.log("🔑 Credenciais Basic Auth:", {
-      credentials: `${token.substring(0, 5)}...${secretKey.substring(0, 5)}...`,
-      base64: `${base64Credentials.substring(0, 20)}...`,
-    })
+    console.log("🔑 Fazendo autenticação Basic Auth...")
 
-    // URLs de autenticação
-    const authUrls = [
-      `${apiUrl}/auth`,
-      `${apiUrl}/token`,
-      `${apiUrl}/oauth/token`,
-      `${apiUrl}/authenticate`,
-      `${apiUrl}/login`,
-    ]
+    // URLs de autenticação para tentar
+    const authUrls = [`${apiUrl}/auth`, `${apiUrl}/token`, `${apiUrl}/oauth/token`, `${apiUrl}/authenticate`]
 
     let authSuccess = false
-    let authData = null
+    let accessToken = null
     let lastError = null
 
     for (const authUrl of authUrls) {
       try {
-        console.log(`🔑 Tentando autenticação Basic Auth em: ${authUrl}`)
+        console.log(`🔄 Tentando autenticação em: ${authUrl}`)
 
         const authResponse = await fetch(authUrl, {
           method: "POST",
@@ -75,46 +67,43 @@ export async function GET() {
         })
 
         if (authResponse.ok) {
-          authData = await authResponse.json()
-          console.log("✅ Autenticação SuperPayBR bem-sucedida!")
-          console.log("📋 Dados de auth:", authData)
-          authSuccess = true
-          break
+          const authData = await authResponse.json()
+          accessToken = authData.access_token || authData.token
+          console.log("✅ Access token obtido:", accessToken ? `${accessToken.substring(0, 20)}...` : "❌ NULO")
+
+          if (accessToken) {
+            authSuccess = true
+            break
+          }
         } else {
           const errorText = await authResponse.text()
           console.log(`❌ Falha em ${authUrl}:`, errorText)
           lastError = errorText
         }
       } catch (error) {
-        console.log(`❌ Erro de rede em ${authUrl}:`, error)
+        console.log(`❌ Erro em ${authUrl}:`, error)
         lastError = error
       }
     }
 
-    if (!authSuccess) {
-      console.error("❌ Todas as tentativas de autenticação falharam")
+    if (authSuccess && accessToken) {
+      return NextResponse.json({
+        success: true,
+        message: "Autenticação SuperPayBR realizada com sucesso",
+        access_token: accessToken,
+        token_preview: `${accessToken.substring(0, 20)}...`,
+      })
+    } else {
       return NextResponse.json(
         {
           success: false,
-          error: "Falha na autenticação SuperPayBR com Basic Auth",
+          error: "Falha na autenticação SuperPayBR",
           details: lastError,
           attempted_urls: authUrls,
-          basic_auth_used: `Basic ${base64Credentials.substring(0, 20)}...`,
         },
         { status: 401 },
       )
     }
-
-    return NextResponse.json({
-      success: true,
-      message: "Autenticação SuperPayBR realizada com sucesso",
-      data: {
-        access_token: authData.access_token || authData.token,
-        token_type: authData.token_type || "Bearer",
-        expires_in: authData.expires_in || 3600,
-        scope: authData.scope,
-      },
-    })
   } catch (error) {
     console.error("❌ Erro na autenticação SuperPayBR:", error)
     return NextResponse.json(
@@ -128,14 +117,12 @@ export async function GET() {
   }
 }
 
-export async function POST() {
-  return GET()
-}
-
-export async function PUT() {
-  return GET()
-}
-
-export async function PATCH() {
-  return GET()
+export async function GET(request: NextRequest) {
+  return NextResponse.json(
+    {
+      success: false,
+      error: "Método GET não suportado. Use POST para testar autenticação.",
+    },
+    { status: 405 },
+  )
 }
