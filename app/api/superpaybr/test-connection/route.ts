@@ -1,23 +1,16 @@
 import { type NextRequest, NextResponse } from "next/server"
 
-export async function GET(request: NextRequest) {
+export async function POST(request: NextRequest) {
   try {
-    console.log("🔍 === TESTANDO CONEXÃO SUPERPAYBR ===")
+    console.log("🔗 === TESTANDO CONEXÃO SUPERPAYBR ===")
 
-    // Verificar variáveis de ambiente
+    // Credenciais SuperPayBR
     const token = process.env.SUPERPAY_TOKEN
     const secretKey = process.env.SUPERPAY_SECRET_KEY
     const apiUrl = process.env.SUPERPAY_API_URL
-    const webhookUrl = process.env.SUPERPAY_WEBHOOK_URL
-
-    console.log("📋 Verificando variáveis de ambiente:", {
-      SUPERPAY_TOKEN: token ? "✅ CONFIGURADO" : "❌ AUSENTE",
-      SUPERPAY_SECRET_KEY: secretKey ? "✅ CONFIGURADO" : "❌ AUSENTE",
-      SUPERPAY_API_URL: apiUrl ? "✅ CONFIGURADO" : "❌ AUSENTE",
-      SUPERPAY_WEBHOOK_URL: webhookUrl ? "✅ CONFIGURADO" : "❌ AUSENTE",
-    })
 
     if (!token || !secretKey || !apiUrl) {
+      console.error("❌ Credenciais SuperPayBR não configuradas")
       return NextResponse.json(
         {
           success: false,
@@ -32,22 +25,55 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Testar autenticação
-    console.log("🔐 Testando autenticação Basic Auth...")
+    console.log("📋 Testando conexão com:", {
+      apiUrl,
+      token: token ? `${token.substring(0, 10)}...` : "❌ AUSENTE",
+      secretKey: secretKey ? `${secretKey.substring(0, 10)}...` : "❌ AUSENTE",
+    })
 
-    const credentials = `${token}:${secretKey}`
-    const base64Credentials = Buffer.from(credentials).toString("base64")
+    // Testar conectividade básica
+    const testUrls = [`${apiUrl}/health`, `${apiUrl}/status`, `${apiUrl}/ping`, `${apiUrl}/auth`, `${apiUrl}`]
 
-    // URLs para testar
-    const testUrls = [`${apiUrl}/auth`, `${apiUrl}/token`, `${apiUrl}/health`, `${apiUrl}/status`]
-
-    const results = []
+    let connectionSuccess = false
+    let workingUrl = null
+    let lastError = null
 
     for (const testUrl of testUrls) {
       try {
-        console.log(`🔄 Testando: ${testUrl}`)
+        console.log(`🔄 Testando conectividade: ${testUrl}`)
 
-        const response = await fetch(testUrl, {
+        const testResponse = await fetch(testUrl, {
+          method: "GET",
+          headers: {
+            Accept: "application/json",
+          },
+        })
+
+        console.log(`📥 Resposta de ${testUrl}:`, {
+          status: testResponse.status,
+          statusText: testResponse.statusText,
+          ok: testResponse.ok,
+        })
+
+        if (testResponse.status < 500) {
+          // Qualquer resposta que não seja erro 5xx indica conectividade
+          connectionSuccess = true
+          workingUrl = testUrl
+          break
+        }
+      } catch (error) {
+        console.log(`❌ Erro de conectividade em ${testUrl}:`, error)
+        lastError = error
+      }
+    }
+
+    if (connectionSuccess) {
+      // Testar autenticação
+      const credentials = `${token}:${secretKey}`
+      const base64Credentials = Buffer.from(credentials).toString("base64")
+
+      try {
+        const authResponse = await fetch(`${apiUrl}/auth`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -59,64 +85,67 @@ export async function GET(request: NextRequest) {
           }),
         })
 
-        const result = {
-          url: testUrl,
-          status: response.status,
-          statusText: response.statusText,
-          ok: response.ok,
-          headers: Object.fromEntries(response.headers.entries()),
+        const authSuccess = authResponse.ok
+        let authData = null
+
+        if (authSuccess) {
+          authData = await authResponse.json()
         }
 
-        if (response.ok) {
-          try {
-            const data = await response.json()
-            result.data = data
-            console.log(`✅ Sucesso em ${testUrl}:`, data)
-          } catch {
-            result.data = await response.text()
-          }
-        } else {
-          try {
-            result.error = await response.text()
-            console.log(`❌ Erro em ${testUrl}:`, result.error)
-          } catch {
-            result.error = "Erro ao ler resposta"
-          }
-        }
-
-        results.push(result)
-      } catch (error) {
-        console.log(`❌ Erro de rede em ${testUrl}:`, error)
-        results.push({
-          url: testUrl,
-          error: error instanceof Error ? error.message : "Erro de rede",
-          status: 0,
+        return NextResponse.json({
+          success: true,
+          message: "Conexão SuperPayBR testada com sucesso!",
+          data: {
+            connectivity: {
+              success: true,
+              working_url: workingUrl,
+              tested_at: new Date().toISOString(),
+            },
+            authentication: {
+              success: authSuccess,
+              status: authResponse.status,
+              has_token: !!(authData?.access_token || authData?.token),
+            },
+            api_info: {
+              base_url: apiUrl,
+              version: "v4",
+              environment: process.env.NODE_ENV,
+            },
+          },
+        })
+      } catch (authError) {
+        return NextResponse.json({
+          success: true,
+          message: "Conexão SuperPayBR OK, mas falha na autenticação",
+          data: {
+            connectivity: {
+              success: true,
+              working_url: workingUrl,
+            },
+            authentication: {
+              success: false,
+              error: authError instanceof Error ? authError.message : "Erro na autenticação",
+            },
+          },
         })
       }
+    } else {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Falha na conectividade SuperPayBR",
+          details: lastError,
+          attempted_urls: testUrls,
+        },
+        { status: 503 },
+      )
     }
-
-    // Verificar se pelo menos uma URL funcionou
-    const hasSuccess = results.some((r) => r.ok)
-
-    return NextResponse.json({
-      success: hasSuccess,
-      message: hasSuccess ? "Conexão SuperPayBR funcionando" : "Falha na conexão SuperPayBR",
-      environment: {
-        token_preview: token ? `${token.substring(0, 10)}...` : "❌ AUSENTE",
-        secret_preview: secretKey ? `${secretKey.substring(0, 10)}...` : "❌ AUSENTE",
-        api_url: apiUrl,
-        webhook_url: webhookUrl,
-      },
-      test_results: results,
-      working_urls: results.filter((r) => r.ok).map((r) => r.url),
-      failed_urls: results.filter((r) => !r.ok).map((r) => r.url),
-    })
   } catch (error) {
     console.error("❌ Erro no teste de conexão SuperPayBR:", error)
     return NextResponse.json(
       {
         success: false,
-        error: "Erro interno no teste de conexão",
+        error: "Erro interno no teste de conexão SuperPayBR",
         details: error instanceof Error ? error.message : "Erro desconhecido",
       },
       { status: 500 },
@@ -124,6 +153,6 @@ export async function GET(request: NextRequest) {
   }
 }
 
-export async function POST(request: NextRequest) {
-  return GET(request)
+export async function GET(request: NextRequest) {
+  return POST(request)
 }

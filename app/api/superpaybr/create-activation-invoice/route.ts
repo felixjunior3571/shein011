@@ -25,49 +25,35 @@ export async function POST(request: NextRequest) {
     // Gerar External ID único
     const externalId = `ACTIVATION_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
 
-    // PASSO 1: Autenticação Basic Auth
+    // Autenticação Basic Auth
     const credentials = `${token}:${secretKey}`
     const base64Credentials = Buffer.from(credentials).toString("base64")
 
-    let accessToken = null
+    // Obter access token
+    const authResponse = await fetch(`${apiUrl}/auth`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        Authorization: `Basic ${base64Credentials}`,
+      },
+      body: JSON.stringify({
+        grant_type: "client_credentials",
+      }),
+    })
 
-    const authUrls = [`${apiUrl}/auth`, `${apiUrl}/token`]
-
-    for (const authUrl of authUrls) {
-      try {
-        const authResponse = await fetch(authUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json",
-            Authorization: `Basic ${base64Credentials}`,
-          },
-          body: JSON.stringify({
-            grant_type: "client_credentials",
-          }),
-        })
-
-        if (authResponse.ok) {
-          const authData = await authResponse.json()
-          accessToken = authData.access_token || authData.token
-          if (accessToken) break
-        }
-      } catch (error) {
-        console.log(`❌ Erro auth em ${authUrl}:`, error)
-      }
+    if (!authResponse.ok) {
+      throw new Error("Falha na autenticação SuperPayBR")
     }
+
+    const authData = await authResponse.json()
+    const accessToken = authData.access_token || authData.token
 
     if (!accessToken) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Falha na autenticação SuperPayBR",
-        },
-        { status: 401 },
-      )
+      throw new Error("Access token não obtido")
     }
 
-    // PASSO 2: Criar fatura de ativação
+    // Dados da fatura de ativação
     const invoiceData = {
       client: {
         name: body.customerName || "Cliente SHEIN",
@@ -96,54 +82,35 @@ export async function POST(request: NextRequest) {
       },
     }
 
-    const createUrls = [`${apiUrl}/invoices`, `${apiUrl}/payment`, `${apiUrl}/create`]
+    // Criar fatura
+    const createResponse = await fetch(`${apiUrl}/invoices`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(invoiceData),
+    })
 
-    let responseData = null
-
-    for (const createUrl of createUrls) {
-      try {
-        const createResponse = await fetch(createUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json",
-            Authorization: `Bearer ${accessToken}`,
-          },
-          body: JSON.stringify(invoiceData),
-        })
-
-        if (createResponse.ok) {
-          responseData = await createResponse.json()
-          break
-        }
-      } catch (error) {
-        console.log(`❌ Erro em ${createUrl}:`, error)
-      }
+    if (!createResponse.ok) {
+      throw new Error("Falha ao criar fatura de ativação")
     }
 
-    if (!responseData) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Falha ao criar fatura de ativação SuperPayBR",
-        },
-        { status: 500 },
-      )
-    }
+    const responseData = await createResponse.json()
 
     // Extrair dados PIX
     let pixPayload = ""
     let qrCodeImage = ""
     let invoiceId = ""
 
-    const findPixData = (obj: any, depth = 0): void => {
-      if (!obj || typeof obj !== "object" || depth > 10) return
+    const findPixData = (obj: any): void => {
+      if (!obj || typeof obj !== "object") return
 
       for (const [key, value] of Object.entries(obj)) {
         if ((key === "id" || key === "invoice_id") && typeof value === "string" && !invoiceId) {
           invoiceId = value
         }
-
         if (
           (key === "payload" || key === "pix_code" || key === "qrcode") &&
           typeof value === "string" &&
@@ -151,13 +118,11 @@ export async function POST(request: NextRequest) {
         ) {
           pixPayload = value
         }
-
         if ((key === "qrcode_image" || key === "qr_code" || key === "image") && typeof value === "string") {
           qrCodeImage = value
         }
-
         if (typeof value === "object" && value !== null) {
-          findPixData(value, depth + 1)
+          findPixData(value)
         }
       }
     }
@@ -165,13 +130,7 @@ export async function POST(request: NextRequest) {
     findPixData(responseData)
 
     if (!pixPayload) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "PIX payload não encontrado na resposta",
-        },
-        { status: 500 },
-      )
+      throw new Error("PIX payload não encontrado na resposta")
     }
 
     const qrCodeUrl =
@@ -204,14 +163,14 @@ export async function POST(request: NextRequest) {
       },
     }
 
-    console.log("✅ Fatura de ativação SuperPayBR criada!")
+    console.log("✅ Fatura de ativação SuperPayBR criada:", response.data.external_id)
     return NextResponse.json(response)
   } catch (error) {
     console.error("❌ Erro ao criar fatura de ativação:", error)
     return NextResponse.json(
       {
         success: false,
-        error: "Erro interno ao criar fatura de ativação",
+        error: "Erro ao criar fatura de ativação SuperPayBR",
         details: error instanceof Error ? error.message : "Erro desconhecido",
       },
       { status: 500 },

@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(
         {
           success: false,
-          error: "external_id é obrigatório",
+          error: "External ID é obrigatório",
         },
         { status: 400 },
       )
@@ -21,15 +21,14 @@ export async function GET(request: NextRequest) {
     console.log("🔍 Verificando pagamento SuperPayBR:", externalId)
 
     // Buscar no Supabase
-    const { data, error } = await supabase
+    const { data: payment, error } = await supabase
       .from("superpaybr_payments")
       .select("*")
       .eq("external_id", externalId)
-      .order("created_at", { ascending: false })
-      .limit(1)
+      .single()
 
-    if (error) {
-      console.error("❌ Erro ao buscar no Supabase:", error)
+    if (error && error.code !== "PGRST116") {
+      console.error("❌ Erro ao buscar pagamento:", error)
       return NextResponse.json(
         {
           success: false,
@@ -40,35 +39,37 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    if (!data || data.length === 0) {
-      console.log("⚠️ Pagamento não encontrado:", externalId)
+    if (!payment) {
       return NextResponse.json({
         success: true,
-        found: false,
-        message: "Pagamento não encontrado",
-        external_id: externalId,
+        data: {
+          external_id: externalId,
+          found: false,
+          status: "not_found",
+          message: "Pagamento não encontrado",
+        },
       })
     }
 
-    const payment = data[0]
-    console.log("✅ Pagamento encontrado:", payment)
-
     return NextResponse.json({
       success: true,
-      found: true,
-      payment: {
-        external_id: payment.external_id,
-        invoice_id: payment.invoice_id,
-        status_code: payment.status_code,
-        status_name: payment.status_name,
+      data: {
+        external_id: externalId,
+        found: true,
+        payment_id: payment.payment_id,
+        status: {
+          code: payment.status_code,
+          name: payment.status_name,
+          is_paid: payment.is_paid,
+          is_denied: payment.is_denied,
+          is_refunded: payment.is_refunded,
+          is_expired: payment.is_expired,
+          is_canceled: payment.is_canceled,
+        },
         amount: payment.amount,
         payment_date: payment.payment_date,
-        is_paid: payment.is_paid,
-        is_denied: payment.is_denied,
-        is_expired: payment.is_expired,
-        is_canceled: payment.is_canceled,
-        is_refunded: payment.is_refunded,
         created_at: payment.created_at,
+        updated_at: payment.updated_at,
       },
     })
   } catch (error) {
