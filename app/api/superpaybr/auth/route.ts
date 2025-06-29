@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 
 export async function GET() {
   try {
-    console.log("🔐 === AUTENTICAÇÃO SUPERPAYBR ===")
+    console.log("🔐 === AUTENTICAÇÃO SUPERPAYBR (BASIC AUTH) ===")
 
     const token = process.env.SUPERPAY_TOKEN
     const secretKey = process.env.SUPERPAY_SECRET_KEY
@@ -30,8 +30,17 @@ export async function GET() {
       )
     }
 
-    // URLs corretas da API SuperPayBR (sem /v4/)
-    const authUrls = [`${apiUrl}/auth`, `${apiUrl}/token`]
+    // Criar Basic Auth base64
+    const credentials = `${token}:${secretKey}`
+    const base64Credentials = Buffer.from(credentials).toString("base64")
+
+    console.log("🔑 Credenciais Basic Auth:", {
+      credentials: `${token.substring(0, 5)}...${secretKey.substring(0, 5)}...`,
+      base64: `${base64Credentials.substring(0, 20)}...`,
+    })
+
+    // URLs de autenticação
+    const authUrls = [`${apiUrl}/auth`, `${apiUrl}/token`, `${apiUrl}/oauth/token`]
 
     let authSuccess = false
     let authData = null
@@ -39,18 +48,17 @@ export async function GET() {
 
     for (const authUrl of authUrls) {
       try {
-        console.log(`🔑 Tentando autenticação em: ${authUrl}`)
+        console.log(`🔑 Tentando autenticação Basic Auth em: ${authUrl}`)
 
-        // Formato correto para SuperPayBR
         const authResponse = await fetch(authUrl, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             Accept: "application/json",
+            Authorization: `Basic ${base64Credentials}`,
           },
           body: JSON.stringify({
-            token: token,
-            secret: secretKey,
+            grant_type: "client_credentials",
           }),
         })
 
@@ -82,9 +90,10 @@ export async function GET() {
       return NextResponse.json(
         {
           success: false,
-          error: "Falha na autenticação SuperPayBR",
+          error: "Falha na autenticação SuperPayBR com Basic Auth",
           details: lastError,
           attempted_urls: authUrls,
+          basic_auth_used: `Basic ${base64Credentials.substring(0, 20)}...`,
         },
         { status: 401 },
       )
@@ -94,9 +103,10 @@ export async function GET() {
       success: true,
       message: "Autenticação SuperPayBR realizada com sucesso",
       data: {
-        access_token: authData.access_token || authData.token || token,
+        access_token: authData.access_token || authData.token,
         token_type: authData.token_type || "Bearer",
         expires_in: authData.expires_in || 3600,
+        scope: authData.scope,
       },
     })
   } catch (error) {

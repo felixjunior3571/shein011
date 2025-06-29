@@ -10,69 +10,118 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     console.log("📥 Dados do webhook:", JSON.stringify(body, null, 2))
 
-    // Extrair dados do webhook
-    const paymentId = body.id || body.payment_id || body.external_id || body.invoice_id
-    const status = body.status || body.payment_status || "unknown"
-    const amount = body.amount || body.value || 0
+    // Extrair dados do webhook SuperPayBR
+    let paymentData = null
+    let externalId = ""
+    let status = ""
+    let amount = 0
+    let isPaid = false
 
-    console.log("📋 Dados extraídos:", {
-      paymentId,
+    // Buscar dados em diferentes estruturas possíveis
+    if (body.invoice) {
+      paymentData = body.invoice
+    } else if (body.payment) {
+      paymentData = body.payment
+    } else if (body.data) {
+      paymentData = body.data
+    } else {
+      paymentData = body
+    }
+
+    // Extrair external_id
+    externalId = paymentData.external_id || paymentData.id || paymentData.invoice_id || ""
+
+    // Extrair status
+    status = paymentData.status || paymentData.payment_status || ""
+
+    // Extrair amount
+    amount = paymentData.amount || paymentData.value || 0
+
+    // Determinar se está pago
+    if (typeof status === "number") {
+      isPaid = status === 5 || status === 2 // SuperPayBR: 5 = Pago, 2 = Aprovado
+    } else if (typeof status === "string") {
+      isPaid =
+        status.toLowerCase().includes("paid") ||
+        status.toLowerCase().includes("approved") ||
+        status.toLowerCase().includes("pago")
+    }
+
+    console.log("📊 Dados extraídos do webhook:", {
+      externalId,
       status,
       amount,
+      isPaid,
     })
 
-    if (!paymentId) {
-      console.error("❌ ID do pagamento não encontrado no webhook")
+    if (!externalId) {
+      console.error("❌ External ID não encontrado no webhook")
       return NextResponse.json(
         {
           success: false,
-          error: "ID do pagamento não encontrado",
+          error: "External ID não encontrado",
         },
         { status: 400 },
       )
     }
 
-    // Salvar no Supabase
-    const { data, error } = await supabase
+    // Salvar/atualizar no Supabase
+    const { data: savedData, error: supabaseError } = await supabase
       .from("payments")
       .upsert(
         {
-          payment_id: paymentId,
-          status: status,
-          amount: amount,
+          external_id: externalId,
+          status: isPaid ? "Pagamento Confirmado!" : status.toString(),
+          amount: typeof amount === "number" ? amount : Number.parseFloat(amount?.toString() || "0"),
+          is_paid: isPaid,
+          is_denied: false,
+          is_expired: false,
+          is_canceled: false,
+          is_refunded: false,
+          payment_date: isPaid ? new Date().toISOString() : null,
+          webhook_data: paymentData,
           provider: "superpaybr",
-          webhook_data: body,
           updated_at: new Date().toISOString(),
         },
-        {
-          onConflict: "payment_id",
-        },
+        { onConflict: "external_id" },
       )
       .select()
 
-    if (error) {
-      console.error("❌ Erro ao salvar no Supabase:", error)
+    if (supabaseError) {
+      console.error("❌ Erro ao salvar no Supabase:", supabaseError)
       return NextResponse.json(
         {
           success: false,
-          error: "Erro ao salvar dados do pagamento",
-          details: error.message,
+          error: "Erro ao salvar dados do webhook",
+          details: supabaseError.message,
         },
         { status: 500 },
       )
     }
 
-    console.log("✅ Webhook processado com sucesso!")
-    console.log("💾 Dados salvos:", data)
+    console.log("✅ Webhook processado e salvo no Supabase:", savedData)
+
+    // Log específico para pagamentos aprovados
+    if (isPaid) {
+      console.log("🎉 === PAGAMENTO APROVADO ===")
+      console.log(`💰 External ID: ${externalId}`)
+      console.log(`💵 Valor: R$ ${amount}`)
+      console.log(`📅 Data: ${new Date().toISOString()}`)
+    }
 
     return NextResponse.json({
       success: true,
       message: "Webhook processado com sucesso",
-      payment_id: paymentId,
-      status: status,
+      data: {
+        external_id: externalId,
+        status: isPaid ? "Pagamento Confirmado!" : status.toString(),
+        is_paid: isPaid,
+        amount: amount,
+        processed_at: new Date().toISOString(),
+      },
     })
   } catch (error) {
-    console.error("❌ Erro ao processar webhook:", error)
+    console.error("❌ Erro ao processar webhook SuperPayBR:", error)
     return NextResponse.json(
       {
         success: false,
@@ -87,7 +136,7 @@ export async function POST(request: NextRequest) {
 export async function GET() {
   return NextResponse.json({
     success: true,
-    message: "Webhook SuperPayBR está ativo",
+    message: "Webhook SuperPayBR está funcionando",
     timestamp: new Date().toISOString(),
   })
 }

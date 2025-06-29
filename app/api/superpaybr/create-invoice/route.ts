@@ -2,7 +2,7 @@ import { type NextRequest, NextResponse } from "next/server"
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("💰 === CRIANDO FATURA SUPERPAYBR (MODO REAL) ===")
+    console.log("💰 === CRIANDO FATURA SUPERPAYBR (BASIC AUTH) ===")
 
     const body = await request.json()
     console.log("📥 Dados recebidos:", JSON.stringify(body, null, 2))
@@ -56,9 +56,13 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // PRIMEIRO: Fazer autenticação
-    console.log("🔐 Fazendo autenticação...")
-    let accessToken = token // Fallback para o token direto
+    // PASSO 1: Fazer autenticação Basic Auth
+    console.log("🔐 Fazendo autenticação Basic Auth...")
+
+    const credentials = `${token}:${secretKey}`
+    const base64Credentials = Buffer.from(credentials).toString("base64")
+
+    let accessToken = null
 
     try {
       const authResponse = await fetch(`${apiUrl}/auth`, {
@@ -66,28 +70,56 @@ export async function POST(request: NextRequest) {
         headers: {
           "Content-Type": "application/json",
           Accept: "application/json",
+          Authorization: `Basic ${base64Credentials}`,
         },
         body: JSON.stringify({
-          token: token,
-          secret: secretKey,
+          grant_type: "client_credentials",
         }),
       })
 
       if (authResponse.ok) {
         const authData = await authResponse.json()
-        accessToken = authData.access_token || authData.token || token
-        console.log("✅ Autenticação realizada com sucesso!")
+        accessToken = authData.access_token || authData.token
+        console.log("✅ Access token obtido:", accessToken ? `${accessToken.substring(0, 20)}...` : "❌ NULO")
       } else {
-        console.log("⚠️ Autenticação falhou, usando token direto")
+        const errorText = await authResponse.text()
+        console.log("❌ Falha na autenticação:", errorText)
+        return NextResponse.json(
+          {
+            success: false,
+            error: "Falha na autenticação SuperPayBR",
+            details: errorText,
+          },
+          { status: 401 },
+        )
       }
     } catch (error) {
-      console.log("⚠️ Erro na autenticação, usando token direto:", error)
+      console.log("❌ Erro na autenticação:", error)
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Erro na autenticação SuperPayBR",
+          details: error instanceof Error ? error.message : "Erro desconhecido",
+        },
+        { status: 500 },
+      )
     }
 
-    // Preparar dados da fatura SuperPayBR no formato correto
+    if (!accessToken) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Access token não obtido",
+        },
+        { status: 401 },
+      )
+    }
+
+    // PASSO 2: Criar fatura com Bearer token
+    console.log("💳 Criando fatura com Bearer token...")
+
+    // Preparar dados da fatura SuperPayBR
     const invoiceData = {
-      token: accessToken,
-      secret: secretKey,
       client: {
         name: cpfData.nome || body.customerData?.name || "Cliente SHEIN",
         document: (cpfData.cpf || body.customerData?.cpf || "00000000000").replace(/\D/g, ""),
@@ -106,7 +138,7 @@ export async function POST(request: NextRequest) {
       },
       payment: {
         external_id: externalId,
-        type: "pix", // PIX
+        type: "pix",
         due_date: new Date(Date.now() + 30 * 60 * 1000).toISOString().split("T")[0],
         description: body.description || `Frete ${method} - Cartão SHEIN`,
         amount: amount,
@@ -116,10 +148,10 @@ export async function POST(request: NextRequest) {
       },
     }
 
-    console.log("🚀 Enviando para SuperPayBR API...")
+    console.log("🚀 Enviando para SuperPayBR API com Bearer token...")
     console.log("📤 Dados da fatura:", JSON.stringify(invoiceData, null, 2))
 
-    // URLs corretas para criação (sem /v4/)
+    // URLs para criação
     const createUrls = [`${apiUrl}/invoices`, `${apiUrl}/payment`, `${apiUrl}/create`]
 
     let createSuccess = false
@@ -278,7 +310,7 @@ export async function POST(request: NextRequest) {
       },
     }
 
-    console.log("✅ Fatura SuperPayBR criada com sucesso (MODO REAL)!")
+    console.log("✅ Fatura SuperPayBR criada com sucesso (MODO REAL + BASIC AUTH)!")
     console.log("📋 Resposta formatada:", JSON.stringify(response, null, 2))
 
     return NextResponse.json(response)

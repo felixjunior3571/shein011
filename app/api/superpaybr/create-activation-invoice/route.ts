@@ -2,7 +2,7 @@ import { type NextRequest, NextResponse } from "next/server"
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("🔓 === CRIANDO FATURA DE ATIVAÇÃO SUPERPAYBR ===")
+    console.log("🔓 === CRIANDO FATURA DE ATIVAÇÃO SUPERPAYBR (BASIC AUTH) ===")
 
     const body = await request.json()
     console.log("📥 Dados recebidos:", JSON.stringify(body, null, 2))
@@ -37,33 +37,62 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Fazer autenticação
-    let accessToken = token
+    // Fazer autenticação Basic Auth
+    const credentials = `${token}:${secretKey}`
+    const base64Credentials = Buffer.from(credentials).toString("base64")
+
+    let accessToken = null
+
     try {
       const authResponse = await fetch(`${apiUrl}/auth`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Accept: "application/json",
+          Authorization: `Basic ${base64Credentials}`,
         },
         body: JSON.stringify({
-          token: token,
-          secret: secretKey,
+          grant_type: "client_credentials",
         }),
       })
 
       if (authResponse.ok) {
         const authData = await authResponse.json()
-        accessToken = authData.access_token || authData.token || token
+        accessToken = authData.access_token || authData.token
+      } else {
+        const errorText = await authResponse.text()
+        return NextResponse.json(
+          {
+            success: false,
+            error: "Falha na autenticação para ativação",
+            details: errorText,
+          },
+          { status: 401 },
+        )
       }
     } catch (error) {
-      console.log("⚠️ Usando token direto para ativação")
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Erro na autenticação para ativação",
+          details: error instanceof Error ? error.message : "Erro desconhecido",
+        },
+        { status: 500 },
+      )
+    }
+
+    if (!accessToken) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Access token não obtido para ativação",
+        },
+        { status: 401 },
+      )
     }
 
     // Dados da fatura de ativação
     const invoiceData = {
-      token: accessToken,
-      secret: secretKey,
       client: {
         name: cpfData.nome || "Cliente SHEIN",
         document: (cpfData.cpf || "00000000000").replace(/\D/g, ""),
@@ -83,7 +112,7 @@ export async function POST(request: NextRequest) {
       },
     }
 
-    console.log("🚀 Criando fatura de ativação...")
+    console.log("🚀 Criando fatura de ativação com Bearer token...")
 
     const createUrls = [`${apiUrl}/invoices`, `${apiUrl}/payment`, `${apiUrl}/create`]
 
@@ -162,6 +191,7 @@ export async function POST(request: NextRequest) {
         {
           success: false,
           error: "PIX payload não encontrado para ativação",
+          response_data: responseData,
         },
         { status: 500 },
       )
@@ -197,7 +227,7 @@ export async function POST(request: NextRequest) {
       },
     }
 
-    console.log("✅ Fatura de ativação criada com sucesso!")
+    console.log("✅ Fatura de ativação criada com sucesso (BASIC AUTH)!")
     return NextResponse.json(response)
   } catch (error) {
     console.error("❌ Erro ao criar fatura de ativação:", error)
@@ -205,6 +235,7 @@ export async function POST(request: NextRequest) {
       {
         success: false,
         error: "Erro interno ao criar fatura de ativação",
+        details: error instanceof Error ? error.message : "Erro desconhecido",
       },
       { status: 500 },
     )
