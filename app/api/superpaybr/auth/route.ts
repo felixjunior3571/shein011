@@ -1,73 +1,69 @@
 import { NextResponse } from "next/server"
 
-// ⚠️ CACHE DE AUTENTICAÇÃO GLOBAL
-let authCache: { token: string; expiresAt: number } | null = null
-
-export async function GET() {
+export async function POST() {
   try {
-    // ✅ VERIFICAR CACHE VÁLIDO
-    if (authCache && Date.now() < authCache.expiresAt) {
-      console.log("✅ Token SuperPayBR obtido do cache")
-      return NextResponse.json({
-        success: true,
-        token: authCache.token,
-        source: "cache",
-      })
+    console.log("=== AUTENTICAÇÃO SUPERPAYBR ===")
+
+    const token = process.env.SUPERPAYBR_TOKEN
+    const secretKey = process.env.SUPERPAYBR_SECRET_KEY
+
+    if (!token || !secretKey) {
+      console.log("❌ Credenciais SuperPayBR não encontradas")
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Credenciais SuperPayBR não configuradas",
+        },
+        { status: 500 },
+      )
     }
 
-    console.log("🔐 Autenticando com SuperPayBR...")
+    console.log("🔐 Fazendo autenticação SuperPayBR...")
 
-    if (!process.env.SUPERPAYBR_TOKEN || !process.env.SUPERPAYBR_SECRET_KEY) {
-      throw new Error("Variáveis de ambiente SuperPayBR não configuradas")
-    }
+    // Criar Basic Auth header
+    const credentials = Buffer.from(`${token}:${secretKey}`).toString("base64")
 
-    const authUrl = `${process.env.SUPERPAYBR_API_URL}/auth`
-
-    const response = await fetch(authUrl, {
+    const authResponse = await fetch("https://api.superpaybr.com/auth", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        Authorization: `Basic ${credentials}`,
         Accept: "application/json",
       },
       body: JSON.stringify({
-        token: process.env.SUPERPAYBR_TOKEN,
-        secret: process.env.SUPERPAYBR_SECRET_KEY,
+        scope: "invoice.write customer.write webhook.write",
       }),
     })
 
-    const responseText = await response.text()
-    console.log("📥 Resposta SuperPayBR Auth:", responseText.substring(0, 200))
+    console.log("📥 Resposta autenticação SuperPayBR:", {
+      status: authResponse.status,
+      statusText: authResponse.statusText,
+      ok: authResponse.ok,
+    })
 
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-    }
-
-    let authResult
-    try {
-      authResult = JSON.parse(responseText)
-    } catch (parseError) {
-      throw new Error(`Erro ao parsear JSON: ${responseText}`)
-    }
-
-    if (authResult.success && authResult.token) {
-      // ✅ SALVAR NO CACHE POR 50 MINUTOS
-      authCache = {
-        token: authResult.token,
-        expiresAt: Date.now() + 50 * 60 * 1000, // 50 minutos
-      }
-
-      console.log("✅ Autenticação SuperPayBR realizada com sucesso!")
+    if (authResponse.ok) {
+      const authData = await authResponse.json()
+      console.log("✅ Autenticação SuperPayBR bem-sucedida!")
 
       return NextResponse.json({
         success: true,
-        token: authResult.token,
-        source: "api",
+        data: authData,
+        message: "Autenticação SuperPayBR realizada com sucesso",
       })
     } else {
-      throw new Error(authResult.message || "Erro na autenticação SuperPayBR")
+      const errorText = await authResponse.text()
+      console.log("❌ Erro na autenticação SuperPayBR:", authResponse.status, errorText)
+
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Erro SuperPayBR ${authResponse.status}: ${errorText}`,
+        },
+        { status: authResponse.status },
+      )
     }
   } catch (error) {
-    console.error("❌ Erro na autenticação SuperPayBR:", error)
+    console.log("❌ Erro na autenticação SuperPayBR:", error)
     return NextResponse.json(
       {
         success: false,
@@ -76,4 +72,12 @@ export async function GET() {
       { status: 500 },
     )
   }
+}
+
+export async function GET() {
+  return NextResponse.json({
+    success: true,
+    message: "SuperPayBR Auth endpoint ativo",
+    timestamp: new Date().toISOString(),
+  })
 }
