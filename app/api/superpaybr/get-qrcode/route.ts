@@ -3,80 +3,74 @@ import { type NextRequest, NextResponse } from "next/server"
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
-    const pixCode = searchParams.get("pix_code")
-    const size = searchParams.get("size") || "200"
+    const invoiceId = searchParams.get("id")
 
-    if (!pixCode) {
+    if (!invoiceId) {
       return NextResponse.json(
         {
           success: false,
-          error: "Código PIX é obrigatório",
+          error: "ID da fatura é obrigatório",
         },
         { status: 400 },
       )
     }
 
-    console.log("🔍 Gerando QR Code SuperPayBR para PIX:", pixCode.substring(0, 50) + "...")
+    console.log("🔍 Buscando QR Code SuperPayBR para fatura:", invoiceId)
 
-    // Gerar QR Code usando QuickChart
-    const qrCodeUrl = `https://quickchart.io/qr?text=${encodeURIComponent(pixCode)}&size=${size}`
-
-    console.log("✅ QR Code SuperPayBR gerado:", qrCodeUrl)
-
-    return NextResponse.json({
-      success: true,
-      qr_code_url: qrCodeUrl,
-      pix_code: pixCode,
-      size: Number.parseInt(size),
+    // Fazer autenticação primeiro
+    const authResponse = await fetch(`${request.nextUrl.origin}/api/superpaybr/auth`, {
+      method: "POST",
     })
-  } catch (error) {
-    console.log("❌ Erro ao gerar QR Code SuperPayBR:", error)
-    return NextResponse.json(
-      {
-        success: false,
-        error: "Erro ao gerar QR Code SuperPayBR",
-        details: error instanceof Error ? error.message : "Unknown error",
+    const authResult = await authResponse.json()
+
+    if (!authResult.success) {
+      throw new Error(`Falha na autenticação SuperPayBR: ${authResult.error}`)
+    }
+
+    const accessToken = authResult.data.access_token
+
+    // Buscar QR Code na SuperPayBR
+    const qrCodeResponse = await fetch(`https://api.superpaybr.com/invoices/qrcode/${invoiceId}`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: "application/json",
       },
-      { status: 500 },
-    )
-  }
-}
+    })
 
-export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json()
-    const { pix_code, size = 200 } = body
+    console.log("📥 Resposta QR Code SuperPayBR:", {
+      status: qrCodeResponse.status,
+      statusText: qrCodeResponse.statusText,
+      ok: qrCodeResponse.ok,
+    })
 
-    if (!pix_code) {
+    if (qrCodeResponse.ok) {
+      const qrCodeData = await qrCodeResponse.json()
+      console.log("✅ QR Code SuperPayBR obtido com sucesso!")
+
+      return NextResponse.json({
+        success: true,
+        data: qrCodeData,
+        message: "QR Code SuperPayBR obtido com sucesso",
+      })
+    } else {
+      const errorText = await qrCodeResponse.text()
+      console.log("❌ Erro ao obter QR Code SuperPayBR:", qrCodeResponse.status, errorText)
+
       return NextResponse.json(
         {
           success: false,
-          error: "Código PIX é obrigatório",
+          error: `Erro SuperPayBR ${qrCodeResponse.status}: ${errorText}`,
         },
-        { status: 400 },
+        { status: qrCodeResponse.status },
       )
     }
-
-    console.log("🔍 Gerando QR Code SuperPayBR via POST para PIX:", pix_code.substring(0, 50) + "...")
-
-    // Gerar QR Code usando QuickChart
-    const qrCodeUrl = `https://quickchart.io/qr?text=${encodeURIComponent(pix_code)}&size=${size}`
-
-    console.log("✅ QR Code SuperPayBR gerado via POST:", qrCodeUrl)
-
-    return NextResponse.json({
-      success: true,
-      qr_code_url: qrCodeUrl,
-      pix_code: pix_code,
-      size: Number.parseInt(size),
-    })
   } catch (error) {
-    console.log("❌ Erro ao gerar QR Code SuperPayBR via POST:", error)
+    console.log("❌ Erro ao obter QR Code SuperPayBR:", error)
     return NextResponse.json(
       {
         success: false,
-        error: "Erro ao gerar QR Code SuperPayBR",
-        details: error instanceof Error ? error.message : "Unknown error",
+        error: error instanceof Error ? error.message : "Erro desconhecido ao obter QR Code SuperPayBR",
       },
       { status: 500 },
     )

