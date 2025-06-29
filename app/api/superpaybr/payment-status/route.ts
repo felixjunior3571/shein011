@@ -93,7 +93,8 @@ export async function GET(request: NextRequest) {
       const accessToken = authResult.data.access_token
 
       // Consultar fatura por external_id
-      const statusResponse = await fetch(`https://api.superpaybr.com/invoices?external_id=${externalId}`, {
+      const apiUrl = process.env.SUPERPAYBR_API_URL || "https://api.superpaybr.com"
+      const statusResponse = await fetch(`${apiUrl}/invoices?external_id=${externalId}`, {
         method: "GET",
         headers: {
           "Content-Type": "application/json",
