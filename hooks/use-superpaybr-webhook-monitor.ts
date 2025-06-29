@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useEffect, useCallback } from "react"
 
 interface PaymentStatus {
   isPaid: boolean
@@ -12,15 +12,10 @@ interface PaymentStatus {
   statusName: string
   amount: number
   paymentDate: string | null
-  externalId: string
-  invoiceId: string
-  token: string
 }
 
 interface WebhookMonitorOptions {
   externalId: string | null
-  invoiceId?: string | null
-  token?: string | null
   enableDebug?: boolean
   onPaymentConfirmed?: (data: PaymentStatus) => void
   onPaymentDenied?: (data: PaymentStatus) => void
@@ -31,8 +26,6 @@ interface WebhookMonitorOptions {
 
 export function useSuperPayBRWebhookMonitor({
   externalId,
-  invoiceId,
-  token,
   enableDebug = false,
   onPaymentConfirmed,
   onPaymentDenied,
@@ -40,94 +33,81 @@ export function useSuperPayBRWebhookMonitor({
   onPaymentCanceled,
   onPaymentRefunded,
 }: WebhookMonitorOptions) {
-  const [paymentStatus, setPaymentStatus] = useState<string>("waiting")
   const [status, setStatus] = useState<PaymentStatus | null>(null)
   const [isWaitingForWebhook, setIsWaitingForWebhook] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [lastCheck, setLastCheck] = useState<Date | null>(null)
 
-  const intervalRef = useRef<NodeJS.Timeout | null>(null)
-
-  const checkWebhookConfirmation = useCallback(async () => {
-    if (!externalId || paymentStatus === "confirmed") return
+  const checkPaymentStatus = useCallback(async () => {
+    if (!externalId) return
 
     try {
       setError(null)
       setLastCheck(new Date())
 
       if (enableDebug) {
-        console.log("🔍 Verificando confirmação webhook SuperPayBR:", {
-          externalId,
-          invoiceId,
-          token,
-        })
+        console.log("🔍 Verificando status SuperPayBR:", externalId)
       }
 
-      const response = await fetch(`/api/superpaybr/payment-status?externalId=${externalId}`)
-      const result = await response.json()
+      const response = await fetch(`/api/superpaybr/check-payment?external_id=${externalId}`)
+      const data = await response.json()
 
-      if (result.success && result.found) {
-        const { data } = result
-
-        setStatus(data)
-
-        if (data.isPaid) {
-          setPaymentStatus("confirmed")
-          setIsWaitingForWebhook(false)
-          if (onPaymentConfirmed) {
-            onPaymentConfirmed(data)
-          }
-        } else if (data.isDenied) {
-          setPaymentStatus("denied")
-          setIsWaitingForWebhook(false)
-          if (onPaymentDenied) {
-            onPaymentDenied(data)
-          }
-        } else if (data.isRefunded) {
-          setPaymentStatus("refunded")
-          setIsWaitingForWebhook(false)
-          if (onPaymentRefunded) {
-            onPaymentRefunded(data)
-          }
-        } else if (data.isExpired) {
-          setPaymentStatus("expired")
-          setIsWaitingForWebhook(false)
-          if (onPaymentExpired) {
-            onPaymentExpired(data)
-          }
-        } else if (data.isCanceled) {
-          setPaymentStatus("canceled")
-          setIsWaitingForWebhook(false)
-          if (onPaymentCanceled) {
-            onPaymentCanceled(data)
-          }
+      if (data.success) {
+        const paymentStatus: PaymentStatus = {
+          isPaid: data.isPaid,
+          isDenied: data.isDenied,
+          isRefunded: data.isRefunded,
+          isExpired: data.isExpired,
+          isCanceled: data.isCanceled,
+          statusCode: data.statusCode,
+          statusName: data.statusName,
+          amount: data.amount,
+          paymentDate: data.paymentDate,
         }
 
-        if (enableDebug) {
-          console.log("✅ Status encontrado:", {
-            isPaid: data.isPaid,
-            statusCode: data.statusCode,
-            statusName: data.statusName,
-          })
+        setStatus(paymentStatus)
+
+        // Executar callbacks baseados no status
+        if (paymentStatus.isPaid && onPaymentConfirmed) {
+          if (enableDebug) {
+            console.log("✅ SuperPayBR: Pagamento confirmado!")
+          }
+          onPaymentConfirmed(paymentStatus)
+        } else if (paymentStatus.isDenied && onPaymentDenied) {
+          if (enableDebug) {
+            console.log("❌ SuperPayBR: Pagamento negado!")
+          }
+          onPaymentDenied(paymentStatus)
+        } else if (paymentStatus.isExpired && onPaymentExpired) {
+          if (enableDebug) {
+            console.log("⏰ SuperPayBR: Pagamento vencido!")
+          }
+          onPaymentExpired(paymentStatus)
+        } else if (paymentStatus.isCanceled && onPaymentCanceled) {
+          if (enableDebug) {
+            console.log("🚫 SuperPayBR: Pagamento cancelado!")
+          }
+          onPaymentCanceled(paymentStatus)
+        } else if (paymentStatus.isRefunded && onPaymentRefunded) {
+          if (enableDebug) {
+            console.log("↩️ SuperPayBR: Pagamento estornado!")
+          }
+          onPaymentRefunded(paymentStatus)
         }
+
+        setIsWaitingForWebhook(!paymentStatus.isPaid && !paymentStatus.isDenied && !paymentStatus.isExpired)
       } else {
-        setIsWaitingForWebhook(true)
-        if (enableDebug) {
-          console.log("⏳ Aguardando confirmação via webhook SuperPayBR...")
-        }
+        throw new Error(data.error || "Erro ao verificar status SuperPayBR")
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Erro desconhecido SuperPayBR"
       setError(errorMessage)
       if (enableDebug) {
-        console.error("❌ Erro ao verificar webhook SuperPayBR:", errorMessage)
+        console.error("❌ Erro ao verificar SuperPayBR:", errorMessage)
       }
     }
   }, [
     externalId,
-    paymentStatus,
-    invoiceId,
-    token,
     enableDebug,
     onPaymentConfirmed,
     onPaymentDenied,
@@ -136,53 +116,28 @@ export function useSuperPayBRWebhookMonitor({
     onPaymentRefunded,
   ])
 
-  // ✅ MONITORAMENTO A CADA 3 SEGUNDOS
+  // Verificar status periodicamente apenas se não foi pago
   useEffect(() => {
-    if (!externalId || paymentStatus === "confirmed") return
+    if (!externalId || status?.isPaid) return
 
-    if (enableDebug) {
-      console.log("🚀 Iniciando monitoramento webhook SuperPayBR:", {
-        externalId,
-        invoiceId,
-        token,
-      })
-    }
+    // Verificação inicial
+    checkPaymentStatus()
 
-    setIsWaitingForWebhook(true)
-
-    // Verificação inicial imediata
-    checkWebhookConfirmation()
-
-    // ✅ VERIFICAR A CADA 3 SEGUNDOS
-    intervalRef.current = setInterval(checkWebhookConfirmation, 3000)
-
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current)
-        intervalRef.current = null
+    // Verificar a cada 5 segundos se ainda não foi pago
+    const interval = setInterval(() => {
+      if (!status?.isPaid) {
+        checkPaymentStatus()
       }
-      if (enableDebug) {
-        console.log("🛑 Monitoramento SuperPayBR limpo")
-      }
-    }
-  }, [externalId, paymentStatus, checkWebhookConfirmation, enableDebug])
+    }, 5000)
 
-  // ✅ CLEANUP AO DESMONTAR COMPONENTE
-  useEffect(() => {
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current)
-        intervalRef.current = null
-      }
-    }
-  }, [])
+    return () => clearInterval(interval)
+  }, [externalId, status?.isPaid, checkPaymentStatus])
 
   return {
-    paymentStatus,
     status,
     isWaitingForWebhook,
     error,
     lastCheck,
-    checkWebhookConfirmation,
+    checkPaymentStatus,
   }
 }

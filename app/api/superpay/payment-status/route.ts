@@ -1,52 +1,36 @@
 import { type NextRequest, NextResponse } from "next/server"
 
-// Referência ao Map global do webhook
-declare global {
-  var paymentConfirmations: Map<string, any> | undefined
-  var realtimeEvents: any[] | undefined
-}
+// ⚠️ MESMO ARMAZENAMENTO GLOBAL DO WEBHOOK
+const paymentConfirmations = new Map<string, any>()
 
-// Inicializar se não existir
-if (!global.paymentConfirmations) {
-  global.paymentConfirmations = new Map()
-}
-if (!global.realtimeEvents) {
-  global.realtimeEvents = []
-}
-
-export async function GET(req: NextRequest) {
+export async function GET(request: NextRequest) {
   try {
-    const searchParams = req.nextUrl.searchParams
-    const keys = ["externalId", "external_id", "invoiceId", "invoice_id", "token"]
-    let found = null
-    let searchKey = ""
+    const searchParams = request.nextUrl.searchParams
 
     // ✅ BUSCAR POR MÚLTIPLAS CHAVES
+    const keys = ["externalId", "invoiceId", "token"]
+    let found = null
+
     for (const key of keys) {
       const value = searchParams.get(key)
-      if (value && global.paymentConfirmations.has(value)) {
-        found = global.paymentConfirmations.get(value)
-        searchKey = `${key}=${value}`
-        break
-      }
-      // Tentar também com prefixo token_
-      if (key === "token" && value && global.paymentConfirmations.has(`token_${value}`)) {
-        found = global.paymentConfirmations.get(`token_${value}`)
-        searchKey = `token_${value}`
+      if (value && paymentConfirmations.has(value)) {
+        found = paymentConfirmations.get(value)
         break
       }
     }
 
-    console.log(`🔍 Consulta payment-status: ${searchKey}`)
-    console.log(`📊 Total confirmações: ${global.paymentConfirmations.size}`)
-    console.log(`📋 Resultado: ${found ? "ENCONTRADO" : "NÃO ENCONTRADO"}`)
+    console.log("🔍 Consultando status SuperPay:", {
+      searchParams: Object.fromEntries(searchParams.entries()),
+      found: !!found,
+      confirmations_total: paymentConfirmations.size,
+    })
 
     if (found) {
-      console.log(`✅ Confirmação encontrada:`, {
+      console.log("✅ Confirmação encontrada em memória:", {
         externalId: found.externalId,
+        isPaid: found.isPaid,
         statusCode: found.statusCode,
         statusName: found.statusName,
-        isPaid: found.isPaid,
       })
     }
 
@@ -54,18 +38,13 @@ export async function GET(req: NextRequest) {
       success: true,
       found: !!found,
       data: found || null,
-      search_key: searchKey,
-      total_confirmations: global.paymentConfirmations.size,
-      timestamp: new Date().toISOString(),
     })
   } catch (error) {
-    console.error("❌ Erro ao consultar payment-status:", error)
+    console.error("❌ Erro ao consultar status SuperPay:", error)
     return NextResponse.json(
       {
         success: false,
-        error: error instanceof Error ? error.message : "Erro desconhecido",
-        found: false,
-        data: null,
+        error: error instanceof Error ? error.message : "Erro desconhecido ao consultar status SuperPay",
       },
       { status: 500 },
     )

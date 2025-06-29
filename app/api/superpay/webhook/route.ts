@@ -1,7 +1,13 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 
-// ✅ INTERFACE DO PAYLOAD SUPERPAYBR
+const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+
+// ⚠️ ARMAZENAMENTO GLOBAL EM MEMÓRIA
+const paymentConfirmations = new Map<string, any>()
+const realtimeEvents: any[] = []
+
+// Interface do payload SuperPayBR
 interface SuperPayWebhookPayload {
   event: {
     type: "invoice.update"
@@ -34,10 +40,6 @@ interface SuperPayWebhookPayload {
   }
 }
 
-// ✅ ARMAZENAMENTO GLOBAL EM MEMÓRIA
-const paymentConfirmations = new Map<string, any>()
-const realtimeEvents: any[] = []
-
 function savePaymentConfirmation(externalId: string, invoiceId: string, data: any) {
   const confirmationData = {
     externalId,
@@ -55,24 +57,29 @@ function savePaymentConfirmation(externalId: string, invoiceId: string, data: an
     timestamp: new Date().toISOString(),
   }
 
-  // Salvar com múltiplas chaves
+  // Salvar com múltiplas chaves para facilitar consulta
   paymentConfirmations.set(externalId, confirmationData)
   paymentConfirmations.set(invoiceId, confirmationData)
   paymentConfirmations.set(`token_${data.token}`, confirmationData)
 
   // Adicionar aos eventos em tempo real
   realtimeEvents.push({
-    ...confirmationData,
-    event_type: "payment_update",
-    received_at: new Date().toISOString(),
+    type: "payment_update",
+    data: confirmationData,
+    timestamp: new Date().toISOString(),
   })
 
   // Manter apenas os últimos 1000 eventos
   if (realtimeEvents.length > 1000) {
-    realtimeEvents.splice(0, realtimeEvents.length - 1000)
+    realtimeEvents.shift()
   }
 
-  console.log(`💾 Confirmação salva para: ${externalId} (Status: ${data.statusName})`)
+  console.log("💾 Confirmação salva em memória global:", {
+    externalId,
+    invoiceId,
+    isPaid: confirmationData.isPaid,
+    statusCode: confirmationData.statusCode,
+  })
 }
 
 export async function POST(request: NextRequest) {
@@ -80,98 +87,148 @@ export async function POST(request: NextRequest) {
     console.log("🔔 WEBHOOK SUPERPAY RECEBIDO 🔔")
 
     const payload: SuperPayWebhookPayload = await request.json()
+    console.log("📋 Payload completo:", JSON.stringify(payload, null, 2))
 
-    console.log(`📋 Tipo do evento: ${payload.event.type}`)
-    console.log(`📅 Data do evento: ${payload.event.date}`)
-    console.log(`🆔 Invoice ID: ${payload.invoices.id}`)
-    console.log(`🔑 External ID: ${payload.invoices.external_id}`)
-    console.log(`🏷️ Token: ${payload.invoices.token}`)
-    console.log(`📊 Status Code: ${payload.invoices.status.code}`)
-    console.log(`📝 Status: ${payload.invoices.status.title}`)
-    console.log(`💰 Valor: R$ ${payload.invoices.prices.total.toFixed(2)}`)
-    console.log(`💳 Tipo: ${payload.invoices.type}`)
+    // ✅ Verificar se é um evento de atualização de fatura
+    if (payload.event?.type !== "invoice.update") {
+      console.log("ℹ️ Evento ignorado:", payload.event?.type)
+      return NextResponse.json({ success: true, message: "Evento ignorado" })
+    }
 
-    // ✅ MAPEAR STATUS CODES SUPERPAY
-    const statusCode = payload.invoices.status.code
-    const statusName = payload.invoices.status.title
+    const invoice = payload.invoices
+    if (!invoice) {
+      console.log("❌ Dados da fatura não encontrados no webhook")
+      return NextResponse.json({ success: false, error: "Dados da fatura não encontrados" }, { status: 400 })
+    }
 
-    let statusDescription = ""
+    const externalId = invoice.external_id
+    const invoiceId = invoice.id
+    const token = invoice.token
+    const statusCode = invoice.status?.code
+    const statusTitle = invoice.status?.title
+    const statusDescription = invoice.status?.description
+    const amount = invoice.prices?.total || 0
+
+    // ✅ LOGS PARA DEBUG
+    console.log("🔔 WEBHOOK SUPERPAY RECEBIDO 🔔")
+    console.log(`Status Code: ${statusCode}`)
+    console.log(`External ID: ${externalId}`)
+    console.log(`Valor: R$ ${amount.toFixed(2)}`)
+    console.log(`Status: ${statusTitle}`)
+
+    // ✅ MAPEAR STATUS OFICIAIS SUPERPAY (1 a 16)
+    let isPaid = false
+    let isDenied = false
+    let isExpired = false
+    let isCanceled = false
+    let isRefunded = false
+
     switch (statusCode) {
-      case 5:
-        statusDescription = "✅ PAGAMENTO CONFIRMADO!"
+      case 5: // Pago
+        isPaid = true
+        console.log("🎉 PAGAMENTO CONFIRMADO SUPERPAY!")
         break
-      case 6:
-        statusDescription = "🚫 PAGAMENTO CANCELADO"
+      case 6: // Cancelado
+        isCanceled = true
+        console.log("🚫 PAGAMENTO CANCELADO SUPERPAY!")
         break
-      case 9:
-        statusDescription = "↩️ PAGAMENTO ESTORNADO"
+      case 9: // Estornado
+        isRefunded = true
+        console.log("↩️ PAGAMENTO ESTORNADO SUPERPAY!")
         break
-      case 12:
-        statusDescription = "❌ PAGAMENTO NEGADO"
+      case 12: // Negado
+        isDenied = true
+        console.log("❌ PAGAMENTO NEGADO SUPERPAY!")
         break
-      case 15:
-        statusDescription = "⏰ PAGAMENTO VENCIDO"
+      case 15: // Vencido
+        isExpired = true
+        console.log("⏰ PAGAMENTO VENCIDO SUPERPAY!")
         break
       default:
-        statusDescription = `📋 Status: ${statusName}`
+        console.log(`ℹ️ Status SuperPay não processado: ${statusCode} - ${statusTitle}`)
     }
 
-    console.log(`🎯 ${statusDescription}`)
-
-    // ✅ SALVAR CONFIRMAÇÃO EM MEMÓRIA GLOBAL
-    const confirmationData = {
+    // ✅ PREPARAR DADOS PARA ARMAZENAMENTO
+    const webhookPaymentData = {
+      isPaid,
+      isDenied,
+      isRefunded,
+      isExpired,
+      isCanceled,
       statusCode,
-      statusName,
-      amount: payload.invoices.prices.total,
-      paymentDate: payload.invoices.payment?.payDate || new Date().toISOString(),
-      token: payload.invoices.token,
-      gateway: payload.invoices.payment?.gateway || "SuperPayBR",
-      payId: payload.invoices.payment?.payId || "",
-      type: payload.invoices.type,
+      statusName: statusTitle,
+      statusDescription,
+      amount,
+      paymentDate: isPaid ? invoice.payment?.payDate || new Date().toISOString() : null,
+      token,
+      invoiceId,
+      externalId,
+      paymentDetails: invoice.payment,
+      webhookData: payload,
+      provider: "superpay",
     }
 
-    savePaymentConfirmation(payload.invoices.external_id, payload.invoices.id, confirmationData)
+    // ✅ ARMAZENAR CONFIRMAÇÕES EM MEMÓRIA GLOBAL
+    savePaymentConfirmation(externalId, invoiceId, webhookPaymentData)
 
-    // ✅ BACKUP NO SUPABASE (OPCIONAL)
+    // ✅ SALVAR NO SUPABASE (backup)
     try {
-      if (process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
-        const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
+      const { error } = await supabase.from("payment_webhooks").upsert(
+        {
+          external_id: externalId,
+          payment_data: webhookPaymentData,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+        {
+          onConflict: "external_id",
+        },
+      )
 
-        await supabase.from("superpaybr_webhooks").insert({
-          external_id: payload.invoices.external_id,
-          invoice_id: payload.invoices.id,
-          token: payload.invoices.token,
-          status_code: statusCode,
-          status_name: statusName,
-          amount: payload.invoices.prices.total,
-          payment_date: confirmationData.paymentDate,
-          webhook_payload: payload,
-          processed_at: new Date().toISOString(),
-        })
-
-        console.log("💾 Webhook salvo no Supabase")
+      if (error) {
+        console.error("❌ Erro ao salvar no Supabase:", error)
+      } else {
+        console.log("✅ Backup salvo no Supabase com sucesso!")
       }
     } catch (supabaseError) {
-      console.error("⚠️ Erro ao salvar no Supabase:", supabaseError)
-      // Não falhar o webhook por causa do Supabase
+      console.error("❌ Erro no Supabase:", supabaseError)
     }
 
-    console.log("✅ Webhook SuperPayBR processado com sucesso!")
+    // ✅ LOGS COMPLETOS PARA DEBUG
+    console.log("📊 RESUMO DO WEBHOOK:")
+    console.log(`- External ID: ${externalId}`)
+    console.log(`- Invoice ID: ${invoiceId}`)
+    console.log(`- Token: ${token}`)
+    console.log(`- Status Code: ${statusCode}`)
+    console.log(`- Status Name: ${statusTitle}`)
+    console.log(`- Valor: R$ ${amount}`)
+    console.log(`- Pago: ${isPaid}`)
+    console.log(`- Negado: ${isDenied}`)
+    console.log(`- Vencido: ${isExpired}`)
+    console.log(`- Cancelado: ${isCanceled}`)
+    console.log(`- Estornado: ${isRefunded}`)
 
-    // ✅ RESPOSTA 200 OK PARA A SUPERPAYBR
+    // ✅ RESPOSTA 200 OK PARA A SUPERPAY
     return NextResponse.json({
       success: true,
-      message: "Webhook processado com sucesso",
-      external_id: payload.invoices.external_id,
-      status_code: statusCode,
-      processed_at: new Date().toISOString(),
+      message: "Webhook SuperPay processado com sucesso",
+      data: {
+        external_id: externalId,
+        invoice_id: invoiceId,
+        status: statusTitle,
+        status_code: statusCode,
+        is_paid: isPaid,
+        amount: amount,
+        processed_at: new Date().toISOString(),
+      },
     })
   } catch (error) {
-    console.error("❌ Erro ao processar webhook SuperPayBR:", error)
+    console.error("❌ ERRO AO PROCESSAR WEBHOOK SUPERPAY:", error)
 
-    // ✅ SEMPRE RETORNAR 200 PARA NÃO AFETAR O SUPERPAYBR
+    // ✅ SEMPRE RETORNAR 200 OK PARA NÃO AFETAR O WEBHOOK
     return NextResponse.json({
-      success: false,
+      success: true,
+      message: "Webhook processado com erro interno",
       error: error instanceof Error ? error.message : "Erro desconhecido",
       processed_at: new Date().toISOString(),
     })
@@ -181,9 +238,9 @@ export async function POST(request: NextRequest) {
 export async function GET() {
   return NextResponse.json({
     success: true,
-    message: "SuperPayBR Webhook endpoint ativo",
-    total_confirmations: paymentConfirmations.size,
-    total_events: realtimeEvents.length,
+    message: "SuperPay Webhook endpoint ativo",
     timestamp: new Date().toISOString(),
+    confirmations_count: paymentConfirmations.size,
+    events_count: realtimeEvents.length,
   })
 }
