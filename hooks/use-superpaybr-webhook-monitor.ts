@@ -1,184 +1,231 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
+import { createClient } from "@supabase/supabase-js"
 
-interface PaymentData {
-  externalId: string
-  amount: number
-  status: string
-  paymentDate?: string
+// Inicializar Supabase
+const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
+
+interface PaymentStatus {
   isPaid: boolean
   isDenied: boolean
+  isRefunded: boolean
   isExpired: boolean
   isCanceled: boolean
-  isRefunded: boolean
-  statusName?: string
-  statusTitle?: string
-  paymentGateway?: string
-  paymentType?: string
-  provider?: string
+  statusCode: number
+  statusName: string
+  amount: number
+  paymentDate?: string
 }
 
-interface SuperPayBRWebhookMonitorOptions {
+interface UseSuperpaybrWebhookMonitorProps {
   externalId: string | null
-  onPaymentConfirmed?: (data: PaymentData) => void
-  onPaymentDenied?: (data: PaymentData) => void
-  onPaymentExpired?: (data: PaymentData) => void
-  onPaymentCanceled?: (data: PaymentData) => void
-  onPaymentRefunded?: (data: PaymentData) => void
   enableDebug?: boolean
-  checkInterval?: number
+  onPaymentConfirmed?: (data: PaymentStatus) => void
+  onPaymentDenied?: (data: PaymentStatus) => void
+  onPaymentExpired?: (data: PaymentStatus) => void
+  onPaymentCanceled?: (data: PaymentStatus) => void
+  onPaymentRefunded?: (data: PaymentStatus) => void
 }
 
-export function useSuperPayBRWebhookMonitor({
+export function useSuperpaybrWebhookMonitor({
   externalId,
+  enableDebug = false,
   onPaymentConfirmed,
   onPaymentDenied,
   onPaymentExpired,
   onPaymentCanceled,
   onPaymentRefunded,
-  enableDebug = false,
-  checkInterval = 2000,
-}: SuperPayBRWebhookMonitorOptions) {
-  const [status, setStatus] = useState<
-    "idle" | "monitoring" | "confirmed" | "denied" | "expired" | "canceled" | "refunded"
-  >("idle")
+}: UseSuperpaybrWebhookMonitorProps) {
+  const [status, setStatus] = useState<PaymentStatus | null>(null)
   const [isWaitingForWebhook, setIsWaitingForWebhook] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [lastCheck, setLastCheck] = useState<Date | null>(null)
 
+  const callbacksExecuted = useRef(new Set<string>())
   const intervalRef = useRef<NodeJS.Timeout | null>(null)
-  const processedPayments = useRef<Set<string>>(new Set())
 
-  const log = (message: string, data?: any) => {
-    if (enableDebug) {
-      console.log(`[SuperPayBRWebhookMonitor] ${message}`, data || "")
-    }
-  }
+  const log = useCallback(
+    (message: string, data?: any) => {
+      if (enableDebug) {
+        console.log(`[SuperPayBR Monitor] ${message}`, data || "")
+      }
+    },
+    [enableDebug],
+  )
 
-  // Função para verificar localStorage e Supabase (SEM API CALLS DESNECESSÁRIAS)
-  const checkForPaymentUpdate = async () => {
+  // Função para executar callback apenas uma vez
+  const executeCallback = useCallback(
+    (callbackName: string, callback: ((data: PaymentStatus) => void) | undefined, data: PaymentStatus) => {
+      const key = `${externalId}_${callbackName}`
+      if (!callbacksExecuted.current.has(key) && callback) {
+        callbacksExecuted.current.add(key)
+        callback(data)
+        log(`Callback executado: ${callbackName}`, data)
+      }
+    },
+    [externalId, log],
+  )
+
+  // Função para verificar status no localStorage
+  const checkLocalStorage = useCallback(() => {
     if (!externalId) return null
 
     try {
-      // Verificar se já foi processado
-      if (processedPayments.current.has(externalId)) {
+      const webhookData = localStorage.getItem(`webhook_payment_${externalId}`)
+      if (webhookData) {
+        const parsedData = JSON.parse(webhookData)
+        log("Status encontrado no localStorage", parsedData)
+        return parsedData
+      }
+    } catch (error) {
+      log("Erro ao ler localStorage", error)
+    }
+
+    return null
+  }, [externalId, log])
+
+  // Função para verificar status no Supabase
+  const checkSupabase = useCallback(async () => {
+    if (!externalId) return null
+
+    try {
+      const { data, error: supabaseError } = await supabase
+        .from("payment_webhooks")
+        .select("*")
+        .eq("external_id", externalId)
+        .eq("provider", "superpaybr")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single()
+
+      if (supabaseError) {
+        if (supabaseError.code !== "PGRST116") {
+          // PGRST116 = no rows returned
+          log("Erro no Supabase", supabaseError)
+        }
         return null
       }
 
-      // 1. Verificar localStorage primeiro (mais rápido)
-      const webhookDataKey = `webhook_payment_${externalId}`
-      const webhookData = localStorage.getItem(webhookDataKey)
-
-      if (webhookData) {
-        const paymentData = JSON.parse(webhookData)
-        log("💾 Dados encontrados no localStorage:", paymentData)
-
-        // Marcar como processado
-        processedPayments.current.add(externalId)
-
-        return paymentData
-      }
-
-      // 2. Se não encontrou no localStorage, verificar Supabase (fallback)
-      log("🔍 Verificando Supabase para:", externalId)
-
-      const supabaseResponse = await fetch(`/api/superpaybr/payment-status?external_id=${externalId}`)
-
-      if (supabaseResponse.ok) {
-        const supabaseData = await supabaseResponse.json()
-
-        if (supabaseData.success && supabaseData.data) {
-          log("🗄️ Dados encontrados no Supabase:", supabaseData.data)
-
-          // Salvar no localStorage para próximas verificações
-          localStorage.setItem(webhookDataKey, JSON.stringify(supabaseData.data))
-
-          // Marcar como processado
-          processedPayments.current.add(externalId)
-
-          return supabaseData.data
+      if (data) {
+        const paymentStatus: PaymentStatus = {
+          isPaid: data.is_paid,
+          isDenied: data.is_denied,
+          isRefunded: data.is_refunded,
+          isExpired: data.is_expired,
+          isCanceled: data.is_canceled,
+          statusCode: data.status_code,
+          statusName: data.status_name,
+          amount: data.amount,
+          paymentDate: data.payment_date,
         }
+
+        log("Status encontrado no Supabase", paymentStatus)
+        return paymentStatus
+      }
+    } catch (error) {
+      log("Erro ao consultar Supabase", error)
+    }
+
+    return null
+  }, [externalId, log])
+
+  // Função principal de verificação
+  const checkPaymentStatus = useCallback(async () => {
+    if (!externalId) return
+
+    setLastCheck(new Date())
+    log(`Verificando status do pagamento: ${externalId}`)
+
+    try {
+      // 1. Verificar localStorage primeiro (mais rápido)
+      let paymentStatus = checkLocalStorage()
+
+      // 2. Se não encontrou no localStorage, verificar Supabase
+      if (!paymentStatus) {
+        paymentStatus = await checkSupabase()
       }
 
-      return null
-    } catch (error) {
-      log("❌ Erro ao verificar pagamento:", error)
-      return null
-    }
-  }
+      if (paymentStatus) {
+        setStatus(paymentStatus)
+        setIsWaitingForWebhook(false)
+        setError(null)
 
-  // Monitoramento principal
+        // Executar callbacks baseados no status
+        if (paymentStatus.isPaid) {
+          executeCallback("confirmed", onPaymentConfirmed, paymentStatus)
+        } else if (paymentStatus.isDenied) {
+          executeCallback("denied", onPaymentDenied, paymentStatus)
+        } else if (paymentStatus.isExpired) {
+          executeCallback("expired", onPaymentExpired, paymentStatus)
+        } else if (paymentStatus.isCanceled) {
+          executeCallback("canceled", onPaymentCanceled, paymentStatus)
+        } else if (paymentStatus.isRefunded) {
+          executeCallback("refunded", onPaymentRefunded, paymentStatus)
+        }
+
+        // Parar monitoramento se o pagamento foi finalizado
+        if (
+          paymentStatus.isPaid ||
+          paymentStatus.isDenied ||
+          paymentStatus.isExpired ||
+          paymentStatus.isCanceled ||
+          paymentStatus.isRefunded
+        ) {
+          if (intervalRef.current) {
+            clearInterval(intervalRef.current)
+            intervalRef.current = null
+          }
+          log("Monitoramento finalizado - status definitivo recebido")
+        }
+      } else {
+        setIsWaitingForWebhook(true)
+        log("Aguardando webhook...")
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Erro desconhecido"
+      setError(errorMessage)
+      log("Erro na verificação", error)
+    }
+  }, [
+    externalId,
+    log,
+    checkLocalStorage,
+    checkSupabase,
+    executeCallback,
+    onPaymentConfirmed,
+    onPaymentDenied,
+    onPaymentExpired,
+    onPaymentCanceled,
+    onPaymentRefunded,
+  ])
+
+  // Iniciar monitoramento quando externalId estiver disponível
   useEffect(() => {
-    if (
-      !externalId ||
-      status === "confirmed" ||
-      status === "denied" ||
-      status === "expired" ||
-      status === "canceled" ||
-      status === "refunded"
-    ) {
-      log("🚫 Monitoramento não iniciado:", { externalId, status })
+    if (!externalId) {
+      log("External ID não disponível ainda")
       return
     }
 
-    log("🔄 Iniciando monitoramento SuperPayBR para:", externalId)
-    setStatus("monitoring")
+    log(`Iniciando monitoramento para: ${externalId}`)
     setIsWaitingForWebhook(true)
 
-    const checkPaymentStatus = async () => {
-      const paymentData = await checkForPaymentUpdate()
-      setLastCheck(new Date())
-
-      if (paymentData) {
-        log("📋 Dados de pagamento encontrados:", paymentData)
-
-        if (paymentData.isPaid) {
-          log("🎉 PAGAMENTO CONFIRMADO SUPERPAYBR!")
-          setStatus("confirmed")
-          setIsWaitingForWebhook(false)
-          onPaymentConfirmed?.(paymentData)
-        } else if (paymentData.isDenied) {
-          log("❌ PAGAMENTO NEGADO SUPERPAYBR!")
-          setStatus("denied")
-          setIsWaitingForWebhook(false)
-          onPaymentDenied?.(paymentData)
-        } else if (paymentData.isExpired) {
-          log("⏰ PAGAMENTO VENCIDO SUPERPAYBR!")
-          setStatus("expired")
-          setIsWaitingForWebhook(false)
-          onPaymentExpired?.(paymentData)
-        } else if (paymentData.isCanceled) {
-          log("🚫 PAGAMENTO CANCELADO SUPERPAYBR!")
-          setStatus("canceled")
-          setIsWaitingForWebhook(false)
-          onPaymentCanceled?.(paymentData)
-        } else if (paymentData.isRefunded) {
-          log("💰 PAGAMENTO REEMBOLSADO SUPERPAYBR!")
-          setStatus("refunded")
-          setIsWaitingForWebhook(false)
-          onPaymentRefunded?.(paymentData)
-        }
-      } else {
-        log("⏳ Ainda aguardando webhook SuperPayBR para:", externalId)
-      }
-    }
-
-    // Verificar imediatamente
+    // Verificação inicial
     checkPaymentStatus()
 
-    // Verificar a cada intervalo definido
-    intervalRef.current = setInterval(checkPaymentStatus, checkInterval)
+    // Verificação periódica a cada 5 segundos
+    intervalRef.current = setInterval(checkPaymentStatus, 5000)
 
     return () => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current)
-        log("🛑 Parando monitoramento SuperPayBR para:", externalId)
+        intervalRef.current = null
       }
+      log("Monitoramento finalizado")
     }
-  }, [externalId, status, checkInterval])
+  }, [externalId, checkPaymentStatus, log])
 
-  // Cleanup ao desmontar
+  // Cleanup no unmount
   useEffect(() => {
     return () => {
       if (intervalRef.current) {
