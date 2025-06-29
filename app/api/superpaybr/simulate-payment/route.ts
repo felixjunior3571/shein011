@@ -1,61 +1,62 @@
 import { type NextRequest, NextResponse } from "next/server"
-
-// Importar armazenamento global do webhook
-import { paymentConfirmations } from "./webhook/route"
+import { paymentConfirmations } from "../webhook/route"
 
 export async function POST(request: NextRequest) {
   try {
     console.log("🧪 === SIMULANDO PAGAMENTO SUPERPAYBR ===")
 
-    const { external_id, amount } = await request.json()
+    const { external_id } = await request.json()
 
     if (!external_id) {
       return NextResponse.json(
         {
           success: false,
-          error: "External ID é obrigatório para simulação",
+          error: "external_id é obrigatório",
         },
         { status: 400 },
       )
     }
 
-    console.log("🎯 Simulando pagamento SuperPayBR:", {
-      external_id,
-      amount: Number.parseFloat(amount || "34.90"),
-    })
+    console.log(`🎯 Simulando pagamento para: ${external_id}`)
 
-    // Criar dados de pagamento simulado (formato TryploPay)
+    // Simular dados de pagamento confirmado
     const simulatedPaymentData = {
       isPaid: true,
       isDenied: false,
       isRefunded: false,
       isExpired: false,
       isCanceled: false,
-      statusCode: 5, // SuperPayBR: 5 = Pago
-      statusName: "Pago (Simulado)",
-      amount: Number.parseFloat(amount || "34.90"),
+      statusCode: 5,
+      statusName: "Pago",
+      statusDescription: "Pagamento confirmado via simulação",
+      amount: 34.9,
       paymentDate: new Date().toISOString(),
       timestamp: new Date().toISOString(),
       externalId: external_id,
-      invoiceId: `SIM_${external_id}`,
+      invoiceId: `INV_${external_id}`,
+      token: `TOKEN_${external_id}`,
       clientName: "Cliente Simulado",
-      clientDocument: "00000000000",
-      clientEmail: "simulado@shein.com",
+      clientDocument: "12345678901",
+      clientEmail: "simulado@teste.com",
+      provider: "superpaybr",
       simulated: true,
     }
 
     // Salvar em memória global (igual webhook real)
     paymentConfirmations.set(external_id, simulatedPaymentData)
-    paymentConfirmations.set(`SIM_${external_id}`, simulatedPaymentData)
+    paymentConfirmations.set(`INV_${external_id}`, simulatedPaymentData)
+    paymentConfirmations.set(`TOKEN_${external_id}`, simulatedPaymentData)
 
-    console.log("✅ Pagamento SuperPayBR simulado com sucesso!")
-    console.log(`💾 Salvo em memória para: ${external_id}`)
+    console.log(`✅ Pagamento simulado salvo em memória para: ${external_id}`)
+    console.log(`📊 Total de confirmações: ${paymentConfirmations.size}`)
 
     return NextResponse.json({
       success: true,
       message: "Pagamento SuperPayBR simulado com sucesso",
-      data: simulatedPaymentData,
       external_id: external_id,
+      status: "Pago",
+      amount: 34.9,
+      simulated: true,
       timestamp: new Date().toISOString(),
     })
   } catch (error) {
@@ -63,7 +64,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         success: false,
-        error: error instanceof Error ? error.message : "Erro desconhecido na simulação SuperPayBR",
+        error: error instanceof Error ? error.message : "Erro desconhecido",
       },
       { status: 500 },
     )
@@ -75,6 +76,5 @@ export async function GET() {
     success: true,
     message: "SuperPayBR Simulate Payment endpoint ativo",
     timestamp: new Date().toISOString(),
-    simulations_count: Array.from(paymentConfirmations.values()).filter((p) => p.simulated).length,
   })
 }

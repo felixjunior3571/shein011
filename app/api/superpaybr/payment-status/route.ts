@@ -1,7 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
-
-// Importar armazenamento global do webhook (igual TryploPay)
-import { paymentConfirmations } from "./webhook/route"
+import { paymentConfirmations } from "../webhook/route"
 
 export async function GET(request: NextRequest) {
   try {
@@ -12,19 +10,20 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(
         {
           success: false,
-          error: "External ID é obrigatório",
+          error: "external_id é obrigatório",
         },
         { status: 400 },
       )
     }
 
-    console.log("🔍 Consultando status SuperPayBR (memória):", externalId)
+    console.log(`🔍 Consultando status SuperPayBR para: ${externalId}`)
 
-    // CONSULTAR APENAS MEMÓRIA GLOBAL (igual TryploPay - sem rate limit)
+    // Consultar memória global (sem rate limit)
     const paymentData = paymentConfirmations.get(externalId)
 
     if (paymentData) {
-      console.log("✅ Status SuperPayBR encontrado em memória!")
+      console.log(`✅ Status encontrado em memória: ${paymentData.statusName}`)
+
       return NextResponse.json({
         success: true,
         isPaid: paymentData.isPaid,
@@ -36,33 +35,44 @@ export async function GET(request: NextRequest) {
         statusName: paymentData.statusName,
         amount: paymentData.amount,
         paymentDate: paymentData.paymentDate,
-        message: "Status SuperPayBR obtido da memória",
-        last_updated: paymentData.timestamp,
-      })
-    } else {
-      console.log("ℹ️ Pagamento SuperPayBR não encontrado na memória:", externalId)
-      return NextResponse.json({
-        success: true,
-        isPaid: false,
-        isDenied: false,
-        isRefunded: false,
-        isExpired: false,
-        isCanceled: false,
-        statusCode: 1,
-        statusName: "Aguardando Pagamento",
-        amount: 0,
-        paymentDate: null,
-        message: "Pagamento não encontrado - aguardando webhook",
+        timestamp: paymentData.timestamp,
+        source: "memory",
       })
     }
+
+    console.log(`ℹ️ Status não encontrado em memória para: ${externalId}`)
+
+    // Retornar status padrão se não encontrado
+    return NextResponse.json({
+      success: true,
+      isPaid: false,
+      isDenied: false,
+      isRefunded: false,
+      isExpired: false,
+      isCanceled: false,
+      statusCode: 1,
+      statusName: "Aguardando Pagamento",
+      amount: 0,
+      paymentDate: null,
+      timestamp: new Date().toISOString(),
+      source: "default",
+    })
   } catch (error) {
     console.error("❌ Erro ao consultar status SuperPayBR:", error)
     return NextResponse.json(
       {
         success: false,
-        error: error instanceof Error ? error.message : "Erro desconhecido ao consultar status SuperPayBR",
+        error: error instanceof Error ? error.message : "Erro desconhecido",
       },
       { status: 500 },
     )
   }
+}
+
+export async function POST() {
+  return NextResponse.json({
+    success: true,
+    message: "Use GET para consultar status",
+    timestamp: new Date().toISOString(),
+  })
 }

@@ -1,29 +1,37 @@
 -- Criar tabela para armazenar webhooks SuperPayBR
-CREATE TABLE IF NOT EXISTS superpaybr_webhooks (
+CREATE TABLE IF NOT EXISTS payment_webhooks (
     id SERIAL PRIMARY KEY,
-    external_id VARCHAR(255) NOT NULL,
+    external_id VARCHAR(255) UNIQUE NOT NULL,
     invoice_id VARCHAR(255),
-    status_code INTEGER NOT NULL,
-    status_name VARCHAR(100) NOT NULL,
-    amount DECIMAL(10,2) NOT NULL,
-    payment_data JSONB NOT NULL,
-    webhook_payload JSONB NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    token VARCHAR(255),
+    status_code INTEGER,
+    status_name VARCHAR(100),
+    status_description TEXT,
+    amount DECIMAL(10,2),
+    payment_date TIMESTAMP,
+    is_paid BOOLEAN DEFAULT FALSE,
+    is_denied BOOLEAN DEFAULT FALSE,
+    is_refunded BOOLEAN DEFAULT FALSE,
+    is_expired BOOLEAN DEFAULT FALSE,
+    is_canceled BOOLEAN DEFAULT FALSE,
+    webhook_data JSONB,
+    received_at TIMESTAMP DEFAULT NOW(),
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
 );
 
 -- Criar índices para melhor performance
-CREATE INDEX IF NOT EXISTS idx_superpaybr_webhooks_external_id ON superpaybr_webhooks(external_id);
-CREATE INDEX IF NOT EXISTS idx_superpaybr_webhooks_invoice_id ON superpaybr_webhooks(invoice_id);
-CREATE INDEX IF NOT EXISTS idx_superpaybr_webhooks_status_code ON superpaybr_webhooks(status_code);
-CREATE INDEX IF NOT EXISTS idx_superpaybr_webhooks_created_at ON superpaybr_webhooks(created_at);
+CREATE INDEX IF NOT EXISTS idx_payment_webhooks_external_id ON payment_webhooks(external_id);
+CREATE INDEX IF NOT EXISTS idx_payment_webhooks_invoice_id ON payment_webhooks(invoice_id);
+CREATE INDEX IF NOT EXISTS idx_payment_webhooks_token ON payment_webhooks(token);
+CREATE INDEX IF NOT EXISTS idx_payment_webhooks_status_code ON payment_webhooks(status_code);
+CREATE INDEX IF NOT EXISTS idx_payment_webhooks_is_paid ON payment_webhooks(is_paid);
+CREATE INDEX IF NOT EXISTS idx_payment_webhooks_received_at ON payment_webhooks(received_at);
 
 -- Comentários para documentação
-COMMENT ON TABLE superpaybr_webhooks IS 'Armazena webhooks recebidos da SuperPayBR';
-COMMENT ON COLUMN superpaybr_webhooks.external_id IS 'ID externo único da fatura (SHEIN_timestamp_random)';
-COMMENT ON COLUMN superpaybr_webhooks.invoice_id IS 'ID da fatura na SuperPayBR';
-COMMENT ON COLUMN superpaybr_webhooks.status_code IS 'Código de status da SuperPayBR (1=Aguardando, 5=Pago, etc)';
-COMMENT ON COLUMN superpaybr_webhooks.status_name IS 'Nome do status em português';
-COMMENT ON COLUMN superpaybr_webhooks.amount IS 'Valor do pagamento em reais';
-COMMENT ON COLUMN superpaybr_webhooks.payment_data IS 'Dados processados do pagamento (formato padronizado)';
-COMMENT ON COLUMN superpaybr_webhooks.webhook_payload IS 'Payload completo recebido da SuperPayBR';
+COMMENT ON TABLE payment_webhooks IS 'Tabela para armazenar webhooks de pagamento SuperPayBR';
+COMMENT ON COLUMN payment_webhooks.external_id IS 'ID externo único da transação';
+COMMENT ON COLUMN payment_webhooks.invoice_id IS 'ID da fatura SuperPayBR';
+COMMENT ON COLUMN payment_webhooks.token IS 'Token da transação SuperPayBR';
+COMMENT ON COLUMN payment_webhooks.status_code IS 'Código de status SuperPayBR (1-16)';
+COMMENT ON COLUMN payment_webhooks.webhook_data IS 'Dados completos do webhook em JSON';

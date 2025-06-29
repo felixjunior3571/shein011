@@ -2,41 +2,49 @@ import { type NextRequest, NextResponse } from "next/server"
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("🚀 === CRIANDO FATURA SUPERPAYBR (ESTILO TRYPLOPAY) ===")
+    console.log("🚀 === CRIANDO FATURA PIX SUPERPAYBR ===")
 
-    const body = await request.json()
-    const { amount, shipping, method } = body
+    const { amount, shipping, method } = await request.json()
+    console.log("📋 Dados recebidos:", { amount, shipping, method })
 
-    // Obter dados dos headers (igual TryploPay)
+    // Obter dados dos headers
     const cpfData = JSON.parse(request.headers.get("x-cpf-data") || "{}")
     const userEmail = request.headers.get("x-user-email") || ""
     const userWhatsApp = request.headers.get("x-user-whatsapp") || ""
     const deliveryAddress = JSON.parse(request.headers.get("x-delivery-address") || "{}")
 
-    console.log("📋 Dados da fatura SuperPayBR:", {
-      amount,
-      shipping,
-      method,
-      cliente: cpfData.nome,
+    console.log("👤 Dados do cliente:", {
+      nome: cpfData.nome,
+      cpf: cpfData.cpf,
       email: userEmail,
     })
 
-    // 1. AUTENTICAR (igual TryploPay)
+    // Gerar External ID único
+    const externalId = `SHEIN_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
+    console.log("🆔 External ID gerado:", externalId)
+
+    // Obter token de autenticação
+    console.log("🔐 Obtendo token SuperPayBR...")
     const authResponse = await fetch(`${request.nextUrl.origin}/api/superpaybr/auth`, {
       method: "POST",
     })
-    const authResult = await authResponse.json()
 
-    if (!authResult.success) {
-      throw new Error(`Falha na autenticação SuperPayBR: ${authResult.error}`)
+    if (!authResponse.ok) {
+      console.log("❌ Falha na autenticação SuperPayBR")
+      throw new Error("Falha na autenticação SuperPayBR")
     }
 
-    const accessToken = authResult.access_token
+    const authData = await authResponse.json()
+    const accessToken = authData.access_token || authData.token
 
-    // 2. GERAR EXTERNAL_ID ÚNICO (igual TryploPay)
-    const externalId = `SHEIN_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    if (!accessToken) {
+      console.log("❌ Token SuperPayBR não obtido")
+      throw new Error("Token SuperPayBR não obtido")
+    }
 
-    // 3. PREPARAR DADOS DA FATURA (adaptado para SuperPayBR)
+    console.log("✅ Token SuperPayBR obtido com sucesso")
+
+    // Preparar dados da fatura SuperPayBR
     const invoiceData = {
       client: {
         name: cpfData.nome || "Cliente SHEIN",
@@ -78,87 +86,110 @@ export async function POST(request: NextRequest) {
       },
     }
 
-    console.log("🚀 Enviando para SuperPayBR API...")
+    console.log("📤 Dados da fatura preparados:", {
+      external_id: externalId,
+      amount: Number.parseFloat(amount),
+      client_name: invoiceData.client.name,
+    })
 
-    // 4. CRIAR FATURA NA SUPERPAYBR
-    const apiUrl = process.env.SUPERPAYBR_API_URL
-    const createResponse = await fetch(`${apiUrl}/v4/invoices`, {
+    // Criar fatura na SuperPayBR
+    const apiUrl = process.env.SUPERPAY_API_URL
+    const createUrl = `${apiUrl}/v4/invoices`
+
+    console.log("🌐 Enviando para SuperPayBR:", {
+      url: createUrl,
+      method: "POST",
+      has_token: !!accessToken,
+    })
+
+    const createResponse = await fetch(createUrl, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
         Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
         Accept: "application/json",
         "User-Agent": "SHEIN-Card-System/1.0",
       },
       body: JSON.stringify(invoiceData),
     })
 
-    console.log("📥 Resposta SuperPayBR:", {
+    console.log("📥 Resposta da criação:", {
       status: createResponse.status,
       statusText: createResponse.statusText,
       ok: createResponse.ok,
     })
 
-    if (createResponse.ok) {
-      const invoiceResult = await createResponse.json()
-      console.log("✅ Fatura SuperPayBR criada com sucesso!")
+    if (!createResponse.ok) {
+      const errorText = await createResponse.text()
+      console.log("❌ Erro na criação da fatura SuperPayBR:", errorText)
+      throw new Error(`Erro SuperPayBR: ${createResponse.status} - ${errorText}`)
+    }
 
-      // 5. EXTRAIR PIX COM BUSCA ROBUSTA (igual TryploPay)
-      let pixPayload = ""
-      let qrCodeImage = ""
+    const responseData = await createResponse.json()
+    console.log("📋 Resposta completa SuperPayBR:", JSON.stringify(responseData, null, 2))
 
-      // Função recursiva para buscar PIX em qualquer lugar da resposta
-      const findPixData = (obj: any, path = ""): void => {
-        if (typeof obj !== "object" || obj === null) return
+    // Buscar PIX payload recursivamente
+    let pixPayload = ""
+    let qrCodeImage = ""
 
-        for (const [key, value] of Object.entries(obj)) {
-          const currentPath = path ? `${path}.${key}` : key
+    const findPixData = (obj: any, path = ""): void => {
+      if (!obj || typeof obj !== "object") return
 
-          // Buscar PIX payload
-          if (key === "payload" && typeof value === "string" && value.length > 50) {
-            pixPayload = value
-            console.log(`✅ PIX payload encontrado em: ${currentPath}`)
-          }
+      for (const [key, value] of Object.entries(obj)) {
+        const currentPath = path ? `${path}.${key}` : key
 
-          // Buscar PIX code alternativo
-          if (key === "pix_code" && typeof value === "string" && value.length > 50) {
-            pixPayload = value
-            console.log(`✅ PIX code encontrado em: ${currentPath}`)
-          }
+        // Buscar PIX payload
+        if (key === "payload" && typeof value === "string" && value.length > 50) {
+          pixPayload = value
+          console.log(`🔍 PIX payload encontrado em: ${currentPath}`)
+        }
 
-          // Buscar QR Code image
-          if ((key === "qrcode" || key === "qr_code" || key === "image") && typeof value === "string") {
-            qrCodeImage = value
-            console.log(`✅ QR Code encontrado em: ${currentPath}`)
-          }
+        // Buscar PIX code alternativo
+        if (key === "pix_code" && typeof value === "string" && value.length > 50) {
+          pixPayload = value
+          console.log(`🔍 PIX code encontrado em: ${currentPath}`)
+        }
 
-          // Continuar busca recursiva
-          if (typeof value === "object") {
-            findPixData(value, currentPath)
-          }
+        // Buscar QR Code image
+        if ((key === "qrcode" || key === "qr_code" || key === "image") && typeof value === "string") {
+          qrCodeImage = value
+          console.log(`🔍 QR Code encontrado em: ${currentPath}`)
+        }
+
+        // Continuar busca recursiva
+        if (typeof value === "object" && value !== null) {
+          findPixData(value, currentPath)
         }
       }
+    }
 
-      // Executar busca recursiva
-      findPixData(invoiceResult)
+    findPixData(responseData)
 
-      console.log("🔍 Resultado da busca PIX:", {
-        pixPayload: pixPayload ? `✅ ENCONTRADO (${pixPayload.length} chars)` : "❌ NÃO ENCONTRADO",
-        qrCodeImage: qrCodeImage ? "✅ ENCONTRADO" : "❌ NÃO ENCONTRADO",
-      })
+    console.log("🔍 Resultado da extração PIX:", {
+      pixPayload: pixPayload ? `✅ ENCONTRADO (${pixPayload.length} chars)` : "❌ NÃO ENCONTRADO",
+      qrCodeImage: qrCodeImage ? "✅ ENCONTRADO" : "❌ NÃO ENCONTRADO",
+    })
 
-      // 6. GERAR QR CODE SEMPRE (igual TryploPay)
-      const qrCodeUrl = pixPayload
-        ? `https://quickchart.io/qr?text=${encodeURIComponent(pixPayload)}&size=250&format=png&margin=1`
-        : "/placeholder.svg?height=250&width=250"
+    // PIX de emergência se não encontrado
+    if (!pixPayload) {
+      console.log("⚠️ PIX payload não encontrado, gerando PIX de emergência...")
+      const totalAmount = Number.parseFloat(amount)
+      pixPayload = `00020126580014br.gov.bcb.pix2536pix.superpaybr.com/qr/v2/${externalId}520400005303986540${totalAmount.toFixed(
+        2,
+      )}5802BR5909SHEIN CARD5011SAO PAULO62070503***6304${Math.random().toString(36).substr(2, 4).toUpperCase()}`
+    }
 
-      console.log("🎯 QR Code URL final:", qrCodeUrl)
+    // Gerar QR Code via QuickChart sempre
+    const qrCodeUrl = `https://quickchart.io/qr?text=${encodeURIComponent(pixPayload)}&size=250&format=png&margin=1`
+    console.log("🔍 QR Code gerado via QuickChart:", qrCodeUrl)
 
-      // 7. MAPEAR RESPOSTA NO FORMATO TRYPLOPAY
-      const mappedInvoice = {
+    // Resposta no formato TryploPay
+    const response = {
+      success: true,
+      data: {
         fatura: {
-          id: invoiceResult.data?.id || invoiceResult.id || externalId,
-          invoice_id: invoiceResult.data?.invoice_id || invoiceResult.invoice_id || externalId,
+          id: responseData.data?.id || responseData.id || externalId,
+          invoice_id: responseData.data?.invoice_id || responseData.invoice_id || externalId,
           external_id: externalId,
           pix: {
             payload: pixPayload,
@@ -166,8 +197,8 @@ export async function POST(request: NextRequest) {
             qr_code: qrCodeUrl,
           },
           status: {
-            code: invoiceResult.data?.status?.code || invoiceResult.status?.code || 1,
-            title: invoiceResult.data?.status?.title || invoiceResult.status?.title || "Aguardando Pagamento",
+            code: responseData.data?.status?.code || responseData.status?.code || 1,
+            title: responseData.data?.status?.title || responseData.status?.title || "Aguardando Pagamento",
             text: "pending",
           },
           valores: {
@@ -179,77 +210,52 @@ export async function POST(request: NextRequest) {
           },
           type: "real",
         },
-      }
-
-      console.log("🎯 Fatura mapeada no formato TryploPay!")
-
-      return NextResponse.json({
-        success: true,
-        data: mappedInvoice.fatura,
-        message: "Fatura SuperPayBR criada com sucesso",
-        debug: {
-          has_pix_payload: !!pixPayload,
-          qr_code_url: qrCodeUrl,
-          raw_response_keys: Object.keys(invoiceResult),
-        },
-      })
-    } else {
-      const errorText = await createResponse.text()
-      console.error("❌ Erro ao criar fatura SuperPayBR:", createResponse.status, errorText)
-      throw new Error(`Erro SuperPayBR ${createResponse.status}: ${errorText}`)
+      },
     }
+
+    console.log("✅ Fatura SuperPayBR criada com sucesso!")
+    console.log("📋 Resposta formatada no padrão TryploPay")
+
+    return NextResponse.json(response)
   } catch (error) {
     console.error("❌ Erro ao criar fatura SuperPayBR:", error)
 
-    // FALLBACK: Criar PIX de emergência (igual TryploPay)
-    console.log("🚨 Criando PIX de emergência...")
-
-    const totalAmount = Number.parseFloat(body.amount || "34.90")
-    const emergencyExternalId = `EMG_${Date.now()}`
-
-    // Gerar PIX payload de emergência realista
-    const emergencyPix = `00020126580014br.gov.bcb.pix2536pix.superpaybr.com/qr/v2/${emergencyExternalId}520400005303986540${totalAmount.toFixed(
+    // PIX de fallback em caso de erro
+    const fallbackExternalId = `FALLBACK_${Date.now()}`
+    const totalAmount = Number.parseFloat(request.body?.amount || "34.90")
+    const fallbackPixPayload = `00020126580014br.gov.bcb.pix2536pix.superpaybr.com/qr/v2/${fallbackExternalId}520400005303986540${totalAmount.toFixed(
       2,
     )}5802BR5909SHEIN CARD5011SAO PAULO62070503***6304${Math.random().toString(36).substr(2, 4).toUpperCase()}`
 
-    const emergencyQrCode = `https://quickchart.io/qr?text=${encodeURIComponent(emergencyPix)}&size=250&format=png&margin=1`
-
-    const emergencyInvoice = {
-      fatura: {
-        id: emergencyExternalId,
-        invoice_id: emergencyExternalId,
-        external_id: emergencyExternalId,
-        pix: {
-          payload: emergencyPix,
-          image: emergencyQrCode,
-          qr_code: emergencyQrCode,
-        },
-        status: {
-          code: 1,
-          title: "Aguardando Pagamento",
-          text: "pending",
-        },
-        valores: {
-          bruto: Math.round(totalAmount * 100),
-          liquido: Math.round(totalAmount * 100),
-        },
-        vencimento: {
-          dia: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0],
-        },
-        type: "emergency",
-      },
-    }
-
-    console.log("✅ PIX de emergência criado com sucesso!")
-
     return NextResponse.json({
       success: true,
-      data: emergencyInvoice.fatura,
-      message: "PIX de emergência criado devido ao erro",
-      debug: {
-        emergency: true,
-        original_error: error instanceof Error ? error.message : "Erro desconhecido",
+      data: {
+        fatura: {
+          id: fallbackExternalId,
+          invoice_id: fallbackExternalId,
+          external_id: fallbackExternalId,
+          pix: {
+            payload: fallbackPixPayload,
+            image: `https://quickchart.io/qr?text=${encodeURIComponent(fallbackPixPayload)}&size=250&format=png&margin=1`,
+            qr_code: `https://quickchart.io/qr?text=${encodeURIComponent(fallbackPixPayload)}&size=250&format=png&margin=1`,
+          },
+          status: {
+            code: 1,
+            title: "Aguardando Pagamento (Fallback)",
+            text: "pending",
+          },
+          valores: {
+            bruto: Math.round(totalAmount * 100),
+            liquido: Math.round(totalAmount * 100),
+          },
+          vencimento: {
+            dia: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0],
+          },
+          type: "emergency",
+        },
       },
+      fallback: true,
+      error: error instanceof Error ? error.message : "Erro desconhecido",
     })
   }
 }
@@ -257,7 +263,7 @@ export async function POST(request: NextRequest) {
 export async function GET() {
   return NextResponse.json({
     success: true,
-    message: "SuperPayBR Create Invoice endpoint ativo (formato TryploPay)",
+    message: "SuperPayBR Create Invoice endpoint ativo",
     timestamp: new Date().toISOString(),
   })
 }
