@@ -1,55 +1,64 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { getPaymentData } from "../webhook/route"
+import { getWebhookData } from "../webhook/route"
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
     const externalId = searchParams.get("external_id")
 
-    console.log("🔍 Verificando pagamento SuperPayBR:", externalId)
-
     if (!externalId) {
       return NextResponse.json(
         {
           success: false,
-          error: "External ID é obrigatório",
+          error: "external_id é obrigatório",
         },
         { status: 400 },
       )
     }
 
-    // Consultar dados do webhook em memória
-    const paymentData = getPaymentData(externalId)
+    console.log("🔍 Verificando pagamento SuperPayBR:", externalId)
 
-    if (!paymentData) {
+    // Consultar no armazenamento global (sem rate limit)
+    const webhookData = getWebhookData(externalId)
+
+    if (webhookData) {
+      console.log("✅ Dados encontrados no webhook SuperPayBR")
+
+      const status = webhookData.status || {}
+      const statusCode = status.code || status.status || 1
+      const isPaid = statusCode === 2 || status.text === "paid" || status.text === "approved"
+
       return NextResponse.json({
         success: true,
-        isPaid: false,
-        isDenied: false,
-        isRefunded: false,
-        isExpired: false,
-        isCanceled: false,
-        statusCode: 1,
-        statusName: "Aguardando Pagamento",
-        amount: 0,
-        paymentDate: null,
-        found: false,
+        external_id: externalId,
+        is_paid: isPaid,
+        status: {
+          code: statusCode,
+          text: status.text || status.name || "pending",
+          title: status.title || "Aguardando Pagamento",
+        },
+        amount: webhookData.amount || 0,
+        payment_date: webhookData.payment_date,
+        source: "webhook",
+        timestamp: webhookData.timestamp,
       })
     }
 
+    console.log("⚠️ Pagamento não encontrado no webhook SuperPayBR")
+
     return NextResponse.json({
       success: true,
-      isPaid: paymentData.isPaid || false,
-      isDenied: paymentData.isDenied || false,
-      isRefunded: paymentData.isRefunded || false,
-      isExpired: paymentData.isExpired || false,
-      isCanceled: paymentData.isCanceled || false,
-      statusCode: paymentData.status_code || 1,
-      statusName: paymentData.status_name || "Aguardando Pagamento",
-      amount: paymentData.amount || 0,
-      paymentDate: paymentData.payment_date || null,
-      timestamp: paymentData.timestamp || new Date().toISOString(),
-      found: true,
+      external_id: externalId,
+      is_paid: false,
+      status: {
+        code: 1,
+        text: "pending",
+        title: "Aguardando Pagamento",
+      },
+      amount: 0,
+      payment_date: null,
+      source: "not_found",
+      timestamp: new Date().toISOString(),
     })
   } catch (error) {
     console.error("❌ Erro ao verificar pagamento SuperPayBR:", error)
@@ -57,8 +66,17 @@ export async function GET(request: NextRequest) {
       {
         success: false,
         error: error instanceof Error ? error.message : "Erro desconhecido",
+        external_id: request.nextUrl.searchParams.get("external_id"),
       },
       { status: 500 },
     )
   }
+}
+
+export async function POST() {
+  return NextResponse.json({
+    success: true,
+    message: "Use GET para verificar pagamento",
+    timestamp: new Date().toISOString(),
+  })
 }
