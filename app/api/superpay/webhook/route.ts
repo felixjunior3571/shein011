@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 
-// Interface baseada no webhook real da SuperPay
+// Interface baseada na documentação oficial SuperPay
 interface SuperPayWebhookPayload {
   event: {
     type: "webhook.update" | "invoice.update"
@@ -60,14 +60,14 @@ const SUPERPAY_STATUS_CODES = {
   12: { name: "Pagamento Negado", action: "denied", critical: true },
   15: { name: "Pagamento Vencido", action: "expired", critical: true },
   16: { name: "Erro no Pagamento", action: "error", critical: true },
-} as const
+}
 
 // 🚨 SISTEMA DE ARMAZENAMENTO GLOBAL PARA WEBHOOKS SUPERPAY
 const webhookStorage = new Map<string, any>()
 const paymentConfirmations = new Map<string, any>()
 const realtimeEvents: any[] = []
 
-// Função para salvar confirmação de pagamento
+// Função para salvar confirmação de pagamento SuperPay
 function savePaymentConfirmation(externalId: string, invoiceId: string, data: any) {
   const confirmationData = {
     externalId,
@@ -93,9 +93,7 @@ function savePaymentConfirmation(externalId: string, invoiceId: string, data: an
   // Salvar em múltiplos locais para garantir acesso
   paymentConfirmations.set(externalId, confirmationData)
   paymentConfirmations.set(invoiceId, confirmationData)
-  if (data.token) {
-    paymentConfirmations.set(`token_${data.token}`, confirmationData)
-  }
+  paymentConfirmations.set(`token_${data.token}`, confirmationData)
 
   console.log("💾 CONFIRMAÇÃO SUPERPAY SALVA EM ARMAZENAMENTO GLOBAL:")
   console.log(`- External ID: ${externalId}`)
@@ -132,7 +130,7 @@ function processWebhookEvent(payload: SuperPayWebhookPayload) {
   console.log(`- Status Text: ${invoices.status.text}`)
   console.log(`- Status Title: ${invoices.status.title}`)
   console.log(`- Status Description: ${invoices.status.description}`)
-  console.log(`- Valor: R$ ${(invoices.prices.total / 100).toFixed(2)}`)
+  console.log(`- Valor: R$ ${invoices.prices.total.toFixed(2)}`)
   console.log(`- Tipo Pagamento: ${invoices.type}`)
   console.log(`- Gateway: ${invoices.payment.gateway}`)
   console.log(`- Data Pagamento: ${invoices.payment.payDate || "N/A"}`)
@@ -141,42 +139,37 @@ function processWebhookEvent(payload: SuperPayWebhookPayload) {
 
   // 🎉 PROCESSAMENTO ESPECIAL PARA STATUS CRÍTICOS
   if (statusInfo.critical) {
-    console.log("🚨 STATUS CRÍTICO DETECTADO - PROCESSANDO IMEDIATAMENTE!")
+    console.log("🚨 STATUS CRÍTICO SUPERPAY DETECTADO - PROCESSANDO IMEDIATAMENTE!")
 
     switch (statusCode) {
       case 5: // PAGAMENTO CONFIRMADO
-        console.log("🎉🎉🎉 PAGAMENTO CONFIRMADO PELA ADQUIRENTE SUPERPAY! 🎉🎉🎉")
-        console.log(`💰 Valor Recebido: R$ ${(invoices.prices.total / 100).toFixed(2)}`)
+        console.log("🎉🎉🎉 PAGAMENTO SUPERPAY CONFIRMADO PELA ADQUIRENTE! 🎉🎉🎉")
+        console.log(`💰 Valor Recebido: R$ ${invoices.prices.total.toFixed(2)}`)
         console.log(`📅 Data: ${invoices.payment.payDate}`)
         console.log(`🆔 Pay ID: ${invoices.payment.payId}`)
         console.log("✅ LIBERANDO PRODUTO/SERVIÇO IMEDIATAMENTE")
         break
-
       case 9: // ESTORNADO
-        console.log("🔄 ESTORNO TOTAL PROCESSADO PELA ADQUIRENTE SUPERPAY!")
-        console.log(`💸 Valor Estornado: R$ ${(invoices.prices.total / 100).toFixed(2)}`)
+        console.log("🔄 ESTORNO TOTAL SUPERPAY PROCESSADO PELA ADQUIRENTE!")
+        console.log(`💸 Valor Estornado: R$ ${invoices.prices.total.toFixed(2)}`)
         console.log("❌ BLOQUEANDO/CANCELANDO PRODUTO/SERVIÇO")
         break
-
       case 12: // PAGAMENTO NEGADO
-        console.log("❌ PAGAMENTO RECUSADO PELA ADQUIRENTE SUPERPAY")
+        console.log("❌ PAGAMENTO SUPERPAY RECUSADO PELA ADQUIRENTE")
         console.log(`🚫 Motivo: ${invoices.status.description}`)
         console.log("⚠️ NOTIFICANDO CLIENTE SOBRE RECUSA")
         break
-
       case 15: // VENCIDO
-        console.log("⏰ PAGAMENTO VENCIDO SUPERPAY")
+        console.log("⏰ PAGAMENTO SUPERPAY VENCIDO")
         console.log(`📅 Vencimento: ${invoices.payment.due}`)
         console.log("⚠️ FATURA EXPIROU SEM PAGAMENTO")
         break
-
       case 6: // CANCELADO
-        console.log("🚫 PAGAMENTO CANCELADO SUPERPAY")
+        console.log("🚫 PAGAMENTO SUPERPAY CANCELADO")
         console.log("⚠️ TRANSAÇÃO FOI CANCELADA")
         break
-
       default:
-        console.log(`❓ Status crítico ${statusCode}: ${statusInfo.name}`)
+        console.log(`❓ Status crítico SuperPay ${statusCode}: ${statusInfo.name}`)
         break
     }
 
@@ -185,7 +178,7 @@ function processWebhookEvent(payload: SuperPayWebhookPayload) {
       statusCode,
       statusName: statusInfo.name,
       action: statusInfo.action,
-      amount: invoices.prices.total / 100, // Converter de centavos para reais
+      amount: invoices.prices.total,
       paymentDate: invoices.payment.payDate,
       payId: invoices.payment.payId,
       gateway: invoices.payment.gateway,
@@ -205,7 +198,7 @@ function processWebhookEvent(payload: SuperPayWebhookPayload) {
     statusName: statusInfo.name,
     externalId: invoices.external_id,
     invoiceId: invoices.id,
-    amount: invoices.prices.total / 100,
+    amount: invoices.prices.total,
     payId: invoices.payment.payId,
     isPaid: statusCode === 5,
     isRefunded: statusCode === 9,
@@ -213,6 +206,7 @@ function processWebhookEvent(payload: SuperPayWebhookPayload) {
     isExpired: statusCode === 15,
     isCanceled: statusCode === 6,
     isCritical: statusInfo.critical,
+    gateway: "SUPERPAY",
   })
 
   // Manter apenas os últimos 100 eventos
@@ -231,7 +225,7 @@ function processWebhookEvent(payload: SuperPayWebhookPayload) {
     isDenied: statusCode === 12,
     isExpired: statusCode === 15,
     isCanceled: statusCode === 6,
-    amount: invoices.prices.total / 100,
+    amount: invoices.prices.total,
     paymentDate: invoices.payment.payDate,
     paymentType: invoices.type,
     externalId: invoices.external_id,
@@ -243,9 +237,9 @@ function processWebhookEvent(payload: SuperPayWebhookPayload) {
   }
 }
 
-// Função para obter confirmação de pagamento (exportada para uso na API de consulta)
-export function getPaymentConfirmation(identifier: string) {
-  return paymentConfirmations.get(identifier) || null
+// Função para obter confirmação de pagamento (exportada para uso na API)
+export function getPaymentConfirmation(key: string) {
+  return paymentConfirmations.get(key)
 }
 
 export async function POST(request: NextRequest) {
@@ -265,7 +259,7 @@ export async function POST(request: NextRequest) {
       webhook: request.headers.get("webhook"),
     }
 
-    console.log("📋 HEADERS COMPLETOS:")
+    console.log("📋 HEADERS COMPLETOS SUPERPAY:")
     Object.entries(headers).forEach(([key, value]) => {
       if (key === "webhook" && value) {
         console.log(`- ${key}: ***TOKEN_PRESENTE***`)
@@ -276,7 +270,7 @@ export async function POST(request: NextRequest) {
 
     // Validar se é da SuperPay
     if (headers.gateway && headers.gateway !== "SUPERPAY") {
-      console.log("❌ Gateway inválido:", headers.gateway)
+      console.log("❌ Gateway inválido SuperPay:", headers.gateway)
       return NextResponse.json({ error: "Gateway inválido" }, { status: 400 })
     }
 
@@ -378,6 +372,7 @@ export async function POST(request: NextRequest) {
       timestamp: new Date().toISOString(),
       error: (error as Error).message,
       stack: (error as Error).stack,
+      gateway: "SUPERPAY",
     })
 
     const errorResponse = {
@@ -410,9 +405,7 @@ export async function GET(request: NextRequest) {
         invoice_id: w.payload?.invoices?.id,
         external_id: w.payload?.invoices?.external_id,
         status: w.payload?.invoices?.status?.code,
-        status_name:
-          SUPERPAY_STATUS_CODES[w.payload?.invoices?.status?.code as keyof typeof SUPERPAY_STATUS_CODES]?.name ||
-          "Desconhecido",
+        status_name: SUPERPAY_STATUS_CODES[w.payload?.invoices?.status?.code]?.name || "Desconhecido",
         processed: w.processed,
       })),
   }
