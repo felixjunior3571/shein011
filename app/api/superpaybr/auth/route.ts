@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 
-export async function GET(request: NextRequest) {
+export async function POST(request: NextRequest) {
   try {
     console.log("=== AUTENTICAÇÃO SUPERPAYBR ===")
 
@@ -8,7 +8,7 @@ export async function GET(request: NextRequest) {
     const secretKey = process.env.SUPERPAYBR_SECRET_KEY
 
     if (!token || !secretKey) {
-      console.log("❌ Credenciais SuperPayBR não encontradas")
+      console.log("❌ Credenciais SuperPayBR não configuradas")
       return NextResponse.json(
         {
           success: false,
@@ -19,22 +19,20 @@ export async function GET(request: NextRequest) {
     }
 
     console.log("🔑 Fazendo autenticação SuperPayBR...")
-    console.log("Token:", token.substring(0, 10) + "...")
-    console.log("Secret:", secretKey.substring(0, 20) + "...")
-
-    // Criar Basic Auth header
-    const credentials = Buffer.from(`${token}:${secretKey}`).toString("base64")
 
     const authResponse = await fetch("https://api.superpaybr.com/auth", {
-      method: "GET",
+      method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Basic ${credentials}`,
-        scope: "invoice.write, customer.write, webhook.write",
+        Accept: "application/json",
       },
+      body: JSON.stringify({
+        token: token,
+        secret: secretKey,
+      }),
     })
 
-    console.log("📥 Resposta SuperPayBR Auth:", {
+    console.log("📥 Resposta da autenticação:", {
       status: authResponse.status,
       statusText: authResponse.statusText,
       ok: authResponse.ok,
@@ -43,13 +41,11 @@ export async function GET(request: NextRequest) {
     if (authResponse.ok) {
       const authData = await authResponse.json()
       console.log("✅ Autenticação SuperPayBR bem-sucedida!")
-      console.log("Account ID:", authData.account)
-      console.log("Working:", authData.working)
-      console.log("Expires:", new Date(authData.expires_in * 1000).toLocaleString())
 
       return NextResponse.json({
         success: true,
         data: authData,
+        message: "Autenticação realizada com sucesso",
       })
     } else {
       const errorText = await authResponse.text()
@@ -58,7 +54,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(
         {
           success: false,
-          error: `Erro na autenticação: ${authResponse.status} - ${errorText}`,
+          error: `Erro de autenticação: ${authResponse.status} - ${errorText}`,
         },
         { status: authResponse.status },
       )
