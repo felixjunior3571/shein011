@@ -1,109 +1,91 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { createClient } from "@supabase/supabase-js"
-import { getSuperPayAccessToken } from "@/lib/superpaybr-auth"
-
-const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
-    const invoiceId = searchParams.get("invoice_id")
-    const externalId = searchParams.get("external_id")
+    const externalId = searchParams.get("externalId")
 
-    if (!invoiceId && !externalId) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "invoice_id ou external_id é obrigatório",
-        },
-        { status: 400 },
-      )
+    if (!externalId) {
+      return NextResponse.json({ success: false, error: "External ID is required" }, { status: 400 })
     }
 
-    console.log("🔍 === VERIFICANDO PAGAMENTO SUPERPAYBR ===")
-    console.log("📋 Invoice ID:", invoiceId)
-    console.log("📋 External ID:", externalId)
+    console.log("🔍 [SuperPayBR Check] Consultando pagamento para:", externalId)
 
-    // Verificar no Supabase primeiro
-    const { data: payment, error } = await supabase
-      .from("superpaybr_payments")
-      .select("*")
-      .or(`invoice_id.eq.${invoiceId || externalId},external_id.eq.${externalId || invoiceId}`)
-      .single()
-
-    if (payment) {
-      console.log("✅ Pagamento encontrado no Supabase:", payment.status)
-      return NextResponse.json({
-        success: true,
-        data: {
-          invoice_id: payment.invoice_id,
-          external_id: payment.external_id,
-          status: payment.status,
-          amount: payment.amount,
-          payment_method: payment.payment_method,
-          updated_at: payment.updated_at,
-          source: "supabase",
-        },
-      })
-    }
-
-    // Se não encontrou no Supabase, consultar API SuperPayBR
+    // Buscar no Supabase (dados do webhook)
     try {
-      const accessToken = await getSuperPayAccessToken()
+      const { createClient } = await import("@supabase/supabase-js")
+      const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
-      const checkResponse = await fetch(`https://api.superpaybr.com/v4/invoices/${invoiceId || externalId}`, {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-          Authorization: `Bearer ${accessToken}`,
-        },
-      })
+      const { data, error } = await supabase
+        .from("payment_webhooks")
+        .select("*")
+        .eq("external_id", externalId)
+        .eq("gateway", "SuperPayBR")
+        .order("received_at", { ascending: false })
+        .limit(1)
+        .single()
 
-      if (checkResponse.ok) {
-        const apiData = await checkResponse.json()
-        console.log("✅ Pagamento encontrado na API SuperPayBR")
+      if (error && error.code !== "PGRST116") {
+        console.error("❌ [SuperPayBR Check] Erro ao consultar Supabase:", error)
+        throw error
+      }
 
-        // Salvar no Supabase para cache
-        await supabase.from("superpaybr_payments").upsert({
-          invoice_id: apiData.id || invoiceId,
-          external_id: apiData.external_id || externalId,
-          status: apiData.status || "pending",
-          amount: apiData.amount || 0,
-          payment_method: "pix",
-          webhook_data: apiData,
-          updated_at: new Date().toISOString(),
+      if (data) {
+        console.log("✅ [SuperPayBR Check] Status encontrado no webhook:", {
+          external_id: data.external_id,
+          status: data.status_name,
+          is_paid: data.is_paid,
+          amount: data.amount,
         })
+
+        const paymentStatus = {
+          isPaid: data.is_paid,
+          isDenied: data.is_denied,
+          isRefunded: data.is_refunded,
+          isExpired: data.is_expired,
+          isCanceled: data.is_canceled,
+          statusCode: data.status_code,
+          statusName: data.status_name,
+          statusTitle: data.status_title,
+          amount: data.amount,
+          paymentDate: data.payment_date,
+          gateway: data.gateway,
+        }
 
         return NextResponse.json({
           success: true,
-          data: {
-            invoice_id: apiData.id || invoiceId,
-            external_id: apiData.external_id || externalId,
-            status: apiData.status || "pending",
-            amount: apiData.amount || 0,
-            payment_method: "pix",
-            source: "api",
-          },
+          found: true,
+          data: paymentStatus,
+          source: "webhook",
+          receivedAt: data.received_at,
+        })
+      } else {
+        console.log("⏳ [SuperPayBR Check] Nenhum webhook recebido ainda para:", externalId)
+
+        return NextResponse.json({
+          success: true,
+          found: false,
+          message: "No webhook received yet",
+          externalId,
         })
       }
-    } catch (apiError) {
-      console.log("⚠️ Erro ao consultar API SuperPayBR:", apiError)
-    }
+    } catch (dbError) {
+      console.error("❌ [SuperPayBR Check] Erro na consulta ao banco:", dbError)
 
-    return NextResponse.json({
-      success: false,
-      error: "Pagamento não encontrado",
-      invoice_id: invoiceId,
-      external_id: externalId,
-    })
+      return NextResponse.json({
+        success: false,
+        error: "Database error",
+        message: "Unable to check payment status",
+      })
+    }
   } catch (error) {
-    console.error("❌ Erro ao verificar pagamento:", error)
+    console.error("❌ [SuperPayBR Check] Erro geral na consulta:", error)
+
     return NextResponse.json(
       {
         success: false,
-        error: "Erro interno ao verificar pagamento",
-        details: error instanceof Error ? error.message : "Erro desconhecido",
+        error: "Internal server error",
+        message: error instanceof Error ? error.message : "Unknown error",
       },
       { status: 500 },
     )

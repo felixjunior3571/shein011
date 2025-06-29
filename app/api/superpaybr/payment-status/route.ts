@@ -1,57 +1,100 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { createClient } from "@supabase/supabase-js"
-
-const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
-    const invoiceId = searchParams.get("invoice_id")
+    const externalId = searchParams.get("externalId")
 
-    if (!invoiceId) {
+    if (!externalId) {
       return NextResponse.json(
         {
           success: false,
-          error: "invoice_id é obrigatório",
+          error: "External ID não fornecido",
         },
         { status: 400 },
       )
     }
 
-    // Buscar status no Supabase
-    const { data: payment, error } = await supabase
-      .from("superpaybr_payments")
-      .select("*")
-      .eq("invoice_id", invoiceId)
-      .single()
+    console.log("=== CONSULTANDO STATUS SUPERPAYBR ===")
+    console.log("External ID:", externalId)
 
-    if (error || !payment) {
-      return NextResponse.json({
-        success: false,
-        error: "Pagamento não encontrado",
-        invoice_id: invoiceId,
-      })
+    // Primeiro, fazer autenticação
+    const authResponse = await fetch(`${request.nextUrl.origin}/api/superpaybr/auth`)
+    const authResult = await authResponse.json()
+
+    if (!authResult.success) {
+      throw new Error("Falha na autenticação SuperPayBR")
     }
 
-    return NextResponse.json({
-      success: true,
-      data: {
-        invoice_id: payment.invoice_id,
-        external_id: payment.external_id,
-        status: payment.status,
-        amount: payment.amount,
-        payment_method: payment.payment_method,
-        created_at: payment.created_at,
-        updated_at: payment.updated_at,
+    const accessToken = authResult.data.access_token
+
+    // Consultar fatura por ID (usando o endpoint de listagem)
+    const statusResponse = await fetch(`https://api.superpaybr.com/invoices?id=${externalId}`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
       },
     })
+
+    console.log("📥 Resposta Status SuperPayBR:", {
+      status: statusResponse.status,
+      statusText: statusResponse.statusText,
+      ok: statusResponse.ok,
+    })
+
+    if (statusResponse.ok) {
+      const statusData = await statusResponse.json()
+      console.log("✅ Status SuperPayBR obtido com sucesso!")
+
+      // Mapear status
+      const invoice = statusData.invoices?.[0]
+      if (invoice) {
+        const isPaid = invoice.status.code === 5
+        const isDenied = invoice.status.code === 12
+        const isExpired = invoice.status.code === 15
+
+        return NextResponse.json({
+          success: true,
+          data: {
+            external_id: externalId,
+            status_code: invoice.status.code,
+            status_title: invoice.status.title,
+            is_paid: isPaid,
+            is_denied: isDenied,
+            is_expired: isExpired,
+            amount: invoice.prices.total,
+            payment_date: invoice.payment.date,
+          },
+          raw_response: statusData,
+        })
+      } else {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "Fatura não encontrada",
+          },
+          { status: 404 },
+        )
+      }
+    } else {
+      const errorText = await statusResponse.text()
+      console.log("❌ Erro ao consultar status SuperPayBR:", statusResponse.status, errorText)
+
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Erro SuperPayBR: ${statusResponse.status} - ${errorText}`,
+        },
+        { status: statusResponse.status },
+      )
+    }
   } catch (error) {
-    console.error("❌ Erro ao buscar status:", error)
+    console.log("❌ Erro ao consultar status SuperPayBR:", error)
     return NextResponse.json(
       {
         success: false,
-        error: "Erro interno",
-        details: error instanceof Error ? error.message : "Erro desconhecido",
+        error: "Erro interno ao consultar status",
       },
       { status: 500 },
     )

@@ -3,73 +3,67 @@ import { type NextRequest, NextResponse } from "next/server"
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
-    const payload = searchParams.get("payload")
+    const invoiceId = searchParams.get("invoiceId")
 
-    if (!payload) {
+    if (!invoiceId) {
       return NextResponse.json(
         {
           success: false,
-          error: "payload é obrigatório",
+          error: "Invoice ID não fornecido",
         },
         { status: 400 },
       )
     }
 
-    // Gerar QR Code via QuickChart
-    const qrCodeUrl = `https://quickchart.io/qr?text=${encodeURIComponent(payload)}&size=300&format=png&margin=1`
+    console.log("=== OBTENDO QRCODE SUPERPAYBR ===")
+    console.log("Invoice ID:", invoiceId)
 
-    return NextResponse.json({
-      success: true,
-      data: {
-        qr_code: qrCodeUrl,
-        payload: payload,
+    // URL CORRIGIDA - sem /v4
+    const qrcodeUrl = `https://api.superpaybr.com/invoices/qrcode/${invoiceId}`
+    console.log("🔗 URL QR Code SuperPayBR:", qrcodeUrl)
+
+    // Fazer requisição pública para obter QR Code (não precisa de autenticação)
+    const qrcodeResponse = await fetch(qrcodeUrl, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
       },
     })
-  } catch (error) {
-    console.error("❌ Erro ao gerar QR Code:", error)
-    return NextResponse.json(
-      {
-        success: false,
-        error: "Erro ao gerar QR Code",
-        details: error instanceof Error ? error.message : "Erro desconhecido",
-      },
-      { status: 500 },
-    )
-  }
-}
 
-export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json()
-    const payload = body.payload
+    console.log("📥 Resposta QR Code SuperPayBR:", {
+      status: qrcodeResponse.status,
+      statusText: qrcodeResponse.statusText,
+      ok: qrcodeResponse.ok,
+    })
 
-    if (!payload) {
+    if (qrcodeResponse.ok) {
+      const qrcodeData = await qrcodeResponse.json()
+      console.log("✅ QR Code SuperPayBR obtido com sucesso!")
+
+      return NextResponse.json({
+        success: true,
+        data: qrcodeData,
+        qrcode_url: qrcodeUrl,
+      })
+    } else {
+      const errorText = await qrcodeResponse.text()
+      console.log("❌ Erro ao obter QR Code SuperPayBR:", qrcodeResponse.status, errorText)
+
       return NextResponse.json(
         {
           success: false,
-          error: "payload é obrigatório",
+          error: `Erro ao obter QR Code: ${qrcodeResponse.status} - ${errorText}`,
+          attempted_url: qrcodeUrl,
         },
-        { status: 400 },
+        { status: qrcodeResponse.status },
       )
     }
-
-    // Gerar QR Code via QuickChart
-    const qrCodeUrl = `https://quickchart.io/qr?text=${encodeURIComponent(payload)}&size=300&format=png&margin=1`
-
-    return NextResponse.json({
-      success: true,
-      data: {
-        qr_code: qrCodeUrl,
-        payload: payload,
-      },
-    })
   } catch (error) {
-    console.error("❌ Erro ao gerar QR Code:", error)
+    console.log("❌ Erro ao obter QR Code SuperPayBR:", error)
     return NextResponse.json(
       {
         success: false,
-        error: "Erro ao gerar QR Code",
-        details: error instanceof Error ? error.message : "Erro desconhecido",
+        error: "Erro interno ao obter QR Code",
       },
       { status: 500 },
     )

