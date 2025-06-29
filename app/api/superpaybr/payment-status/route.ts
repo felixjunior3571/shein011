@@ -6,59 +6,145 @@ const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
-    const externalId = searchParams.get("externalId")
+    const paymentId = searchParams.get("id")
 
-    if (!externalId) {
+    if (!paymentId) {
       return NextResponse.json(
         {
           success: false,
-          error: "External ID é obrigatório",
+          error: "ID do pagamento é obrigatório",
         },
         { status: 400 },
       )
     }
 
-    console.log("📊 === STATUS PAGAMENTO SUPERPAYBR ===")
-    console.log("🆔 External ID:", externalId)
+    console.log(`🔍 Consultando status do pagamento: ${paymentId}`)
 
-    // Consultar apenas Supabase (dados do webhook)
-    const { data: paymentData, error } = await supabase
-      .from("payments")
-      .select("*")
-      .eq("external_id", externalId)
-      .single()
+    // Buscar no Supabase primeiro
+    const { data: payment, error } = await supabase.from("payments").select("*").eq("payment_id", paymentId).single()
 
-    if (error || !paymentData) {
-      console.log("❌ Pagamento não encontrado no Supabase")
+    if (error && error.code !== "PGRST116") {
+      console.error("❌ Erro ao consultar Supabase:", error)
       return NextResponse.json(
         {
           success: false,
-          error: "Pagamento não encontrado",
-          external_id: externalId,
+          error: "Erro ao consultar banco de dados",
         },
-        { status: 404 },
+        { status: 500 },
       )
     }
 
-    console.log("✅ Status encontrado:", {
-      status: paymentData.status,
-      is_paid: paymentData.is_paid,
-      amount: paymentData.amount,
-    })
+    if (payment) {
+      const cacheAge = Date.now() - new Date(payment.updated_at).getTime()
+
+      console.log(`📊 Pagamento encontrado no cache (${Math.round(cacheAge / 1000)}s atrás)`)
+
+      return NextResponse.json({
+        success: true,
+        data: {
+          id: payment.payment_id,
+          status: payment.status,
+          amount: payment.amount,
+          provider: payment.provider,
+          created_at: payment.created_at,
+          updated_at: payment.updated_at,
+          cache_age_seconds: Math.round(cacheAge / 1000),
+        },
+      })
+    }
+
+    // Se não encontrou no cache, consultar API
+    const token = process.env.SUPERPAY_TOKEN
+    const secretKey = process.env.SUPERPAY_SECRET_KEY
+    const apiUrl = process.env.SUPERPAY_API_URL
+
+    if (!token || !secretKey || !apiUrl) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Credenciais SuperPayBR não configuradas",
+        },
+        { status: 500 },
+      )
+    }
+
+    console.log("🔄 Consultando API SuperPayBR...")
+
+    const statusUrls = [
+      `${apiUrl}/invoices/${paymentId}`,
+      `${apiUrl}/payment/${paymentId}`,
+      `${apiUrl}/status/${paymentId}`,
+    ]
+
+    let statusSuccess = false
+    let responseData = null
+
+    for (const statusUrl of statusUrls) {
+      try {
+        const statusResponse = await fetch(statusUrl, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+        })
+
+        if (statusResponse.ok) {
+          responseData = await statusResponse.json()
+          statusSuccess = true
+          break
+        }
+      } catch (error) {
+        console.log(`❌ Erro em ${statusUrl}:`, error)
+      }
+    }
+
+    if (!statusSuccess) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Não foi possível consultar o status na API",
+        },
+        { status: 500 },
+      )
+    }
+
+    // Extrair dados da resposta
+    const status = responseData.status || responseData.payment_status || "pending"
+    const amount = responseData.amount || responseData.value || 0
+
+    // Salvar no cache
+    const { data: savedPayment } = await supabase
+      .from("payments")
+      .upsert(
+        {
+          payment_id: paymentId,
+          status: status,
+          amount: amount,
+          provider: "superpaybr",
+          api_data: responseData,
+          updated_at: new Date().toISOString(),
+        },
+        {
+          onConflict: "payment_id",
+        },
+      )
+      .select()
+      .single()
+
+    console.log(`✅ Status consultado e salvo: ${status}`)
 
     return NextResponse.json({
       success: true,
       data: {
-        external_id: externalId,
-        status: paymentData.status,
-        is_paid: paymentData.is_paid,
-        is_denied: paymentData.is_denied,
-        is_expired: paymentData.is_expired,
-        is_canceled: paymentData.is_canceled,
-        is_refunded: paymentData.is_refunded,
-        amount: paymentData.amount,
-        payment_date: paymentData.payment_date,
-        updated_at: paymentData.updated_at,
+        id: paymentId,
+        status: status,
+        amount: amount,
+        provider: "superpaybr",
+        created_at: savedPayment?.created_at,
+        updated_at: savedPayment?.updated_at,
+        cache_age_seconds: 0,
       },
     })
   } catch (error) {

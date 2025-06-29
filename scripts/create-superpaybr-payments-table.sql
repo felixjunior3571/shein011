@@ -1,34 +1,28 @@
 -- Criar tabela de pagamentos SuperPayBR
 CREATE TABLE IF NOT EXISTS payments (
   id SERIAL PRIMARY KEY,
-  external_id VARCHAR(255) UNIQUE NOT NULL,
-  status VARCHAR(100) NOT NULL DEFAULT 'pending',
-  amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
-  is_paid BOOLEAN NOT NULL DEFAULT FALSE,
-  is_denied BOOLEAN NOT NULL DEFAULT FALSE,
-  is_expired BOOLEAN NOT NULL DEFAULT FALSE,
-  is_canceled BOOLEAN NOT NULL DEFAULT FALSE,
-  is_refunded BOOLEAN NOT NULL DEFAULT FALSE,
-  payment_date TIMESTAMP NULL,
-  webhook_data JSONB NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  payment_id VARCHAR(255) UNIQUE NOT NULL,
+  status VARCHAR(50) NOT NULL DEFAULT 'pending',
+  amount DECIMAL(10,2),
+  provider VARCHAR(50) NOT NULL DEFAULT 'superpaybr',
+  webhook_data JSONB,
+  api_data JSONB,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- Criar índices para performance
-CREATE INDEX IF NOT EXISTS idx_payments_external_id ON payments(external_id);
+CREATE INDEX IF NOT EXISTS idx_payments_payment_id ON payments(payment_id);
 CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status);
-CREATE INDEX IF NOT EXISTS idx_payments_is_paid ON payments(is_paid);
+CREATE INDEX IF NOT EXISTS idx_payments_provider ON payments(provider);
 CREATE INDEX IF NOT EXISTS idx_payments_created_at ON payments(created_at);
+CREATE INDEX IF NOT EXISTS idx_payments_updated_at ON payments(updated_at);
 
--- Comentários
-COMMENT ON TABLE payments IS 'Tabela de pagamentos SuperPayBR com dados de webhook';
-COMMENT ON COLUMN payments.external_id IS 'ID único do pagamento (chave de integração)';
-COMMENT ON COLUMN payments.webhook_data IS 'Dados completos recebidos do webhook SuperPayBR';
-
--- Inserir dados de teste (opcional)
-INSERT INTO payments (external_id, status, amount, is_paid) 
-VALUES ('TEST_SUPERPAYBR_001', 'Pagamento Confirmado!', 34.90, TRUE)
-ON CONFLICT (external_id) DO NOTHING;
-
-SELECT 'Tabela payments criada com sucesso!' as result;
+-- Comentários para documentação
+COMMENT ON TABLE payments IS 'Tabela para armazenar dados de pagamentos do SuperPayBR';
+COMMENT ON COLUMN payments.payment_id IS 'ID único do pagamento (external_id)';
+COMMENT ON COLUMN payments.status IS 'Status do pagamento (pending, paid, failed, etc.)';
+COMMENT ON COLUMN payments.amount IS 'Valor do pagamento em reais';
+COMMENT ON COLUMN payments.provider IS 'Provedor de pagamento (superpaybr)';
+COMMENT ON COLUMN payments.webhook_data IS 'Dados recebidos via webhook';
+COMMENT ON COLUMN payments.api_data IS 'Dados consultados via API';

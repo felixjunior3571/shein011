@@ -3,84 +3,51 @@ import { createClient } from "@supabase/supabase-js"
 
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
-// Cache para evitar consultas excessivas
-const cache = new Map<string, { data: any; timestamp: number }>()
-const CACHE_DURATION = 30000 // 30 segundos
-
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
-    const externalId = searchParams.get("externalId")
+    const paymentId = searchParams.get("payment_id")
 
-    if (!externalId) {
+    if (!paymentId) {
       return NextResponse.json(
         {
           success: false,
-          error: "External ID é obrigatório",
+          error: "payment_id é obrigatório",
         },
         { status: 400 },
       )
     }
 
-    console.log("🔍 === CONSULTANDO PAGAMENTO SUPERPAYBR ===")
-    console.log("🆔 External ID:", externalId)
+    console.log(`🔍 Verificando pagamento: ${paymentId}`)
 
-    // Verificar cache primeiro
-    const cacheKey = `payment_${externalId}`
-    const cached = cache.get(cacheKey)
-    const now = Date.now()
-
-    if (cached && now - cached.timestamp < CACHE_DURATION) {
-      console.log("⚡ Retornando dados do cache")
-      return NextResponse.json({
-        success: true,
-        data: cached.data,
-        source: "cache",
-        cached_at: new Date(cached.timestamp).toISOString(),
-      })
-    }
-
-    // Consultar Supabase primeiro (dados do webhook)
-    console.log("💾 Consultando Supabase...")
-    const { data: supabaseData, error: supabaseError } = await supabase
+    // Buscar no Supabase primeiro (cache)
+    const { data: cachedPayment, error: cacheError } = await supabase
       .from("payments")
       .select("*")
-      .eq("external_id", externalId)
+      .eq("payment_id", paymentId)
       .single()
 
-    if (!supabaseError && supabaseData) {
-      console.log("✅ Dados encontrados no Supabase:", {
-        status: supabaseData.status,
-        is_paid: supabaseData.is_paid,
-        amount: supabaseData.amount,
-      })
+    if (!cacheError && cachedPayment) {
+      const cacheAge = Date.now() - new Date(cachedPayment.updated_at).getTime()
 
-      const responseData = {
-        external_id: externalId,
-        status: supabaseData.status,
-        is_paid: supabaseData.is_paid,
-        is_denied: supabaseData.is_denied,
-        is_expired: supabaseData.is_expired,
-        is_canceled: supabaseData.is_canceled,
-        is_refunded: supabaseData.is_refunded,
-        amount: supabaseData.amount,
-        payment_date: supabaseData.payment_date,
-        updated_at: supabaseData.updated_at,
+      // Se o cache tem menos de 30 segundos, usar ele
+      if (cacheAge < 30000) {
+        console.log("✅ Usando dados do cache (< 30s)")
+        return NextResponse.json({
+          success: true,
+          data: {
+            id: cachedPayment.payment_id,
+            status: cachedPayment.status,
+            amount: cachedPayment.amount,
+            provider: cachedPayment.provider,
+            cached: true,
+            cache_age: Math.round(cacheAge / 1000),
+          },
+        })
       }
-
-      // Atualizar cache
-      cache.set(cacheKey, { data: responseData, timestamp: now })
-
-      return NextResponse.json({
-        success: true,
-        data: responseData,
-        source: "supabase",
-      })
     }
 
-    console.log("⚠️ Dados não encontrados no Supabase, consultando API...")
-
-    // Se não encontrou no Supabase, consultar API SuperPayBR
+    // Consultar API SuperPayBR
     const token = process.env.SUPERPAY_TOKEN
     const secretKey = process.env.SUPERPAY_SECRET_KEY
     const apiUrl = process.env.SUPERPAY_API_URL
@@ -95,33 +62,30 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Tentar múltiplas URLs de consulta
+    console.log("🔄 Consultando API SuperPayBR...")
+
     const checkUrls = [
-      `${apiUrl}/v4/invoices/${externalId}`,
-      `${apiUrl}/invoices/${externalId}`,
-      `${apiUrl}/v4/payment/${externalId}`,
-      `${apiUrl}/payment/${externalId}`,
+      `${apiUrl}/invoices/${paymentId}`,
+      `${apiUrl}/payment/${paymentId}`,
+      `${apiUrl}/status/${paymentId}`,
     ]
 
     let checkSuccess = false
-    let apiData = null
+    let responseData = null
 
     for (const checkUrl of checkUrls) {
       try {
-        console.log(`🔄 Consultando: ${checkUrl}`)
-
         const checkResponse = await fetch(checkUrl, {
           method: "GET",
           headers: {
             "Content-Type": "application/json",
+            Accept: "application/json",
             Authorization: `Bearer ${token}`,
-            "X-API-Key": secretKey,
           },
         })
 
         if (checkResponse.ok) {
-          apiData = await checkResponse.json()
-          console.log("✅ Dados obtidos da API SuperPayBR")
+          responseData = await checkResponse.json()
           checkSuccess = true
           break
         }
@@ -130,66 +94,69 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    if (!checkSuccess || !apiData) {
-      console.log("❌ Não foi possível obter dados da API")
+    if (!checkSuccess) {
+      // Retornar dados do cache mesmo se antigos
+      if (cachedPayment) {
+        console.log("⚠️ API falhou, usando cache antigo")
+        return NextResponse.json({
+          success: true,
+          data: {
+            id: cachedPayment.payment_id,
+            status: cachedPayment.status,
+            amount: cachedPayment.amount,
+            provider: cachedPayment.provider,
+            cached: true,
+            fallback: true,
+          },
+        })
+      }
+
       return NextResponse.json(
         {
           success: false,
-          error: "Pagamento não encontrado",
-          external_id: externalId,
+          error: "Não foi possível verificar o status do pagamento",
         },
-        { status: 404 },
+        { status: 500 },
       )
     }
 
-    // Processar dados da API
-    const status = apiData.status || apiData.payment_status || 0
-    const amount = apiData.amount || apiData.value || 0
+    // Extrair status da resposta
+    const status = responseData.status || responseData.payment_status || "pending"
+    const amount = responseData.amount || responseData.value || 0
 
-    let isPaid = false
-    let statusName = "Pendente"
+    // Atualizar cache no Supabase
+    await supabase.from("payments").upsert(
+      {
+        payment_id: paymentId,
+        status: status,
+        amount: amount,
+        provider: "superpaybr",
+        api_data: responseData,
+        updated_at: new Date().toISOString(),
+      },
+      {
+        onConflict: "payment_id",
+      },
+    )
 
-    if (typeof status === "number" && status === 5) {
-      isPaid = true
-      statusName = "Pagamento Confirmado!"
-    } else if (typeof status === "string" && status.toLowerCase().includes("paid")) {
-      isPaid = true
-      statusName = "Pagamento Confirmado!"
-    }
-
-    const responseData = {
-      external_id: externalId,
-      status: statusName,
-      is_paid: isPaid,
-      is_denied: false,
-      is_expired: false,
-      is_canceled: false,
-      is_refunded: false,
-      amount: typeof amount === "number" ? amount : Number.parseFloat(amount?.toString() || "0"),
-      payment_date: isPaid ? new Date().toISOString() : null,
-      updated_at: new Date().toISOString(),
-    }
-
-    // Atualizar cache
-    cache.set(cacheKey, { data: responseData, timestamp: now })
-
-    console.log("✅ Consulta concluída:", {
-      status: statusName,
-      is_paid: isPaid,
-      amount: responseData.amount,
-    })
+    console.log(`✅ Status do pagamento ${paymentId}: ${status}`)
 
     return NextResponse.json({
       success: true,
-      data: responseData,
-      source: "api",
+      data: {
+        id: paymentId,
+        status: status,
+        amount: amount,
+        provider: "superpaybr",
+        cached: false,
+      },
     })
   } catch (error) {
-    console.error("❌ Erro ao consultar pagamento SuperPayBR:", error)
+    console.error("❌ Erro ao verificar pagamento:", error)
     return NextResponse.json(
       {
         success: false,
-        error: "Erro interno ao consultar pagamento",
+        error: "Erro interno ao verificar pagamento",
         details: error instanceof Error ? error.message : "Erro desconhecido",
       },
       { status: 500 },

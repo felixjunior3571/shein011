@@ -30,8 +30,8 @@ export async function GET() {
       )
     }
 
-    // Tentar múltiplas URLs de autenticação
-    const authUrls = [`${apiUrl}/v4/auth`, `${apiUrl}/auth`, `${apiUrl}/v4/token`, `${apiUrl}/token`]
+    // URLs corretas da API SuperPayBR (sem /v4/)
+    const authUrls = [`${apiUrl}/auth`, `${apiUrl}/token`]
 
     let authSuccess = false
     let authData = null
@@ -41,17 +41,16 @@ export async function GET() {
       try {
         console.log(`🔑 Tentando autenticação em: ${authUrl}`)
 
+        // Formato correto para SuperPayBR
         const authResponse = await fetch(authUrl, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-            "X-API-Key": secretKey,
+            Accept: "application/json",
           },
           body: JSON.stringify({
-            grant_type: "client_credentials",
-            client_id: token,
-            client_secret: secretKey,
+            token: token,
+            secret: secretKey,
           }),
         })
 
@@ -64,6 +63,7 @@ export async function GET() {
         if (authResponse.ok) {
           authData = await authResponse.json()
           console.log("✅ Autenticação SuperPayBR bem-sucedida!")
+          console.log("📋 Dados de auth:", authData)
           authSuccess = true
           break
         } else {
@@ -82,7 +82,7 @@ export async function GET() {
       return NextResponse.json(
         {
           success: false,
-          error: "Falha na autenticação SuperPayBR em todas as URLs",
+          error: "Falha na autenticação SuperPayBR",
           details: lastError,
           attempted_urls: authUrls,
         },
@@ -94,7 +94,7 @@ export async function GET() {
       success: true,
       message: "Autenticação SuperPayBR realizada com sucesso",
       data: {
-        access_token: authData.access_token || token, // Fallback para o próprio token
+        access_token: authData.access_token || authData.token || token,
         token_type: authData.token_type || "Bearer",
         expires_in: authData.expires_in || 3600,
       },

@@ -2,25 +2,27 @@ import { type NextRequest, NextResponse } from "next/server"
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("🎯 === CRIANDO FATURA ATIVAÇÃO SUPERPAYBR ===")
+    console.log("🔓 === CRIANDO FATURA DE ATIVAÇÃO SUPERPAYBR ===")
 
     const body = await request.json()
-    const { amount = 1.99 } = body
+    console.log("📥 Dados recebidos:", JSON.stringify(body, null, 2))
 
-    // Dados do cliente do localStorage
-    const cpfData = JSON.parse(request.headers.get("x-cpf-data") || "{}")
-    const userEmail = request.headers.get("x-user-email") || ""
-    const userWhatsApp = request.headers.get("x-user-whatsapp") || ""
+    const amount = 1.99 // Valor fixo para ativação
+    const cpfData = body.customerData || {}
+    const userEmail = body.customerData?.email || ""
+    const userWhatsApp = body.customerData?.phone || ""
 
-    const externalId = `ATIVACAO_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
+    // Gerar External ID único para ativação
+    const externalId = `ACTIVATION_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
 
-    console.log("📋 Criando fatura de ativação:", {
+    console.log("📋 Dados da ativação:", {
       externalId,
       amount,
-      customerName: cpfData.nome,
+      customerName: cpfData.nome || "Cliente SHEIN",
+      email: userEmail,
     })
 
-    // Usar credenciais diretas
+    // Credenciais SuperPayBR
     const token = process.env.SUPERPAY_TOKEN
     const secretKey = process.env.SUPERPAY_SECRET_KEY
     const apiUrl = process.env.SUPERPAY_API_URL
@@ -35,50 +37,55 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Fazer autenticação
+    let accessToken = token
+    try {
+      const authResponse = await fetch(`${apiUrl}/auth`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          token: token,
+          secret: secretKey,
+        }),
+      })
+
+      if (authResponse.ok) {
+        const authData = await authResponse.json()
+        accessToken = authData.access_token || authData.token || token
+      }
+    } catch (error) {
+      console.log("⚠️ Usando token direto para ativação")
+    }
+
+    // Dados da fatura de ativação
     const invoiceData = {
+      token: accessToken,
+      secret: secretKey,
       client: {
         name: cpfData.nome || "Cliente SHEIN",
         document: (cpfData.cpf || "00000000000").replace(/\D/g, ""),
         email: userEmail || "cliente@shein.com",
         phone: (userWhatsApp || "11999999999").replace(/\D/g, ""),
-        address: {
-          street: "Rua Principal",
-          number: "123",
-          neighborhood: "Centro",
-          city: "São Paulo",
-          state: "SP",
-          zipcode: "01001000",
-        },
         ip: request.headers.get("x-forwarded-for") || "127.0.0.1",
       },
       payment: {
-        id: externalId,
-        type: "3", // PIX
-        due_at: new Date(Date.now() + 30 * 60 * 1000).toISOString().split("T")[0],
-        referer: "SHEIN_ATIVACAO",
-        installment: 1,
-        order_url: `${request.nextUrl.origin}/upp/001`,
-        store_url: request.nextUrl.origin,
-        webhook: process.env.SUPERPAY_WEBHOOK_URL,
-        discount: 0,
-        products: [
-          {
-            id: "1",
-            title: "Taxa de Ativação - Cartão SHEIN",
-            qnt: 1,
-            amount: amount,
-          },
-        ],
-      },
-      shipping: {
-        amount: 0,
+        external_id: externalId,
+        type: "pix",
+        due_date: new Date(Date.now() + 30 * 60 * 1000).toISOString().split("T")[0],
+        description: "Ativação do Cartão SHEIN - Taxa de Ativação",
+        amount: amount,
+        webhook_url: process.env.SUPERPAY_WEBHOOK_URL,
+        return_url: `${request.nextUrl.origin}/activation/success`,
+        cancel_url: `${request.nextUrl.origin}/activation`,
       },
     }
 
-    console.log("🚀 Enviando para SuperPayBR...")
+    console.log("🚀 Criando fatura de ativação...")
 
-    // Tentar múltiplas URLs
-    const createUrls = [`${apiUrl}/v4/invoices`, `${apiUrl}/invoices`]
+    const createUrls = [`${apiUrl}/invoices`, `${apiUrl}/payment`, `${apiUrl}/create`]
 
     let createSuccess = false
     let responseData = null
@@ -89,8 +96,8 @@ export async function POST(request: NextRequest) {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-            "X-API-Key": secretKey,
+            Accept: "application/json",
+            Authorization: `Bearer ${accessToken}`,
           },
           body: JSON.stringify(invoiceData),
         })
@@ -106,39 +113,58 @@ export async function POST(request: NextRequest) {
     }
 
     if (!createSuccess) {
-      console.log("⚠️ Gerando PIX de emergência para ativação...")
-      return createEmergencyActivationPix(amount, externalId)
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Falha ao criar fatura de ativação",
+        },
+        { status: 500 },
+      )
     }
 
     // Extrair dados PIX
     let pixPayload = ""
     let qrCodeImage = ""
-    const invoiceId = responseData.data?.id || responseData.id || externalId
+    let invoiceId = ""
 
-    // Buscar PIX recursivamente
-    const findPixData = (obj: any): void => {
-      if (!obj || typeof obj !== "object") return
+    const findPixData = (obj: any, depth = 0): void => {
+      if (!obj || typeof obj !== "object" || depth > 10) return
 
       for (const [key, value] of Object.entries(obj)) {
-        if ((key === "payload" || key === "pix_code") && typeof value === "string" && value.length > 50) {
+        if ((key === "id" || key === "invoice_id") && typeof value === "string" && !invoiceId) {
+          invoiceId = value
+        }
+
+        if (
+          (key === "payload" || key === "pix_code" || key === "qrcode" || key === "pix_payload") &&
+          typeof value === "string" &&
+          value.length > 50
+        ) {
           pixPayload = value
         }
-        if ((key === "qrcode" || key === "qr_code" || key === "image") && typeof value === "string") {
+
+        if ((key === "qrcode_image" || key === "qr_code" || key === "image") && typeof value === "string") {
           qrCodeImage = value
         }
+
         if (typeof value === "object" && value !== null) {
-          findPixData(value)
+          findPixData(value, depth + 1)
         }
       }
     }
 
     findPixData(responseData)
 
-    // PIX de emergência se necessário
+    invoiceId = invoiceId || responseData.data?.id || responseData.id || externalId
+
     if (!pixPayload) {
-      pixPayload = `00020126580014br.gov.bcb.pix2536pix.superpaybr.com/qr/v2/${invoiceId}520400005303986540${amount.toFixed(
-        2,
-      )}5802BR5909SHEIN CARD5011SAO PAULO62070503***6304ATIV`
+      return NextResponse.json(
+        {
+          success: false,
+          error: "PIX payload não encontrado para ativação",
+        },
+        { status: 500 },
+      )
     }
 
     const qrCodeUrl =
@@ -167,7 +193,7 @@ export async function POST(request: NextRequest) {
         vencimento: {
           dia: new Date(Date.now() + 30 * 60 * 1000).toISOString().split("T")[0],
         },
-        type: "real",
+        type: "activation",
       },
     }
 
@@ -175,43 +201,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(response)
   } catch (error) {
     console.error("❌ Erro ao criar fatura de ativação:", error)
-    return createEmergencyActivationPix(1.99, `EMG_ATIV_${Date.now()}`)
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Erro interno ao criar fatura de ativação",
+      },
+      { status: 500 },
+    )
   }
-}
-
-function createEmergencyActivationPix(amount: number, externalId: string) {
-  console.log("🚨 Criando PIX de emergência para ativação...")
-
-  const pixPayload = `00020126580014br.gov.bcb.pix2536emergency.superpaybr.com/qr/v2/${externalId}520400005303986540${amount.toFixed(
-    2,
-  )}5802BR5909SHEIN CARD5011SAO PAULO62070503***6304ATIV`
-
-  const qrCodeUrl = `https://quickchart.io/qr?text=${encodeURIComponent(pixPayload)}&size=300&format=png&margin=1`
-
-  return NextResponse.json({
-    success: true,
-    data: {
-      id: externalId,
-      invoice_id: externalId,
-      external_id: externalId,
-      pix: {
-        payload: pixPayload,
-        image: qrCodeUrl,
-        qr_code: qrCodeUrl,
-      },
-      status: {
-        code: 1,
-        title: "Aguardando Pagamento",
-        text: "pending",
-      },
-      valores: {
-        bruto: Math.round(amount * 100),
-        liquido: Math.round(amount * 100),
-      },
-      vencimento: {
-        dia: new Date(Date.now() + 30 * 60 * 1000).toISOString().split("T")[0],
-      },
-      type: "emergency",
-    },
-  })
 }

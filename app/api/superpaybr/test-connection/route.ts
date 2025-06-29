@@ -24,6 +24,7 @@ export async function GET() {
         SUPERPAY_WEBHOOK_URL: !!webhookUrl,
       },
       api_tests: {},
+      auth_test: null,
       overall_status: "unknown",
     }
 
@@ -36,8 +37,8 @@ export async function GET() {
       })
     }
 
-    // Testar múltiplas URLs da API
-    const testUrls = [`${apiUrl}/v4/auth`, `${apiUrl}/auth`, `${apiUrl}/v4/invoices`, `${apiUrl}/invoices`]
+    // Testar URLs corretas (sem /v4/)
+    const testUrls = [`${apiUrl}/auth`, `${apiUrl}/invoices`]
 
     let anySuccess = false
 
@@ -49,8 +50,8 @@ export async function GET() {
           method: "GET",
           headers: {
             "Content-Type": "application/json",
+            Accept: "application/json",
             Authorization: `Bearer ${token}`,
-            "X-API-Key": secretKey,
           },
         })
 
@@ -77,6 +78,40 @@ export async function GET() {
           error: error instanceof Error ? error.message : "Erro de rede",
           accessible: false,
         }
+      }
+    }
+
+    // Testar autenticação específica
+    try {
+      console.log("🔐 Testando autenticação...")
+      const authResponse = await fetch(`${apiUrl}/auth`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          token: token,
+          secret: secretKey,
+        }),
+      })
+
+      results.auth_test = {
+        status: authResponse.status,
+        statusText: authResponse.statusText,
+        ok: authResponse.ok,
+      }
+
+      if (authResponse.ok) {
+        console.log("✅ Autenticação bem-sucedida!")
+        anySuccess = true
+      } else {
+        console.log(`⚠️ Autenticação retornou: ${authResponse.status}`)
+      }
+    } catch (error) {
+      console.log("❌ Erro no teste de autenticação:", error)
+      results.auth_test = {
+        error: error instanceof Error ? error.message : "Erro de rede",
       }
     }
 
