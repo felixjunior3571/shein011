@@ -1,6 +1,8 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import Image from "next/image"
+import { AlertCircle, RefreshCw } from "lucide-react"
 
 interface InvoiceData {
   id: string
@@ -60,7 +62,7 @@ export function SmartQRCode({ invoice, width = 250, height = 250, className = ""
     return (
       <div className={`flex items-center justify-center bg-gray-100 rounded-lg ${className}`} style={{ width, height }}>
         <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-600 mx-auto mb-2"></div>
+          <RefreshCw className="w-8 h-8 text-gray-400 animate-spin mx-auto mb-2" />
           <p className="text-sm text-gray-600">Gerando QR Code...</p>
         </div>
       </div>
@@ -71,6 +73,7 @@ export function SmartQRCode({ invoice, width = 250, height = 250, className = ""
     return (
       <div className={`flex items-center justify-center bg-red-100 rounded-lg ${className}`} style={{ width, height }}>
         <div className="text-center">
+          <AlertCircle className="w-8 h-8 text-red-500 mb-2" />
           <p className="text-sm text-red-600">Erro ao carregar QR Code</p>
           <button onClick={generateQRCode} className="text-xs text-red-700 underline mt-1">
             Tentar novamente
@@ -82,7 +85,7 @@ export function SmartQRCode({ invoice, width = 250, height = 250, className = ""
 
   return (
     <div className={className}>
-      <img
+      <Image
         src={qrCodeUrl || "/placeholder.svg"}
         alt="QR Code PIX"
         width={width}
