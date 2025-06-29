@@ -74,9 +74,11 @@ export function useSuperpayWebhookMonitor({
         if (data.isPaid) {
           setPaymentStatus("confirmed")
           setIsWaitingForWebhook(false)
+          console.log("🎉 PAGAMENTO CONFIRMADO VIA WEBHOOK!")
           if (onPaymentConfirmed) {
             onPaymentConfirmed(data)
           }
+          // Redirecionar após 2 segundos
           setTimeout(() => {
             window.location.href = "/success"
           }, 2000)

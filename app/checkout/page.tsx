@@ -1,171 +1,170 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
-import { Card, CardContent } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Loader2, Copy, CheckCircle, XCircle, Clock, AlertCircle } from "lucide-react"
+import { Copy, CheckCircle, Clock, AlertCircle } from "lucide-react"
 import { useSuperpayWebhookMonitor } from "@/hooks/use-superpay-webhook-monitor"
 
+interface InvoiceData {
+  id: string
+  invoice_id: string
+  external_id: string
+  pix: {
+    payload: string
+    image: string
+    qr_code: string
+  }
+  status: {
+    code: number
+    title: string
+    text: string
+  }
+  valores: {
+    bruto: number
+    liquido: number
+  }
+  vencimento: {
+    dia: string
+  }
+  type: "real" | "emergency"
+}
+
 export default function CheckoutPage() {
-  const router = useRouter()
-  const searchParams = useSearchParams()
-  const [pixCode, setPixCode] = useState<string>("")
-  const [qrCodeUrl, setQrCodeUrl] = useState<string>("")
-  const [externalId, setExternalId] = useState<string>("")
-  const [invoiceId, setInvoiceId] = useState<string>("")
-  const [amount, setAmount] = useState<number>(0)
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState<string>("")
+  const [invoice, setInvoice] = useState<InvoiceData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
 
   // ✅ MONITORAMENTO VIA WEBHOOK
-  const {
-    paymentStatus,
-    status,
-    isWaitingForWebhook,
-    error: webhookError,
-  } = useSuperpayWebhookMonitor({
-    externalId,
-    invoiceId,
+  const { paymentStatus, status, isWaitingForWebhook } = useSuperpayWebhookMonitor({
+    externalId: invoice?.external_id || null,
+    invoiceId: invoice?.invoice_id || null,
     enableDebug: true,
     onPaymentConfirmed: (data) => {
-      console.log("🎉 Pagamento confirmado via webhook!", data)
-    },
-    onPaymentDenied: (data) => {
-      console.log("❌ Pagamento negado via webhook!", data)
-    },
-    onPaymentExpired: (data) => {
-      console.log("⏰ Pagamento vencido via webhook!", data)
-    },
-    onPaymentCanceled: (data) => {
-      console.log("🚫 Pagamento cancelado via webhook!", data)
-    },
-    onPaymentRefunded: (data) => {
-      console.log("↩️ Pagamento estornado via webhook!", data)
+      console.log("🎉 Pagamento confirmado!", data)
     },
   })
 
-  // Criar fatura PIX
+  // Criar fatura automaticamente ao carregar a página
   useEffect(() => {
-    const createPixInvoice = async () => {
-      try {
-        setIsLoading(true)
-        setError("")
+    createInvoice()
+  }, [])
 
-        const selectedValue = searchParams.get("value") || "1"
-        const invoiceAmount = selectedValue === "1" ? 1.0 : selectedValue === "10" ? 10.0 : 100.0
+  const createInvoice = async () => {
+    try {
+      setLoading(true)
+      setError(null)
 
-        setAmount(invoiceAmount)
+      console.log("🔄 Criando fatura PIX...")
 
-        console.log("🚀 Criando fatura PIX SuperPayBR:", { amount: invoiceAmount })
-
-        const response = await fetch("/api/superpaybr/create-invoice", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            amount: invoiceAmount,
-            description: `Pagamento PIX - R$ ${invoiceAmount.toFixed(2)}`,
-            external_id: `pix_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      const response = await fetch("/api/superpaybr/create-invoice", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-cpf-data": JSON.stringify({
+            nome: "Cliente SHEIN",
+            cpf: "00000000000",
           }),
-        })
+          "x-user-email": "cliente@shein.com",
+          "x-user-whatsapp": "11999999999",
+          "x-delivery-address": JSON.stringify({
+            street: "Rua Principal",
+            number: "123",
+            neighborhood: "Centro",
+            city: "São Paulo",
+            state: "SP",
+            zipcode: "01001000",
+          }),
+        },
+        body: JSON.stringify({
+          amount: 34.9,
+          shipping: 0,
+          method: "EXPRESS",
+        }),
+      })
 
-        const data = await response.json()
+      const result = await response.json()
 
-        if (data.success && data.invoice) {
-          setExternalId(data.invoice.external_id)
-          setInvoiceId(data.invoice.id)
-          setPixCode(data.invoice.payment?.details?.pix_code || "")
-          setQrCodeUrl(data.qrCodeUrl || "")
-
-          console.log("✅ Fatura PIX criada com sucesso:", {
-            external_id: data.invoice.external_id,
-            invoice_id: data.invoice.id,
-            pix_code: data.invoice.payment?.details?.pix_code?.substring(0, 50) + "...",
-          })
-        } else {
-          throw new Error(data.error || "Erro ao criar fatura PIX")
-        }
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : "Erro desconhecido"
-        setError(errorMessage)
-        console.error("❌ Erro ao criar fatura PIX:", errorMessage)
-      } finally {
-        setIsLoading(false)
+      if (result.success && result.data) {
+        setInvoice(result.data)
+        console.log("✅ Fatura criada:", result.data)
+      } else {
+        throw new Error(result.error || "Erro ao criar fatura")
       }
+    } catch (err) {
+      console.error("❌ Erro ao criar fatura:", err)
+      setError(err instanceof Error ? err.message : "Erro desconhecido")
+    } finally {
+      setLoading(false)
     }
-
-    createPixInvoice()
-  }, [searchParams])
+  }
 
   const copyPixCode = async () => {
-    if (pixCode) {
-      await navigator.clipboard.writeText(pixCode)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
+    if (invoice?.pix.payload) {
+      try {
+        await navigator.clipboard.writeText(invoice.pix.payload)
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+      } catch (err) {
+        console.error("Erro ao copiar:", err)
+      }
     }
   }
 
   const getStatusIcon = () => {
     switch (paymentStatus) {
       case "confirmed":
-        return <CheckCircle className="h-6 w-6 text-green-500" />
+        return <CheckCircle className="h-5 w-5 text-green-500" />
+      case "waiting":
+        return <Clock className="h-5 w-5 text-yellow-500" />
       case "denied":
-        return <XCircle className="h-6 w-6 text-red-500" />
       case "expired":
-        return <Clock className="h-6 w-6 text-orange-500" />
       case "canceled":
-        return <XCircle className="h-6 w-6 text-gray-500" />
-      case "refunded":
-        return <AlertCircle className="h-6 w-6 text-blue-500" />
+        return <AlertCircle className="h-5 w-5 text-red-500" />
       default:
-        return <Loader2 className="h-6 w-6 text-blue-500 animate-spin" />
+        return <Clock className="h-5 w-5 text-gray-500" />
     }
   }
 
-  const getStatusMessage = () => {
+  const getStatusText = () => {
     switch (paymentStatus) {
       case "confirmed":
-        return "Pagamento confirmado! Redirecionando..."
+        return "Pagamento Confirmado!"
+      case "waiting":
+        return "Aguardando Pagamento"
       case "denied":
-        return "Pagamento negado"
+        return "Pagamento Negado"
       case "expired":
-        return "Pagamento vencido"
+        return "Pagamento Vencido"
       case "canceled":
-        return "Pagamento cancelado"
-      case "refunded":
-        return "Pagamento estornado"
+        return "Pagamento Cancelado"
       default:
-        return isWaitingForWebhook ? "Aguardando confirmação do pagamento..." : "Processando..."
+        return "Processando..."
     }
   }
 
-  if (isLoading) {
+  if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-pink-50 to-purple-50 flex items-center justify-center p-4">
-        <Card className="w-full max-w-md">
-          <CardContent className="p-8 text-center">
-            <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-pink-500" />
-            <h2 className="text-xl font-semibold mb-2">Gerando PIX...</h2>
-            <p className="text-gray-600">Aguarde enquanto preparamos seu pagamento</p>
-          </CardContent>
-        </Card>
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500 mx-auto mb-4"></div>
+          <p className="text-gray-600">Gerando PIX...</p>
+        </div>
       </div>
     )
   }
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-pink-50 to-purple-50 flex items-center justify-center p-4">
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <Card className="w-full max-w-md">
-          <CardContent className="p-8 text-center">
-            <XCircle className="h-8 w-8 mx-auto mb-4 text-red-500" />
-            <h2 className="text-xl font-semibold mb-2 text-red-600">Erro ao gerar PIX</h2>
+          <CardContent className="p-6 text-center">
+            <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
+            <h2 className="text-xl font-semibold text-gray-900 mb-2">Erro ao gerar PIX</h2>
             <p className="text-gray-600 mb-4">{error}</p>
-            <Button onClick={() => router.back()} variant="outline">
-              Voltar
+            <Button onClick={createInvoice} className="w-full">
+              Tentar Novamente
             </Button>
           </CardContent>
         </Card>
@@ -173,83 +172,127 @@ export default function CheckoutPage() {
     )
   }
 
+  if (!invoice) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <p className="text-gray-600">Carregando...</p>
+      </div>
+    )
+  }
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-pink-50 to-purple-50 p-4">
-      <div className="max-w-md mx-auto space-y-6">
+    <div className="min-h-screen bg-gray-50 py-8">
+      <div className="max-w-2xl mx-auto px-4">
         {/* Header */}
-        <div className="text-center pt-8">
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">Pagamento PIX</h1>
-          <p className="text-gray-600">Valor: R$ {amount.toFixed(2)}</p>
+        <div className="text-center mb-8">
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Pagamento via PIX</h1>
+          <p className="text-gray-600">Escaneie o QR Code ou copie o código PIX</p>
         </div>
 
         {/* Status do Pagamento */}
-        <Card>
-          <CardContent className="p-6 text-center">
-            <div className="flex items-center justify-center mb-4">{getStatusIcon()}</div>
-            <h3 className="text-lg font-semibold mb-2">{getStatusMessage()}</h3>
-            {status && (
-              <div className="text-sm text-gray-600">
-                <p>Status: {status.statusName}</p>
-                <p>Código: {status.statusCode}</p>
+        <Card className="mb-6">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-center space-x-3">
+              {getStatusIcon()}
+              <span className="text-lg font-medium">{getStatusText()}</span>
+            </div>
+            {paymentStatus === "confirmed" && (
+              <div className="mt-4 text-center">
+                <p className="text-green-600 font-medium">Redirecionando para página de sucesso...</p>
               </div>
             )}
-            {webhookError && <p className="text-sm text-red-500 mt-2">Erro: {webhookError}</p>}
+            {isWaitingForWebhook && (
+              <div className="mt-4 text-center">
+                <div className="animate-pulse text-sm text-gray-500">Monitorando pagamento em tempo real...</div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Valor */}
+        <Card className="mb-6">
+          <CardContent className="p-6 text-center">
+            <p className="text-sm text-gray-600 mb-2">Valor a pagar</p>
+            <p className="text-3xl font-bold text-gray-900">R$ {(invoice.valores.bruto / 100).toFixed(2)}</p>
+            <p className="text-sm text-gray-500 mt-2">
+              Vencimento: {new Date(invoice.vencimento.dia).toLocaleDateString("pt-BR")}
+            </p>
           </CardContent>
         </Card>
 
         {/* QR Code */}
-        {qrCodeUrl && paymentStatus === "waiting" && (
-          <Card>
-            <CardContent className="p-6 text-center">
-              <h3 className="text-lg font-semibold mb-4">Escaneie o QR Code</h3>
-              <div className="bg-white p-4 rounded-lg inline-block">
-                <img src={qrCodeUrl || "/placeholder.svg"} alt="QR Code PIX" className="w-48 h-48 mx-auto" />
-              </div>
-              <p className="text-sm text-gray-600 mt-4">Abra o app do seu banco e escaneie o código QR para pagar</p>
-            </CardContent>
-          </Card>
-        )}
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle className="text-center">QR Code PIX</CardTitle>
+          </CardHeader>
+          <CardContent className="p-6 text-center">
+            <div className="bg-white p-4 rounded-lg inline-block shadow-sm">
+              <img
+                src={invoice.pix.qr_code || "/placeholder.svg"}
+                alt="QR Code PIX"
+                className="w-64 h-64 mx-auto"
+                onError={(e) => {
+                  console.error("Erro ao carregar QR Code")
+                  e.currentTarget.src = "/placeholder.svg?height=256&width=256"
+                }}
+              />
+            </div>
+            <p className="text-sm text-gray-600 mt-4">Abra o app do seu banco e escaneie o código</p>
+          </CardContent>
+        </Card>
 
         {/* PIX Copia e Cola */}
-        {pixCode && paymentStatus === "waiting" && (
-          <Card>
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle className="text-center">PIX Copia e Cola</CardTitle>
+          </CardHeader>
+          <CardContent className="p-6">
+            <div className="bg-gray-100 p-4 rounded-lg mb-4">
+              <p className="text-sm font-mono break-all text-gray-800">{invoice.pix.payload}</p>
+            </div>
+            <Button onClick={copyPixCode} className="w-full bg-transparent" variant="outline">
+              <Copy className="h-4 w-4 mr-2" />
+              {copied ? "Copiado!" : "Copiar Código PIX"}
+            </Button>
+          </CardContent>
+        </Card>
+
+        {/* Informações */}
+        <Card>
+          <CardContent className="p-6">
+            <h3 className="font-semibold mb-4">Informações do Pagamento</h3>
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between">
+                <span className="text-gray-600">ID da Fatura:</span>
+                <span className="font-mono">{invoice.invoice_id}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-600">External ID:</span>
+                <span className="font-mono">{invoice.external_id}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-600">Status:</span>
+                <span>{invoice.status.title}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-600">Tipo:</span>
+                <span className="capitalize">{invoice.type === "emergency" ? "Emergência" : "Normal"}</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Debug Info */}
+        {process.env.NODE_ENV === "development" && status && (
+          <Card className="mt-6 border-yellow-200">
+            <CardHeader>
+              <CardTitle className="text-yellow-800">Debug Info</CardTitle>
+            </CardHeader>
             <CardContent className="p-6">
-              <h3 className="text-lg font-semibold mb-4 text-center">PIX Copia e Cola</h3>
-              <div className="bg-gray-50 p-3 rounded-lg mb-4">
-                <p className="text-xs text-gray-600 break-all font-mono">{pixCode}</p>
-              </div>
-              <Button onClick={copyPixCode} className="w-full bg-transparent" variant="outline">
-                <Copy className="h-4 w-4 mr-2" />
-                {copied ? "Copiado!" : "Copiar código PIX"}
-              </Button>
-              <p className="text-sm text-gray-600 mt-4 text-center">
-                Ou copie o código PIX e cole no seu app de pagamentos
-              </p>
+              <pre className="text-xs bg-yellow-50 p-4 rounded overflow-auto">{JSON.stringify(status, null, 2)}</pre>
             </CardContent>
           </Card>
         )}
-
-        {/* Informações de Debug */}
-        {externalId && (
-          <Card>
-            <CardContent className="p-4">
-              <h4 className="text-sm font-semibold mb-2">Informações do Pagamento</h4>
-              <div className="text-xs text-gray-600 space-y-1">
-                <p>External ID: {externalId}</p>
-                <p>Invoice ID: {invoiceId}</p>
-                <p>Status: {paymentStatus}</p>
-                <p>Aguardando webhook: {isWaitingForWebhook ? "Sim" : "Não"}</p>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Botão Voltar */}
-        <div className="text-center">
-          <Button onClick={() => router.back()} variant="outline">
-            Voltar
-          </Button>
-        </div>
       </div>
     </div>
   )

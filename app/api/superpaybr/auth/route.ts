@@ -1,14 +1,27 @@
 import { NextResponse } from "next/server"
 
+// ⚠️ CACHE DE AUTENTICAÇÃO GLOBAL
+let authCache: { token: string; expiresAt: number } | null = null
+
 export async function POST() {
   try {
-    console.log("=== AUTENTICAÇÃO SUPERPAYBR ===")
+    console.log("🔐 Iniciando autenticação SuperPayBR...")
+
+    // ✅ VERIFICAR CACHE VÁLIDO
+    if (authCache && Date.now() < authCache.expiresAt) {
+      console.log("✅ Token SuperPayBR obtido do cache")
+      return NextResponse.json({
+        success: true,
+        token: authCache.token,
+        source: "cache",
+      })
+    }
 
     const token = process.env.SUPERPAYBR_TOKEN
     const secretKey = process.env.SUPERPAYBR_SECRET_KEY
 
     if (!token || !secretKey) {
-      console.log("❌ Credenciais SuperPayBR não encontradas")
+      console.error("❌ Credenciais SuperPayBR não encontradas")
       return NextResponse.json(
         {
           success: false,
@@ -18,20 +31,21 @@ export async function POST() {
       )
     }
 
-    console.log("🔐 Fazendo autenticação SuperPayBR...")
+    console.log("📋 Credenciais encontradas:", {
+      token: token.substring(0, 10) + "...",
+      secret: secretKey.substring(0, 10) + "...",
+    })
 
-    // Criar Basic Auth header
-    const credentials = Buffer.from(`${token}:${secretKey}`).toString("base64")
-
-    const authResponse = await fetch("https://api.superpaybr.com/auth", {
+    // ✅ AUTENTICAÇÃO CORRETA SUPERPAYBR
+    const authResponse = await fetch(`${process.env.SUPERPAYBR_API_URL}/auth`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Basic ${credentials}`,
         Accept: "application/json",
       },
       body: JSON.stringify({
-        scope: "invoice.write customer.write webhook.write",
+        token: token,
+        secret: secretKey,
       }),
     })
 
@@ -41,29 +55,41 @@ export async function POST() {
       ok: authResponse.ok,
     })
 
+    const responseText = await authResponse.text()
+    console.log("📄 Resposta completa:", responseText.substring(0, 500))
+
     if (authResponse.ok) {
-      const authData = await authResponse.json()
-      console.log("✅ Autenticação SuperPayBR bem-sucedida!")
+      let authData
+      try {
+        authData = JSON.parse(responseText)
+      } catch (parseError) {
+        console.error("❌ Erro ao parsear JSON:", parseError)
+        throw new Error(`Resposta inválida da API: ${responseText}`)
+      }
 
-      return NextResponse.json({
-        success: true,
-        data: authData,
-        message: "Autenticação SuperPayBR realizada com sucesso",
-      })
+      if (authData.success && authData.token) {
+        // ✅ SALVAR NO CACHE POR 50 MINUTOS
+        authCache = {
+          token: authData.token,
+          expiresAt: Date.now() + 50 * 60 * 1000, // 50 minutos
+        }
+
+        console.log("✅ Autenticação SuperPayBR realizada com sucesso!")
+
+        return NextResponse.json({
+          success: true,
+          token: authData.token,
+          source: "api",
+        })
+      } else {
+        throw new Error(authData.message || "Token não recebido da API SuperPayBR")
+      }
     } else {
-      const errorText = await authResponse.text()
-      console.log("❌ Erro na autenticação SuperPayBR:", authResponse.status, errorText)
-
-      return NextResponse.json(
-        {
-          success: false,
-          error: `Erro SuperPayBR ${authResponse.status}: ${errorText}`,
-        },
-        { status: authResponse.status },
-      )
+      console.error("❌ Erro na autenticação SuperPayBR:", authResponse.status, responseText)
+      throw new Error(`Erro SuperPayBR ${authResponse.status}: ${responseText}`)
     }
   } catch (error) {
-    console.log("❌ Erro na autenticação SuperPayBR:", error)
+    console.error("❌ Erro na autenticação SuperPayBR:", error)
     return NextResponse.json(
       {
         success: false,
@@ -79,5 +105,7 @@ export async function GET() {
     success: true,
     message: "SuperPayBR Auth endpoint ativo",
     timestamp: new Date().toISOString(),
+    cache_status: authCache ? "cached" : "empty",
+    cache_expires: authCache ? new Date(authCache.expiresAt).toISOString() : null,
   })
 }
