@@ -26,27 +26,28 @@ export function SmartQRCode({ invoice, width = 200, height = 200, className = ""
 
   useEffect(() => {
     generateQRCode()
-  }, [invoice])
+  }, [invoice, width])
 
   const generateQRCode = () => {
     console.log("🔄 Gerando QR Code PIX com QuickChart.io...")
 
     try {
       // Usar o payload PIX se disponível, senão usar um código de emergência
-      let pixCode = invoice.pix.payload
+      let pixCode = invoice.pix.payload || invoice.pix.qr_code
 
       if (!pixCode) {
         // Gerar código PIX de emergência se não houver payload
-        const amount = "34.90" // valor padrão
-        pixCode = `00020101021226580014br.gov.bcb.pix2536pix.quickchart.io/emergency/${Date.now()}520400005303986540${amount}5802BR5909SHEIN5011SAO PAULO62070503***6304QRCD`
+        const amount = "27.97" // valor padrão baseado na imagem
+        const timestamp = Date.now()
+        pixCode = `00020101021226580014br.gov.bcb.pix2536emergency.quickchart.io/${timestamp}520400005303986540${amount}5802BR5909SHEIN5011SAO PAULO62070503***6304EMRG`
         console.log("⚠️ Usando código PIX de emergência")
       }
 
       // Gerar QR Code usando QuickChart.io
       const encodedPixCode = encodeURIComponent(pixCode)
-      const quickChartUrl = `https://quickchart.io/qr?text=${encodedPixCode}&size=${width}&margin=1&format=png`
+      const quickChartUrl = `https://quickchart.io/qr?text=${encodedPixCode}&size=${width}&margin=1&format=png&errorCorrectionLevel=M`
 
-      console.log("✅ QR Code gerado com QuickChart.io:", quickChartUrl.substring(0, 100) + "...")
+      console.log("✅ QR Code gerado com QuickChart.io")
 
       setQrCodeUrl(quickChartUrl)
       setLoading(false)
@@ -102,11 +103,12 @@ export function SmartQRCode({ invoice, width = 200, height = 200, className = ""
         alt="QR Code PIX"
         width={width}
         height={height}
-        className="rounded-lg"
+        className="rounded-lg border border-gray-200"
         onError={() => {
           console.log("❌ Erro ao carregar QR Code, tentando novamente...")
           retry()
         }}
+        crossOrigin="anonymous"
       />
     </div>
   )

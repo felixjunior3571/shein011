@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js"
 
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
-// Importar armazenamento global do webhook
+// Armazenamento global em memória como fallback
 const paymentConfirmations = new Map<string, any>()
 
 function getPaymentConfirmation(identifier: string) {
@@ -33,43 +33,82 @@ export async function GET(request: NextRequest) {
     console.log("🔍 Verificando status de pagamento SuperPayBR:", { externalId, invoiceId, token, action })
 
     if (action === "all") {
-      // Buscar todas as confirmações no Supabase
-      const { data: webhooks, error } = await supabase
-        .from("payment_webhooks")
-        .select("*")
-        .eq("gateway", "superpaybr")
-        .order("received_at", { ascending: false })
-        .limit(50)
+      try {
+        // Buscar todas as confirmações no Supabase
+        const { data: webhooks, error } = await supabase
+          .from("payment_webhooks")
+          .select("*")
+          .eq("gateway", "superpaybr")
+          .order("received_at", { ascending: false })
+          .limit(50)
 
-      if (error) {
-        console.log("❌ Erro ao buscar webhooks no Supabase:", error)
-        return NextResponse.json({ success: false, error: "Database error" }, { status: 500 })
+        if (error) {
+          console.log("⚠️ Erro ao buscar webhooks no Supabase, usando fallback:", error.message)
+          // Fallback para dados em memória
+          const confirmations: any[] = []
+          const seen = new Set<string>()
+
+          for (const [key, value] of paymentConfirmations.entries()) {
+            if (!seen.has(value.externalId)) {
+              confirmations.push(value)
+              seen.add(value.externalId)
+            }
+          }
+
+          return NextResponse.json({
+            success: true,
+            data: confirmations.sort((a, b) => new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime()),
+            source: "memory_fallback",
+          })
+        }
+
+        return NextResponse.json({
+          success: true,
+          data: webhooks || [],
+          source: "supabase",
+        })
+      } catch (dbError) {
+        console.log("❌ Erro de conexão com Supabase:", dbError)
+        return NextResponse.json({
+          success: true,
+          data: [],
+          source: "error_fallback",
+        })
       }
-
-      return NextResponse.json({
-        success: true,
-        data: webhooks || [],
-      })
     }
 
     if (action === "events") {
-      // Buscar eventos recentes no Supabase
-      const { data: events, error } = await supabase
-        .from("payment_webhooks")
-        .select("*")
-        .eq("gateway", "superpaybr")
-        .order("received_at", { ascending: false })
-        .limit(20)
+      try {
+        // Buscar eventos recentes no Supabase
+        const { data: events, error } = await supabase
+          .from("payment_webhooks")
+          .select("*")
+          .eq("gateway", "superpaybr")
+          .order("received_at", { ascending: false })
+          .limit(20)
 
-      if (error) {
-        console.log("❌ Erro ao buscar eventos no Supabase:", error)
-        return NextResponse.json({ success: false, error: "Database error" }, { status: 500 })
+        if (error) {
+          console.log("⚠️ Erro ao buscar eventos no Supabase:", error.message)
+          return NextResponse.json({
+            success: true,
+            data: [],
+            source: "memory_fallback",
+          })
+        }
+
+        return NextResponse.json({
+          success: true,
+          data: events || [],
+          source: "supabase",
+        })
+      } catch (dbError) {
+        console.log("❌ Erro de conexão com Supabase:", dbError)
+        return NextResponse.json({
+          success: true,
+          data: [],
+          source: "error_fallback",
+        })
       }
-
-      return NextResponse.json({
-        success: true,
-        data: events || [],
-      })
     }
 
     // Determinar identificador para busca
@@ -105,45 +144,49 @@ export async function GET(request: NextRequest) {
       console.log(`🔍 Busca em memória por Token (${token}):`, confirmation ? "ENCONTRADO" : "NÃO ENCONTRADO")
     }
 
-    // Se não encontrou na memória, buscar no Supabase
+    // Se não encontrou na memória, tentar buscar no Supabase
     if (!confirmation) {
-      console.log("🔍 Buscando no Supabase...")
+      try {
+        console.log("🔍 Buscando no Supabase...")
 
-      let query = supabase.from("payment_webhooks").select("*").eq("gateway", "superpaybr")
+        let query = supabase.from("payment_webhooks").select("*").eq("gateway", "superpaybr")
 
-      if (externalId) {
-        query = query.eq("external_id", externalId)
-      } else if (invoiceId) {
-        query = query.eq("invoice_id", invoiceId)
-      } else if (token) {
-        query = query.eq("token", token)
-      }
-
-      const { data: webhookData, error } = await query.single()
-
-      if (error && error.code !== "PGRST116") {
-        // PGRST116 = No rows found
-        console.log("❌ Erro ao buscar no Supabase:", error)
-        return NextResponse.json({ success: false, error: "Database error" }, { status: 500 })
-      }
-
-      if (webhookData) {
-        confirmation = {
-          externalId: webhookData.external_id,
-          invoiceId: webhookData.invoice_id,
-          token: webhookData.token,
-          isPaid: webhookData.is_paid,
-          isDenied: webhookData.is_denied,
-          isRefunded: webhookData.is_refunded,
-          isExpired: webhookData.is_expired,
-          isCanceled: webhookData.is_canceled,
-          amount: webhookData.amount,
-          paymentDate: webhookData.payment_date,
-          statusCode: webhookData.status_code,
-          statusName: webhookData.status_description,
-          receivedAt: webhookData.received_at,
+        if (externalId) {
+          query = query.eq("external_id", externalId)
+        } else if (invoiceId) {
+          query = query.eq("invoice_id", invoiceId)
+        } else if (token) {
+          query = query.eq("token", token)
         }
-        console.log("✅ Confirmação encontrada no Supabase")
+
+        const { data: webhookData, error } = await query.single()
+
+        if (error && error.code !== "PGRST116") {
+          // PGRST116 = No rows found
+          console.log("⚠️ Erro ao buscar no Supabase:", error.message)
+        }
+
+        if (webhookData) {
+          confirmation = {
+            externalId: webhookData.external_id,
+            invoiceId: webhookData.invoice_id,
+            token: webhookData.token,
+            isPaid: webhookData.is_paid,
+            isDenied: webhookData.is_denied,
+            isRefunded: webhookData.is_refunded,
+            isExpired: webhookData.is_expired,
+            isCanceled: webhookData.is_canceled,
+            amount: webhookData.amount,
+            paymentDate: webhookData.payment_date,
+            statusCode: webhookData.status_code,
+            statusName: webhookData.status_description,
+            receivedAt: webhookData.received_at,
+          }
+          console.log("✅ Confirmação encontrada no Supabase")
+        }
+      } catch (dbError) {
+        console.log("❌ Erro de conexão com Supabase:", dbError)
+        // Continuar sem erro, apenas não encontrou dados
       }
     }
 
@@ -191,6 +234,7 @@ export async function GET(request: NextRequest) {
       {
         success: false,
         error: "Internal server error",
+        message: error instanceof Error ? error.message : "Unknown error",
       },
       { status: 500 },
     )

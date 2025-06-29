@@ -201,34 +201,39 @@ export async function POST(request: NextRequest) {
     // Armazenar confirmações em memória global
     const confirmation = savePaymentConfirmation(external_id, invoice.id, webhookData)
 
-    // Salvar webhook no Supabase
-    const supabaseData = {
-      external_id,
-      invoice_id: invoice.id,
-      token,
-      status_code: statusCode,
-      status_name: statusInfo.name,
-      status_description: statusInfo.title,
-      amount: preco / 100,
-      payment_date: invoice.payment?.payDate || null,
-      is_paid: isPaid,
-      is_denied: isDenied,
-      is_refunded: isRefunded,
-      is_expired: isExpired,
-      is_canceled: isCanceled,
-      webhook_data: body,
-      gateway: "superpaybr",
-      processed_at: new Date().toISOString(),
-    }
+    // Tentar salvar webhook no Supabase (com fallback)
+    try {
+      const supabaseData = {
+        external_id,
+        invoice_id: invoice.id,
+        token,
+        status_code: statusCode,
+        status_name: statusInfo.name,
+        status_description: statusInfo.title,
+        amount: preco / 100,
+        payment_date: invoice.payment?.payDate || null,
+        is_paid: isPaid,
+        is_denied: isDenied,
+        is_refunded: isRefunded,
+        is_expired: isExpired,
+        is_canceled: isCanceled,
+        webhook_data: body,
+        gateway: "superpaybr",
+        processed_at: new Date().toISOString(),
+        received_at: new Date().toISOString(),
+      }
 
-    const { error: dbError } = await supabase.from("payment_webhooks").upsert(supabaseData, {
-      onConflict: "external_id",
-    })
+      const { error: dbError } = await supabase.from("payment_webhooks").upsert(supabaseData, {
+        onConflict: "external_id,gateway",
+      })
 
-    if (dbError) {
-      console.log("❌ Erro ao salvar webhook SuperPayBR no Supabase:", dbError)
-    } else {
-      console.log("✅ Webhook SuperPayBR salvo no Supabase com sucesso")
+      if (dbError) {
+        console.log("⚠️ Erro ao salvar webhook SuperPayBR no Supabase (continuando com memória):", dbError.message)
+      } else {
+        console.log("✅ Webhook SuperPayBR salvo no Supabase com sucesso")
+      }
+    } catch (dbError) {
+      console.log("⚠️ Erro de conexão com Supabase (continuando com memória):", dbError)
     }
 
     console.log("✅ Webhook SuperPayBR processado com sucesso!")
