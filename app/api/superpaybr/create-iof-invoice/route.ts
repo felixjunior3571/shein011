@@ -1,5 +1,4 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { getSuperPayAccessToken } from "@/lib/superpaybr-auth"
 
 // Função para validar CPF
 function validateCPF(cpf: string): boolean {
@@ -80,7 +79,15 @@ export async function POST(request: NextRequest) {
     }
 
     // Obter access token
-    const accessToken = await getSuperPayAccessToken()
+    const authResponse = await fetch(`${request.nextUrl.origin}/api/superpaybr/auth`)
+    const authData = await authResponse.json()
+
+    if (!authData.success) {
+      console.log("❌ Falha na autenticação SuperPayBR IOF, usando fallback")
+      return createSimulatedIOFInvoice(request, body)
+    }
+
+    const { access_token } = authData.data
 
     // Carregar dados do usuário
     const getUserData = () => {
@@ -187,7 +194,7 @@ export async function POST(request: NextRequest) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
+        Authorization: `Bearer ${access_token}`,
       },
       body: JSON.stringify(invoicePayload),
     })

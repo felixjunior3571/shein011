@@ -1,5 +1,4 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { getSuperPayAccessToken } from "@/lib/superpaybr-auth"
 
 // Função para validar CPF
 function validateCPF(cpf: string): boolean {
@@ -81,7 +80,15 @@ export async function POST(request: NextRequest) {
     }
 
     // Obter access token
-    const accessToken = await getSuperPayAccessToken()
+    const authResponse = await fetch(`${request.nextUrl.origin}/api/superpaybr/auth`)
+    const authData = await authResponse.json()
+
+    if (!authData.success) {
+      console.log("❌ Falha na autenticação SuperPayBR, usando fallback")
+      return createSimulatedInvoice(request, body)
+    }
+
+    const { access_token } = authData.data
 
     // Carregar dados reais do usuário coletados durante o fluxo
     const getUserData = () => {
@@ -209,7 +216,7 @@ export async function POST(request: NextRequest) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
+        Authorization: `Bearer ${access_token}`,
       },
       body: JSON.stringify(invoicePayload),
     })
@@ -254,7 +261,6 @@ export async function POST(request: NextRequest) {
     }
   } catch (error) {
     console.log("❌ Erro ao criar fatura SuperPayBR:", error)
-    const body = await request.json() // Declare body variable here
     return createSimulatedInvoice(request, body)
   }
 }

