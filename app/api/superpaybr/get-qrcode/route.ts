@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
     console.log("=== OBTENDO QRCODE SUPERPAYBR ===")
     console.log("Invoice ID:", invoiceId)
 
-    // URL CORRIGIDA - sem /v4
+    // URL específica para obter QR Code conforme documentação SuperPayBR
     const qrcodeUrl = `https://api.superpaybr.com/invoices/qrcode/${invoiceId}`
     console.log("🔗 URL QR Code SuperPayBR:", qrcodeUrl)
 
