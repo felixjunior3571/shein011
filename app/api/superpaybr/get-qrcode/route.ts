@@ -6,122 +6,61 @@ export async function GET(request: NextRequest) {
     const invoiceId = searchParams.get("invoiceId")
 
     if (!invoiceId) {
-      console.log("❌ Invoice ID não fornecido")
+      return NextResponse.json({ success: false, error: "Invoice ID é obrigatório" }, { status: 400 })
+    }
+
+    console.log("🔍 Buscando QR Code SuperPayBR para invoice:", invoiceId)
+
+    // Verificar se temos as variáveis de ambiente necessárias
+    const apiUrl = process.env.SUPERPAY_API_URL
+    const token = process.env.SUPERPAY_TOKEN
+
+    if (!apiUrl || !token) {
+      console.error("❌ Variáveis de ambiente SuperPayBR não configuradas")
       return NextResponse.json(
-        {
-          success: false,
-          error: "Invoice ID não fornecido",
-        },
-        { status: 400 },
+        { success: false, error: "Configuração da API SuperPayBR não encontrada" },
+        { status: 500 },
       )
     }
 
-    console.log("=== OBTENDO QRCODE SUPERPAYBR V4 ===")
-    console.log("Invoice ID:", invoiceId)
-
-    // URL CORRETA conforme documentação SuperPayBR v4
-    const qrcodeUrl = `https://api.superpaybr.com/v4/invoices/qrcode/${invoiceId}`
-    console.log("🔗 URL QR Code SuperPayBR v4:", qrcodeUrl)
-
-    // Fazer requisição pública para obter QR Code (CONSULTA PÚBLICA - não precisa de autenticação)
-    const startTime = Date.now()
-    const qrcodeResponse = await fetch(qrcodeUrl, {
+    // Fazer requisição para a API SuperPayBR
+    const response = await fetch(`${apiUrl}/v4/invoice/${invoiceId}`, {
       method: "GET",
       headers: {
+        Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
-        "User-Agent": "SHEIN-Card-App/1.0",
-        Accept: "application/json",
       },
     })
-    const responseTime = Date.now() - startTime
 
-    console.log("📥 Resposta QR Code SuperPayBR v4:", {
-      status: qrcodeResponse.status,
-      statusText: qrcodeResponse.statusText,
-      ok: qrcodeResponse.ok,
-      responseTime: `${responseTime}ms`,
-      url: qrcodeUrl,
-    })
-
-    if (qrcodeResponse.ok) {
-      const qrcodeData = await qrcodeResponse.json()
-      console.log("✅ QR Code SuperPayBR v4 obtido com sucesso!")
-      console.log("📋 Estrutura da resposta:", {
-        keys: Object.keys(qrcodeData),
-        hasQrCode: !!qrcodeData.qr_code,
-        hasImage: !!qrcodeData.image,
-        hasUrl: !!qrcodeData.url,
-      })
-
-      return NextResponse.json({
-        success: true,
-        data: qrcodeData,
-        qrcode_url: qrcodeUrl,
-        invoice_id: invoiceId,
-        response_time: responseTime,
-        api_version: "v4",
-        source: "superpaybr_v4_api",
-      })
-    } else {
-      // Tratar erros conforme formato da documentação SuperPayBR
-      let errorData = null
-      try {
-        errorData = await qrcodeResponse.json()
-      } catch {
-        errorData = { message: await qrcodeResponse.text() }
-      }
-
-      console.log("❌ Erro SuperPayBR v4:", {
-        status: qrcodeResponse.status,
-        errorData,
-      })
-
-      // Tratamento específico para erro 404 conforme documentação
-      if (qrcodeResponse.status === 404) {
-        console.log("📋 Fatura não encontrada (404):", {
-          error: errorData?.error,
-          message: errorData?.message,
-          seconds: errorData?.__seconds,
-        })
-
-        return NextResponse.json(
-          {
-            success: false,
-            error: "Fatura não encontrada",
-            message: errorData?.message || "Sorry, we couldn't find this invoice id.",
-            invoice_id: invoiceId,
-            attempted_url: qrcodeUrl,
-            api_response: errorData,
-            __seconds: errorData?.__seconds,
-            api_version: "v4",
-          },
-          { status: 404 },
-        )
-      }
-
-      // Outros erros
+    if (!response.ok) {
+      console.error("❌ Erro na API SuperPayBR:", response.status, response.statusText)
       return NextResponse.json(
-        {
-          success: false,
-          error: `Erro SuperPayBR v4: ${qrcodeResponse.status}`,
-          message: errorData?.message || qrcodeResponse.statusText,
-          details: errorData,
-          attempted_url: qrcodeUrl,
-          invoice_id: invoiceId,
-          api_version: "v4",
-        },
-        { status: qrcodeResponse.status },
+        { success: false, error: `Erro na API SuperPayBR: ${response.status}` },
+        { status: response.status },
       )
     }
+
+    const data = await response.json()
+    console.log("✅ Resposta da API SuperPayBR:", data)
+
+    // Extrair dados do QR Code
+    const qrCodeData = {
+      qr_code: data?.pix?.qr_code || data?.qr_code,
+      image: data?.pix?.image || data?.image,
+      payload: data?.pix?.payload || data?.payload,
+      pix_code: data?.pix?.pix_code || data?.pix_code,
+    }
+
+    return NextResponse.json({
+      success: true,
+      data: qrCodeData,
+    })
   } catch (error) {
-    console.log("❌ Erro interno SuperPayBR v4:", error)
+    console.error("❌ Erro interno ao buscar QR Code SuperPayBR:", error)
     return NextResponse.json(
       {
         success: false,
-        error: "Erro interno do servidor",
-        message: "Falha na comunicação com SuperPayBR v4",
-        details: error instanceof Error ? error.message : String(error),
-        api_version: "v4",
+        error: error instanceof Error ? error.message : "Erro interno do servidor",
       },
       { status: 500 },
     )

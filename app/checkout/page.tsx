@@ -237,7 +237,7 @@ export default function SuperPayBRCheckoutPage() {
     console.log("🚨 Criando PIX de emergência SuperPayBR...")
 
     const totalAmount = Number.parseFloat(amount)
-    const emergencyPix = `00020101021226580014br.gov.bcb.pix2536emergency.superpaybr.com/qr/v2/EMERGENCY${Date.now()}520400005303986540${totalAmount.toFixed(2)}5802BR5909SHEIN5011SAO PAULO62070503***6304EMRG`
+    const emergencyPix = `00020101021226580014br.gov.bcb.pix2536emergency.quickchart.io/qr/v2/EMERGENCY${Date.now()}520400005303986540${totalAmount.toFixed(2)}5802BR5909SHEIN5011SAO PAULO62070503***6304EMRG`
 
     const emergencyInvoice: InvoiceData = {
       id: `EMG_${Date.now()}`,
@@ -245,7 +245,7 @@ export default function SuperPayBRCheckoutPage() {
       pix: {
         payload: emergencyPix,
         image: "/placeholder.svg?height=250&width=250",
-        qr_code: `https://quickchart.io/qr?text=${encodeURIComponent(emergencyPix)}`,
+        qr_code: `https://quickchart.io/qr?text=${encodeURIComponent(emergencyPix)}&size=200&margin=1&format=png`,
       },
       status: {
         code: 1,
@@ -425,7 +425,7 @@ export default function SuperPayBRCheckoutPage() {
             <p className="text-sm text-gray-500">Frete {method} - Cartão SHEIN</p>
           </div>
 
-          {/* QR Code Inteligente */}
+          {/* QR Code Limpo */}
           <div className="text-center mb-6">
             <div className="bg-white p-4 rounded-lg border-2 border-gray-200 inline-block">
               {invoice && <SmartQRCode invoice={invoice} width={200} height={200} className="mx-auto" />}

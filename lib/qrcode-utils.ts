@@ -1,5 +1,6 @@
 /**
  * Utilitários para processamento de QR Codes PIX - SuperPayBR
+ * Versão simplificada usando QuickChart.io
  */
 
 export interface QRCodeData {
@@ -17,6 +18,18 @@ export interface ProcessedQRCodeData {
   isValid: boolean
   source: string
   error?: string
+}
+
+/**
+ * Gera QR Code usando QuickChart.io
+ */
+export function generateQuickChartQRCode(pixCode: string, size = 200): string {
+  if (!pixCode) {
+    return "/placeholder.svg?height=200&width=200"
+  }
+
+  const encodedPixCode = encodeURIComponent(pixCode)
+  return `https://quickchart.io/qr?text=${encodedPixCode}&size=${size}&margin=1&format=png`
 }
 
 /**
@@ -96,12 +109,7 @@ export function isValidImageUrl(url: string): boolean {
  * Gera QR Code de fallback usando QuickChart.io
  */
 export function generateFallbackQRCode(pixCode: string): string {
-  if (!pixCode) {
-    return "/placeholder.svg?height=200&width=200"
-  }
-
-  const encodedPixCode = encodeURIComponent(pixCode)
-  return `https://quickchart.io/qr?text=${encodedPixCode}&size=200`
+  return generateQuickChartQRCode(pixCode)
 }
 
 /**
@@ -139,17 +147,17 @@ export function createEmergencyQRCode(amount: number): {
   type: "emergency"
 } {
   const timestamp = Date.now()
-  const emergencyPayload = `00020101021226580014br.gov.bcb.pix2536emergency.superpaybr.com/qr/v2/EMG${timestamp}520400005303986540${amount.toFixed(2)}5802BR5909SHEIN5011SAO PAULO62070503***6304EMRG`
+  const emergencyPayload = `00020101021226580014br.gov.bcb.pix2536emergency.quickchart.io/qr/v2/EMG${timestamp}520400005303986540${amount.toFixed(2)}5802BR5909SHEIN5011SAO PAULO62070503***6304EMRG`
 
   return {
-    qr_code: generateFallbackQRCode(emergencyPayload),
+    qr_code: generateQuickChartQRCode(emergencyPayload),
     payload: emergencyPayload,
     type: "emergency",
   }
 }
 
 /**
- * Obtém QR Code da SuperPayBR com fallbacks
+ * Obtém QR Code da SuperPayBR com fallbacks usando QuickChart.io
  */
 export async function getQRCodeFromSuperPayBR(invoiceId: string): Promise<ProcessedQRCodeData> {
   logQRCodeEvent("fetch_start", { invoiceId })
@@ -163,6 +171,13 @@ export async function getQRCodeFromSuperPayBR(invoiceId: string): Promise<Proces
 
     if (data.success && data.data) {
       const processed = processQRCodeData(data.data)
+
+      // Se temos um payload PIX, gerar QR Code com QuickChart.io
+      if (processed.pixCode) {
+        processed.qrCodeUrl = generateQuickChartQRCode(processed.pixCode)
+        processed.source = "quickchart_generated"
+      }
+
       logQRCodeEvent("process_success", processed)
       return processed
     } else {
