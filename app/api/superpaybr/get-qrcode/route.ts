@@ -19,8 +19,17 @@ export async function GET(request: NextRequest) {
     console.log(`🔍 Gerando QR Code de emergência SuperPayBR: ${externalId}`)
 
     const validAmount = Number.parseFloat(amount)
+    if (isNaN(validAmount) || validAmount <= 0) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Valor inválido",
+        },
+        { status: 400 },
+      )
+    }
 
-    // PIX payload de emergência
+    // Gerar PIX payload de emergência
     const emergencyPixPayload = `00020126580014br.gov.bcb.pix2536pix.superpaybr.com/qr/v2/${externalId}520400005303986540${validAmount.toFixed(
       2,
     )}5802BR5909SHEIN CARD5011SAO PAULO62070503***6304${Math.random().toString(36).substr(2, 4).toUpperCase()}`
@@ -41,17 +50,25 @@ export async function GET(request: NextRequest) {
         },
         amount: validAmount,
         type: "emergency",
+        generated_at: new Date().toISOString(),
       },
     })
   } catch (error) {
     console.error("❌ Erro ao gerar QR Code SuperPayBR:", error)
-
     return NextResponse.json(
       {
         success: false,
-        error: error instanceof Error ? error.message : "Erro ao gerar QR Code",
+        error: error instanceof Error ? error.message : "Erro desconhecido",
       },
       { status: 500 },
     )
   }
+}
+
+export async function POST() {
+  return NextResponse.json({
+    success: true,
+    message: "Use GET para gerar QR Code",
+    timestamp: new Date().toISOString(),
+  })
 }

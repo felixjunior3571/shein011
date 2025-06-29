@@ -1,6 +1,6 @@
-import { NextResponse } from "next/server"
+import { type NextRequest, NextResponse } from "next/server"
 
-export async function POST() {
+export async function POST(request: NextRequest) {
   try {
     console.log("🔐 Autenticando SuperPayBR...")
 
@@ -19,7 +19,7 @@ export async function POST() {
       )
     }
 
-    console.log("🌐 Enviando requisição de autenticação para SuperPayBR")
+    console.log("🌐 Enviando requisição de autenticação...")
 
     const authResponse = await fetch(`${apiUrl}/v4/auth`, {
       method: "POST",
@@ -34,16 +34,16 @@ export async function POST() {
       }),
     })
 
-    console.log("📥 Resposta da autenticação:", {
-      status: authResponse.status,
-      statusText: authResponse.statusText,
-      ok: authResponse.ok,
-    })
-
     if (!authResponse.ok) {
       const errorText = await authResponse.text()
       console.error("❌ Erro na autenticação SuperPayBR:", errorText)
-      throw new Error(`Erro de autenticação: ${authResponse.status} - ${errorText}`)
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Erro de autenticação: ${authResponse.status}`,
+        },
+        { status: authResponse.status },
+      )
     }
 
     const authData = await authResponse.json()
@@ -60,7 +60,7 @@ export async function POST() {
     return NextResponse.json(
       {
         success: false,
-        error: error instanceof Error ? error.message : "Erro de autenticação desconhecido",
+        error: error instanceof Error ? error.message : "Erro desconhecido",
       },
       { status: 500 },
     )

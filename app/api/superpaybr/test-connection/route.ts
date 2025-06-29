@@ -1,83 +1,97 @@
-import { NextResponse } from "next/server"
+import { type NextRequest, NextResponse } from "next/server"
 
-export async function GET() {
+export async function POST(request: NextRequest) {
   try {
     console.log("🧪 Testando conexão SuperPayBR...")
 
+    // Verificar variáveis de ambiente
     const apiUrl = process.env.SUPERPAY_API_URL
     const token = process.env.SUPERPAY_TOKEN
     const secretKey = process.env.SUPERPAY_SECRET_KEY
 
-    // Verificar variáveis de ambiente
-    const envCheck = {
-      SUPERPAY_API_URL: !!apiUrl,
-      SUPERPAY_TOKEN: !!token,
-      SUPERPAY_SECRET_KEY: !!secretKey,
-    }
-
-    console.log("🔍 Verificação de variáveis:", envCheck)
-
-    if (!apiUrl || !token || !secretKey) {
+    if (!apiUrl) {
       return NextResponse.json({
         success: false,
-        error: "Variáveis de ambiente SuperPayBR não configuradas",
-        env_check: envCheck,
+        error: "SUPERPAY_API_URL não configurada",
+        missing: ["SUPERPAY_API_URL"],
       })
     }
 
-    // Testar autenticação
-    console.log("🔐 Testando autenticação...")
-
-    const authResponse = await fetch(`${apiUrl}/v4/auth`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify({
-        token: token,
-        secret_key: secretKey,
-      }),
-    })
-
-    const authResult = {
-      status: authResponse.status,
-      statusText: authResponse.statusText,
-      ok: authResponse.ok,
+    if (!token) {
+      return NextResponse.json({
+        success: false,
+        error: "SUPERPAY_TOKEN não configurado",
+        missing: ["SUPERPAY_TOKEN"],
+      })
     }
 
-    console.log("📥 Resultado da autenticação:", authResult)
+    if (!secretKey) {
+      return NextResponse.json({
+        success: false,
+        error: "SUPERPAY_SECRET_KEY não configurado",
+        missing: ["SUPERPAY_SECRET_KEY"],
+      })
+    }
+
+    console.log("✅ Variáveis de ambiente configuradas")
+
+    // Testar autenticação
+    const authResponse = await fetch(`${request.nextUrl.origin}/api/superpaybr/auth`, {
+      method: "POST",
+    })
 
     if (!authResponse.ok) {
-      const errorText = await authResponse.text()
+      const errorData = await authResponse.json()
       return NextResponse.json({
         success: false,
         error: "Falha na autenticação SuperPayBR",
-        auth_result: authResult,
-        error_details: errorText,
-        env_check: envCheck,
+        details: errorData,
       })
     }
 
     const authData = await authResponse.json()
 
-    console.log("✅ Conexão SuperPayBR testada com sucesso")
+    if (!authData.access_token) {
+      return NextResponse.json({
+        success: false,
+        error: "Token de acesso não obtido",
+        auth_response: authData,
+      })
+    }
+
+    console.log("✅ Autenticação SuperPayBR bem-sucedida")
 
     return NextResponse.json({
       success: true,
-      message: "Conexão SuperPayBR funcionando",
-      auth_result: authResult,
-      has_access_token: !!authData.access_token,
-      env_check: envCheck,
+      message: "Conexão SuperPayBR testada com sucesso",
+      config: {
+        api_url: apiUrl,
+        has_token: !!token,
+        has_secret: !!secretKey,
+      },
+      auth: {
+        success: true,
+        token_type: authData.token_type,
+        expires_in: authData.expires_in,
+      },
       timestamp: new Date().toISOString(),
     })
   } catch (error) {
     console.error("❌ Erro no teste de conexão SuperPayBR:", error)
-
-    return NextResponse.json({
-      success: false,
-      error: error instanceof Error ? error.message : "Erro desconhecido",
-      timestamp: new Date().toISOString(),
-    })
+    return NextResponse.json(
+      {
+        success: false,
+        error: error instanceof Error ? error.message : "Erro desconhecido",
+      },
+      { status: 500 },
+    )
   }
+}
+
+export async function GET() {
+  return NextResponse.json({
+    success: true,
+    message: "SuperPayBR Test Connection endpoint ativo",
+    timestamp: new Date().toISOString(),
+  })
 }

@@ -1,10 +1,11 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { createClient } from "@supabase/supabase-js"
 import { globalPaymentStorage } from "../webhook/route"
 
 export async function POST(request: NextRequest) {
   try {
-    const { external_id, amount } = await request.json()
+    console.log("🧪 Simulando pagamento SuperPayBR...")
+
+    const { external_id, status = "paid" } = await request.json()
 
     if (!external_id) {
       return NextResponse.json(
@@ -16,75 +17,53 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    console.log(`🧪 Simulando pagamento SuperPayBR: ${external_id}`)
+    // Mapear status para códigos SuperPayBR
+    const statusMapping = {
+      paid: { code: 5, name: "paid", title: "Pagamento Confirmado" },
+      denied: { code: 7, name: "denied", title: "Pagamento Negado" },
+      expired: { code: 9, name: "expired", title: "Pagamento Vencido" },
+      canceled: { code: 6, name: "canceled", title: "Pagamento Cancelado" },
+      refunded: { code: 8, name: "refunded", title: "Pagamento Estornado" },
+    }
 
-    const simulatedAmount = Number.parseFloat(amount?.toString() || "34.90")
+    const statusInfo = statusMapping[status as keyof typeof statusMapping] || statusMapping.paid
 
-    // Dados do pagamento simulado
-    const paymentData = {
+    // Simular dados do pagamento
+    const simulatedPayment = {
       external_id: external_id,
       invoice_id: external_id,
       status: {
-        code: 2,
-        text: "paid",
-        title: "Pagamento Confirmado",
+        code: statusInfo.code,
+        text: statusInfo.name,
+        title: statusInfo.title,
       },
-      amount: simulatedAmount,
-      payment_date: new Date().toISOString(),
-      is_paid: true,
-      is_denied: false,
-      is_expired: false,
-      is_canceled: false,
-      is_refunded: false,
+      amount: 34.9,
+      payment_date: status === "paid" ? new Date().toISOString() : null,
+      is_paid: status === "paid",
+      is_denied: status === "denied",
+      is_expired: status === "expired",
+      is_canceled: status === "canceled",
+      is_refunded: status === "refunded",
       webhook_received_at: new Date().toISOString(),
       simulated: true,
     }
 
-    console.log("💾 Salvando pagamento simulado no armazenamento global")
-
     // Salvar no armazenamento global
-    globalPaymentStorage.set(external_id, paymentData)
+    globalPaymentStorage.set(external_id, simulatedPayment)
 
-    // Backup no Supabase
-    try {
-      const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
-
-      await supabase.from("superpaybr_webhooks").upsert({
-        external_id: external_id,
-        invoice_id: external_id,
-        status_code: 2,
-        status_name: "paid",
-        status_title: "Pagamento Confirmado",
-        amount: simulatedAmount,
-        payment_date: new Date().toISOString(),
-        is_paid: true,
-        is_denied: false,
-        is_expired: false,
-        is_canceled: false,
-        is_refunded: false,
-        webhook_data: { simulated: true },
-        created_at: new Date().toISOString(),
-      })
-
-      console.log("✅ Backup da simulação no Supabase realizado")
-    } catch (supabaseError) {
-      console.error("⚠️ Erro no backup da simulação:", supabaseError)
-    }
-
-    console.log("✅ Pagamento SuperPayBR simulado com sucesso")
+    console.log(`✅ Pagamento simulado: ${external_id} - ${statusInfo.title}`)
 
     return NextResponse.json({
       success: true,
       message: "Pagamento simulado com sucesso",
-      data: paymentData,
+      data: simulatedPayment,
     })
   } catch (error) {
-    console.error("❌ Erro na simulação SuperPayBR:", error)
-
+    console.error("❌ Erro ao simular pagamento:", error)
     return NextResponse.json(
       {
         success: false,
-        error: error instanceof Error ? error.message : "Erro na simulação",
+        error: error instanceof Error ? error.message : "Erro desconhecido",
       },
       { status: 500 },
     )
