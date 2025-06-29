@@ -1,173 +1,182 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 
-// Inicializar Supabase
-const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!)
 
-interface SuperPayBRWebhookData {
-  event: {
-    type: string
-    date: string
-  }
-  invoices: {
-    id: string
-    external_id: string
-    token: string
-    date: string
-    status: {
-      code: number
-      title: string
-      description: string
-    }
-    customer: string
-    prices: {
-      total: number
-      discount: number
-      taxs: {
-        others: any
-      }
-      refound: any
-    }
-    type: string
-    payment: {
-      gateway: string
-      date: string | null
-      due: string
-      card: any
-      payId: string
-      payDate: string
-      details: {
-        barcode: string | null
-        pix_code: string
-        qrcode: string
-        url: string
-      }
-    }
-  }
+// Mapeamento de status SuperPayBR
+const STATUS_MAP = {
+  1: "pending", // Aguardando Pagamento
+  2: "processing", // Em Processamento
+  3: "scheduled", // Pagamento Agendado
+  4: "authorized", // Autorizado
+  5: "paid", // ✅ PAGO
+  6: "canceled", // Cancelado
+  7: "refund_pending", // Aguardando Estorno
+  8: "partially_refunded", // Parcialmente Estornado
+  9: "refunded", // Estornado
+  10: "disputed", // Contestado/Em Contestação
+  12: "denied", // ❌ PAGAMENTO NEGADO
+  15: "expired", // ⏰ PAGAMENTO VENCIDO
+  16: "error", // Erro no Pagamento
 }
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("🔔 WEBHOOK SUPERPAYBR RECEBIDO!")
+    console.log("=== WEBHOOK SUPERPAYBR RECEBIDO ===")
 
-    // Obter dados do webhook
-    const webhookData: SuperPayBRWebhookData = await request.json()
-    console.log("📋 Dados do webhook:", JSON.stringify(webhookData, null, 2))
+    const webhookData = await request.json()
+    console.log("📥 Dados do webhook SuperPayBR:", JSON.stringify(webhookData, null, 2))
 
+    // Extrair dados do webhook SuperPayBR
     const { event, invoices } = webhookData
 
-    // Validar se é um evento de atualização de fatura
-    if (event.type !== "invoice.update") {
-      console.log("⚠️ Evento ignorado:", event.type)
-      return NextResponse.json({ success: true, message: "Evento ignorado" })
+    if (!event || !invoices) {
+      console.log("❌ Webhook SuperPayBR inválido - dados ausentes")
+      return NextResponse.json({ error: "Invalid webhook data" }, { status: 400 })
     }
 
-    const externalId = invoices.external_id
-    const statusCode = invoices.status.code
-    const statusTitle = invoices.status.title
-    const amount = invoices.prices.total / 100 // SuperPayBR usa centavos
-    const paymentDate = invoices.payment.payDate
+    const { id: invoiceId, external_id: externalId, status, prices, payment } = invoices
 
-    console.log(`🎯 Processando pagamento: ${externalId} - Status: ${statusCode} (${statusTitle})`)
+    console.log("🔍 Processando webhook SuperPayBR:", {
+      event_type: event.type,
+      invoice_id: invoiceId,
+      external_id: externalId,
+      status_code: status.code,
+      status_title: status.title,
+      amount: prices.total,
+      payment_date: payment.payDate,
+    })
 
-    // Mapear status da SuperPayBR
-    const paymentStatus = {
-      isPaid: false,
-      isDenied: false,
-      isRefunded: false,
-      isExpired: false,
-      isCanceled: false,
-      statusCode,
-      statusName: statusTitle,
-      amount,
-      paymentDate,
+    // Mapear status SuperPayBR
+    const mappedStatus = STATUS_MAP[status.code] || "unknown"
+    const isPaid = status.code === 5
+    const isDenied = status.code === 12
+    const isExpired = status.code === 15
+    const isCanceled = status.code === 6
+    const isRefunded = status.code === 9
+
+    // Preparar dados para salvar
+    const webhookRecord = {
+      external_id: externalId,
+      invoice_id: invoiceId,
+      status_code: status.code,
+      status_name: mappedStatus,
+      status_title: status.title,
+      amount: prices.total,
+      payment_date: payment.payDate || null,
+      webhook_data: webhookData,
+      processed_at: new Date().toISOString(),
+      is_paid: isPaid,
+      is_denied: isDenied,
+      is_expired: isExpired,
+      is_canceled: isCanceled,
+      is_refunded: isRefunded,
     }
 
-    switch (statusCode) {
-      case 5: // Pagamento Confirmado
-        paymentStatus.isPaid = true
-        console.log("✅ PAGAMENTO CONFIRMADO!")
-        break
-      case 12: // Pagamento Negado
-        paymentStatus.isDenied = true
-        console.log("❌ PAGAMENTO NEGADO!")
-        break
-      case 15: // Pagamento Vencido
-        paymentStatus.isExpired = true
-        console.log("⏰ PAGAMENTO VENCIDO!")
-        break
-      case 6: // Cancelado
-        paymentStatus.isCanceled = true
-        console.log("🚫 PAGAMENTO CANCELADO!")
-        break
-      case 9: // Estornado
-        paymentStatus.isRefunded = true
-        console.log("↩️ PAGAMENTO ESTORNADO!")
-        break
-      default:
-        console.log(`ℹ️ Status intermediário: ${statusCode} - ${statusTitle}`)
+    // Salvar no Supabase
+    const { data, error } = await supabase.from("payment_webhooks").upsert(webhookRecord, {
+      onConflict: "external_id",
+    })
+
+    if (error) {
+      console.log("❌ Erro ao salvar webhook SuperPayBR no Supabase:", error)
+    } else {
+      console.log("✅ Webhook SuperPayBR salvo no Supabase com sucesso!")
     }
 
-    // Salvar no localStorage via broadcast (para clientes conectados)
-    const webhookPayload = {
-      type: "SUPERPAYBR_WEBHOOK",
-      externalId,
-      paymentStatus,
-      timestamp: new Date().toISOString(),
-    }
-
-    // Salvar no Supabase para persistência
-    try {
-      const { error: supabaseError } = await supabase.from("payment_webhooks").insert({
-        external_id: externalId,
-        provider: "superpaybr",
-        status_code: statusCode,
-        status_name: statusTitle,
-        amount,
-        payment_date: paymentDate,
-        is_paid: paymentStatus.isPaid,
-        is_denied: paymentStatus.isDenied,
-        is_refunded: paymentStatus.isRefunded,
-        is_expired: paymentStatus.isExpired,
-        is_canceled: paymentStatus.isCanceled,
-        raw_data: webhookData,
-        created_at: new Date().toISOString(),
-      })
-
-      if (supabaseError) {
-        console.log("⚠️ Erro ao salvar no Supabase:", supabaseError)
-      } else {
-        console.log("💾 Webhook salvo no Supabase com sucesso!")
+    // Salvar também no localStorage para monitoramento puro
+    if (typeof window !== "undefined" && externalId) {
+      const paymentData = {
+        isPaid,
+        isDenied,
+        isRefunded,
+        isExpired,
+        isCanceled,
+        statusCode: status.code,
+        statusName: mappedStatus,
+        statusTitle: status.title,
+        amount: prices.total,
+        paymentDate: payment.payDate,
+        processedAt: new Date().toISOString(),
       }
-    } catch (supabaseError) {
-      console.log("⚠️ Erro no Supabase:", supabaseError)
+
+      localStorage.setItem(`webhook_payment_${externalId}`, JSON.stringify(paymentData))
+      console.log("💾 Dados do pagamento salvos no localStorage:", externalId)
     }
 
-    // Broadcast para clientes conectados (se houver WebSocket ou Server-Sent Events)
-    console.log("📡 Broadcasting webhook data:", webhookPayload)
+    // Log do resultado
+    if (isPaid) {
+      console.log("🎉 PAGAMENTO CONFIRMADO VIA WEBHOOK SUPERPAYBR!")
+      console.log(`💰 Valor: R$ ${prices.total}`)
+      console.log(`📅 Data: ${payment.payDate}`)
+    } else if (isDenied) {
+      console.log("❌ PAGAMENTO NEGADO VIA WEBHOOK SUPERPAYBR!")
+    } else if (isExpired) {
+      console.log("⏰ PAGAMENTO VENCIDO VIA WEBHOOK SUPERPAYBR!")
+    } else {
+      console.log(`ℹ️ Status atualizado: ${status.title} (${mappedStatus})`)
+    }
 
     return NextResponse.json({
       success: true,
-      message: "Webhook processado com sucesso",
-      status: paymentStatus,
+      message: "Webhook SuperPayBR processado com sucesso",
+      status: mappedStatus,
     })
   } catch (error) {
     console.log("❌ Erro ao processar webhook SuperPayBR:", error)
     return NextResponse.json(
       {
         success: false,
-        error: "Erro ao processar webhook",
+        error: "Erro interno ao processar webhook",
       },
       { status: 500 },
     )
   }
 }
 
-// Método GET para validação de webhook (conforme documentação)
-export async function GET(request: NextRequest) {
-  return NextResponse.json({
-    success: true,
-    message: "Webhook SuperPayBR endpoint ativo",
-    timestamp: new Date().toISOString(),
-  })
+// Método OPTIONS para validação do webhook SuperPayBR
+export async function OPTIONS(request: NextRequest) {
+  try {
+    console.log("=== VALIDAÇÃO WEBHOOK SUPERPAYBR ===")
+
+    const body = await request.json()
+    const { token } = body
+
+    if (!token) {
+      return NextResponse.json({ error: "Token não fornecido" }, { status: 400 })
+    }
+
+    console.log("🔍 Validando token SuperPayBR:", token)
+
+    // Fazer autenticação para validar
+    const authResponse = await fetch(`${request.nextUrl.origin}/api/superpaybr/auth`)
+    const authResult = await authResponse.json()
+
+    if (!authResult.success) {
+      return NextResponse.json({ error: "Falha na autenticação" }, { status: 401 })
+    }
+
+    const accessToken = authResult.data.access_token
+
+    // Validar token com SuperPayBR
+    const validateResponse = await fetch("https://api.superpaybr.com/webhooks", {
+      method: "OPTIONS",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ token }),
+    })
+
+    if (validateResponse.ok) {
+      console.log("✅ Token SuperPayBR válido!")
+      return NextResponse.json({ success: true })
+    } else {
+      console.log("❌ Token SuperPayBR inválido!")
+      return NextResponse.json({ error: "Token inválido" }, { status: 404 })
+    }
+  } catch (error) {
+    console.log("❌ Erro na validação do webhook SuperPayBR:", error)
+    return NextResponse.json({ error: "Erro interno" }, { status: 500 })
+  }
 }
