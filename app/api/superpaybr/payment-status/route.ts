@@ -18,55 +18,65 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    console.log("🔍 Consultando status SuperPayBR no Supabase:", externalId)
+    console.log("🔍 Verificando status SuperPayBR:", externalId)
 
-    // Buscar no Supabase APENAS (sem consultar API para evitar rate limit)
+    // Buscar APENAS no Supabase (dados do webhook)
     const { data, error } = await supabase
       .from("payment_webhooks")
       .select("*")
       .eq("external_id", externalId)
-      .order("updated_at", { ascending: false })
+      .eq("provider", "superpaybr")
+      .order("processed_at", { ascending: false })
       .limit(1)
       .single()
 
     if (error && error.code !== "PGRST116") {
-      console.log("❌ Erro ao consultar Supabase SuperPayBR:", error)
-      return NextResponse.json({ success: false, error: "Erro ao consultar status" }, { status: 500 })
+      console.error("❌ Erro ao consultar Supabase:", error)
+      return NextResponse.json({ success: false, error: "Erro ao verificar status" }, { status: 500 })
     }
 
     if (!data) {
-      console.log("ℹ️ Pagamento SuperPayBR não encontrado no Supabase:", externalId)
+      console.log("ℹ️ Status não encontrado - aguardando webhook")
       return NextResponse.json({
         success: true,
-        data: {
-          isPaid: false,
-          isDenied: false,
-          isRefunded: false,
-          isExpired: false,
-          isCanceled: false,
-          statusCode: 1,
-          statusName: "Aguardando Pagamento",
-          amount: 0,
-          paymentDate: null,
-        },
-        message: "Pagamento não encontrado - aguardando webhook",
+        found: false,
+        status: "waiting",
+        message: "Aguardando confirmação via webhook SuperPayBR",
       })
     }
 
-    console.log("✅ Status SuperPayBR encontrado no Supabase!")
+    console.log("✅ Status encontrado:", {
+      is_paid: data.is_paid,
+      status_title: data.status_title,
+      processed_at: data.processed_at,
+    })
 
     return NextResponse.json({
       success: true,
-      data: data.payment_data,
-      message: "Status SuperPayBR obtido do Supabase",
-      last_updated: data.updated_at,
+      found: true,
+      data: {
+        external_id: data.external_id,
+        invoice_id: data.invoice_id,
+        status_code: data.status_code,
+        status_title: data.status_title,
+        status_name: data.status_name,
+        amount: data.amount,
+        is_paid: data.is_paid,
+        is_denied: data.is_denied,
+        is_expired: data.is_expired,
+        is_canceled: data.is_canceled,
+        is_refunded: data.is_refunded,
+        payment_date: data.payment_date,
+        processed_at: data.processed_at,
+      },
+      message: data.is_paid ? "Pagamento confirmado!" : data.status_title,
     })
   } catch (error) {
-    console.log("❌ Erro ao consultar status SuperPayBR:", error)
+    console.error("❌ Erro ao verificar status SuperPayBR:", error)
     return NextResponse.json(
       {
         success: false,
-        error: error instanceof Error ? error.message : "Erro desconhecido ao consultar status SuperPayBR",
+        error: error instanceof Error ? error.message : "Erro desconhecido ao verificar status SuperPayBR",
       },
       { status: 500 },
     )

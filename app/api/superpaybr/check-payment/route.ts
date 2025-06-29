@@ -18,54 +18,54 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    console.log("🔍 Verificando pagamento SuperPayBR:", externalId)
-
-    // Buscar APENAS no Supabase (sem consultar API para evitar rate limit)
+    // ⚠️ IMPORTANTE: Buscar APENAS no Supabase para evitar rate limit
     const { data, error } = await supabase
       .from("payment_webhooks")
       .select("*")
       .eq("external_id", externalId)
-      .order("updated_at", { ascending: false })
+      .eq("provider", "superpaybr")
+      .order("processed_at", { ascending: false })
       .limit(1)
       .single()
 
     if (error && error.code !== "PGRST116") {
-      console.log("❌ Erro ao verificar pagamento SuperPayBR:", error)
+      console.error("❌ Erro ao consultar Supabase:", error)
       return NextResponse.json({ success: false, error: "Erro ao verificar pagamento" }, { status: 500 })
     }
 
     if (!data) {
-      console.log("ℹ️ Pagamento SuperPayBR não encontrado:", externalId)
+      // Não encontrado - aguardando webhook
       return NextResponse.json({
         success: true,
         isPaid: false,
-        message: "Pagamento não encontrado - aguardando webhook",
+        isDenied: false,
+        isExpired: false,
+        isCanceled: false,
+        isRefunded: false,
+        statusCode: 1,
+        statusName: "pending",
+        message: "Aguardando confirmação via webhook SuperPayBR",
       })
     }
 
-    const paymentData = data.payment_data
-    console.log("✅ Pagamento SuperPayBR encontrado:", {
-      isPaid: paymentData.isPaid,
-      statusCode: paymentData.statusCode,
-      statusName: paymentData.statusName,
-    })
-
+    // Encontrado no Supabase
     return NextResponse.json({
       success: true,
-      isPaid: paymentData.isPaid,
-      isDenied: paymentData.isDenied,
-      isExpired: paymentData.isExpired,
-      isCanceled: paymentData.isCanceled,
-      isRefunded: paymentData.isRefunded,
-      statusCode: paymentData.statusCode,
-      statusName: paymentData.statusName,
-      amount: paymentData.amount,
-      paymentDate: paymentData.paymentDate,
-      message: paymentData.isPaid ? "Pagamento confirmado!" : "Aguardando pagamento",
-      last_updated: data.updated_at,
+      isPaid: data.is_paid,
+      isDenied: data.is_denied,
+      isExpired: data.is_expired,
+      isCanceled: data.is_canceled,
+      isRefunded: data.is_refunded,
+      statusCode: data.status_code,
+      statusName: data.status_name,
+      statusTitle: data.status_title,
+      amount: data.amount,
+      paymentDate: data.payment_date,
+      message: data.is_paid ? "Pagamento confirmado!" : "Aguardando pagamento",
+      last_updated: data.processed_at,
     })
   } catch (error) {
-    console.log("❌ Erro ao verificar pagamento SuperPayBR:", error)
+    console.error("❌ Erro ao verificar pagamento SuperPayBR:", error)
     return NextResponse.json(
       {
         success: false,
