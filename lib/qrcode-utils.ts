@@ -1,118 +1,103 @@
-// QR Code utilities for SuperPayBR integration
+/**
+ * Utilitários para processamento de QR Codes PIX - SuperPayBR
+ */
 
 export interface QRCodeData {
   qr_code?: string
-  qrcode?: string
-  url?: string
   image?: string
+  url?: string
   pix_code?: string
-  bruto?: string
-  liquido?: string
-  invoice_id?: string
-  status?: string
+  payload?: string
 }
 
 export interface ProcessedQRCodeData {
   qrCodeUrl: string | null
   pixCode: string | null
-  amount: string | null
-  invoiceId: string | null
-  status: string
-  source: "api" | "generated" | "fallback"
+  imageUrl: string | null
+  isValid: boolean
+  source: string
+  error?: string
 }
 
 /**
- * Process QR Code data from SuperPayBR API response
+ * Processa dados de QR Code da API SuperPayBR
  */
 export function processQRCodeData(data: any): ProcessedQRCodeData {
+  console.log("🔄 Processando dados QR Code SuperPayBR:", data)
+
   try {
-    // Log the incoming data for debugging
-    logQRCodeEvent("Processing QR Code data", { data })
+    // Extrair URLs possíveis
+    const qrCodeUrl = data?.qr_code || data?.url || data?.image || null
+    const pixCode = data?.pix_code || data?.payload || null
+    const imageUrl = data?.image || data?.qr_code || null
 
-    // Extract QR code URL from various possible fields
-    const qrCodeUrl = data?.qr_code || data?.qrcode || data?.url || data?.image || null
-
-    // Extract PIX code
-    const pixCode = data?.pix_code || data?.codigo_pix || null
-
-    // Extract amount information
-    const amount = data?.bruto || data?.liquido || data?.valor || data?.amount || null
-
-    // Extract invoice ID
-    const invoiceId = data?.invoice_id || data?.id || data?.fatura_id || null
-
-    // Extract status
-    const status = data?.status || data?.situacao || "unknown"
+    // Validar se temos pelo menos uma URL válida
+    const isValid = !!(qrCodeUrl || pixCode)
 
     const result: ProcessedQRCodeData = {
       qrCodeUrl,
       pixCode,
-      amount,
-      invoiceId,
-      status,
-      source: qrCodeUrl ? "api" : "fallback",
+      imageUrl,
+      isValid,
+      source: "superpaybr_api",
     }
 
-    logQRCodeEvent("QR Code data processed", result)
+    console.log("✅ Dados QR Code processados:", result)
     return result
   } catch (error) {
-    logQRCodeEvent("Error processing QR Code data", {
-      error: error instanceof Error ? error.message : "Unknown error",
-      data,
-    })
-
+    console.error("❌ Erro ao processar dados QR Code:", error)
     return {
       qrCodeUrl: null,
       pixCode: null,
-      amount: null,
-      invoiceId: null,
-      status: "error",
-      source: "fallback",
+      imageUrl: null,
+      isValid: false,
+      source: "error",
+      error: error instanceof Error ? error.message : "Erro desconhecido",
     }
   }
 }
 
 /**
- * Log QR Code related events for debugging
+ * Registra eventos de QR Code para debugging
  */
-export function logQRCodeEvent(event: string, data?: any): void {
+export function logQRCodeEvent(event: string, data: any) {
   const timestamp = new Date().toISOString()
-  const logData = {
-    timestamp,
-    event,
-    ...data,
-  }
+  console.log(`[QR-CODE-${event.toUpperCase()}] ${timestamp}:`, data)
 
-  // Log to console in development
-  if (process.env.NODE_ENV === "development") {
-    console.log(`[QR Code Utils] ${event}:`, data)
+  // Salvar no localStorage para debug (apenas em desenvolvimento)
+  if (typeof window !== "undefined" && process.env.NODE_ENV === "development") {
+    const logs = JSON.parse(localStorage.getItem("qrcode_debug_logs") || "[]")
+    logs.push({
+      event,
+      data,
+      timestamp,
+    })
+    // Manter apenas os últimos 50 logs
+    if (logs.length > 50) {
+      logs.splice(0, logs.length - 50)
+    }
+    localStorage.setItem("qrcode_debug_logs", JSON.stringify(logs))
   }
-
-  // In production, you might want to send to a logging service
-  // For now, we'll just use console.log
-  console.log(`[QR Code Utils] ${timestamp} - ${event}`, data)
 }
 
 /**
- * Validate if a URL is a valid image URL
+ * Valida se uma URL de imagem é válida
  */
 export function isValidImageUrl(url: string): boolean {
   try {
     const urlObj = new URL(url)
-    const validDomains = ["api.superpaybr.com", "superpaybr.com", "quickchart.io", "chart.googleapis.com"]
-
-    return validDomains.some((domain) => urlObj.hostname.includes(domain))
+    return urlObj.protocol === "http:" || urlObj.protocol === "https:"
   } catch {
     return false
   }
 }
 
 /**
- * Generate a fallback QR code using QuickChart.io
+ * Gera QR Code de fallback usando QuickChart.io
  */
 export function generateFallbackQRCode(pixCode: string): string {
   if (!pixCode) {
-    return "/placeholder.svg?height=200&width=200&text=QR+Code+Indisponível"
+    return "/placeholder.svg?height=200&width=200"
   }
 
   const encodedPixCode = encodeURIComponent(pixCode)
@@ -120,11 +105,11 @@ export function generateFallbackQRCode(pixCode: string): string {
 }
 
 /**
- * Extract PIX code from various data formats
+ * Extrai código PIX de diferentes formatos de dados
  */
 export function extractPixCode(data: any): string | null {
-  // Try different possible field names for PIX code
-  const possibleFields = ["pix_code", "codigo_pix", "qr_code_text", "pix_copia_cola", "codigo", "payload"]
+  // Tentar diferentes campos onde o código PIX pode estar
+  const possibleFields = ["pix_code", "payload", "pix", "code", "qr_code_text"]
 
   for (const field of possibleFields) {
     if (data?.[field] && typeof data[field] === "string") {
@@ -136,40 +121,64 @@ export function extractPixCode(data: any): string | null {
 }
 
 /**
- * Format amount for display
+ * Formata valor monetário em Real brasileiro
  */
-export function formatAmount(amount: string | number | null): string {
-  if (!amount) return "R$ 0,00"
-
-  const numAmount = typeof amount === "string" ? Number.parseFloat(amount) : amount
-
-  if (isNaN(numAmount)) return "R$ 0,00"
-
+export function formatAmount(amount: number): string {
   return new Intl.NumberFormat("pt-BR", {
     style: "currency",
     currency: "BRL",
-  }).format(numAmount)
+  }).format(amount)
 }
 
 /**
- * Check if QR code data is valid and complete
+ * Cria QR Code de emergência com dados básicos
  */
-export function isValidQRCodeData(data: ProcessedQRCodeData): boolean {
-  return !!(data.qrCodeUrl || data.pixCode)
-}
-
-/**
- * Create emergency QR code with basic information
- */
-export function createEmergencyQRCode(invoiceId?: string): ProcessedQRCodeData {
-  logQRCodeEvent("Creating emergency QR code", { invoiceId })
+export function createEmergencyQRCode(amount: number): {
+  qr_code: string
+  payload: string
+  type: "emergency"
+} {
+  const timestamp = Date.now()
+  const emergencyPayload = `00020101021226580014br.gov.bcb.pix2536emergency.superpaybr.com/qr/v2/EMG${timestamp}520400005303986540${amount.toFixed(2)}5802BR5909SHEIN5011SAO PAULO62070503***6304EMRG`
 
   return {
-    qrCodeUrl: "/placeholder.svg?height=200&width=200&text=QR+Code+Temporariamente+Indisponível",
-    pixCode: null,
-    amount: null,
-    invoiceId: invoiceId || null,
-    status: "emergency",
-    source: "fallback",
+    qr_code: generateFallbackQRCode(emergencyPayload),
+    payload: emergencyPayload,
+    type: "emergency",
+  }
+}
+
+/**
+ * Obtém QR Code da SuperPayBR com fallbacks
+ */
+export async function getQRCodeFromSuperPayBR(invoiceId: string): Promise<ProcessedQRCodeData> {
+  logQRCodeEvent("fetch_start", { invoiceId })
+
+  try {
+    // Primeira tentativa: API SuperPayBR v4
+    const response = await fetch(`/api/superpaybr/get-qrcode?invoiceId=${invoiceId}`)
+    const data = await response.json()
+
+    logQRCodeEvent("api_response", { status: response.status, data })
+
+    if (data.success && data.data) {
+      const processed = processQRCodeData(data.data)
+      logQRCodeEvent("process_success", processed)
+      return processed
+    } else {
+      throw new Error(data.error || "Falha na API SuperPayBR")
+    }
+  } catch (error) {
+    logQRCodeEvent("fetch_error", { error: error instanceof Error ? error.message : error })
+
+    // Retornar dados de erro
+    return {
+      qrCodeUrl: null,
+      pixCode: null,
+      imageUrl: null,
+      isValid: false,
+      source: "error",
+      error: error instanceof Error ? error.message : "Erro desconhecido",
+    }
   }
 }
