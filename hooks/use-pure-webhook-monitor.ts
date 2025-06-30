@@ -1,28 +1,29 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useEffect, useState } from "react"
 
-interface PaymentData {
-  externalId: string
-  amount: number
-  status: string
-  paymentDate?: string
+interface PaymentStatus {
   isPaid: boolean
   isDenied: boolean
   isExpired: boolean
   isCanceled: boolean
   isRefunded: boolean
+  statusCode: number
+  statusName: string
+  amount: number
+  paymentDate: string
+  lastUpdate: string
+  externalId: string
+  invoiceId: string
 }
 
-interface WebhookMonitorOptions {
-  externalId: string | null
-  onPaymentConfirmed?: (data: PaymentData) => void
-  onPaymentDenied?: (data: PaymentData) => void
-  onPaymentExpired?: (data: PaymentData) => void
-  onPaymentCanceled?: (data: PaymentData) => void
-  onPaymentRefunded?: (data: PaymentData) => void
-  enableDebug?: boolean
+interface UseWebhookMonitorOptions {
+  externalId: string
+  onPaymentConfirmed?: (data: PaymentStatus) => void
+  onPaymentDenied?: (data: PaymentStatus) => void
+  onPaymentExpired?: (data: PaymentStatus) => void
   checkInterval?: number
+  maxAttempts?: number
 }
 
 export function usePureWebhookMonitor({
@@ -30,141 +31,100 @@ export function usePureWebhookMonitor({
   onPaymentConfirmed,
   onPaymentDenied,
   onPaymentExpired,
-  onPaymentCanceled,
-  onPaymentRefunded,
-  enableDebug = false,
-  checkInterval = 2000,
-}: WebhookMonitorOptions) {
-  const [status, setStatus] = useState<
-    "idle" | "monitoring" | "confirmed" | "denied" | "expired" | "canceled" | "refunded"
-  >("idle")
-  const [isWaitingForWebhook, setIsWaitingForWebhook] = useState(false)
+  checkInterval = 3000, // 3 segundos
+  maxAttempts = 100, // 5 minutos máximo
+}: UseWebhookMonitorOptions) {
+  const [status, setStatus] = useState<PaymentStatus | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [lastCheck, setLastCheck] = useState<Date | null>(null)
+  const [attempts, setAttempts] = useState(0)
 
-  const intervalRef = useRef<NodeJS.Timeout | null>(null)
-  const processedPayments = useRef<Set<string>>(new Set())
-
-  const log = (message: string, data?: any) => {
-    if (enableDebug) {
-      console.log(`[WebhookMonitor] ${message}`, data || "")
-    }
-  }
-
-  // Função para verificar localStorage (SEM API CALLS)
-  const checkLocalStorageForPayment = () => {
-    if (!externalId) return null
-
-    try {
-      // Verificar se já foi processado
-      if (processedPayments.current.has(externalId)) {
-        return null
-      }
-
-      // Verificar localStorage para dados do webhook
-      const webhookDataKey = `webhook_payment_${externalId}`
-      const webhookData = localStorage.getItem(webhookDataKey)
-
-      if (webhookData) {
-        const paymentData = JSON.parse(webhookData)
-        log("💾 Dados encontrados no localStorage:", paymentData)
-
-        // Marcar como processado
-        processedPayments.current.add(externalId)
-
-        return paymentData
-      }
-
-      return null
-    } catch (error) {
-      log("❌ Erro ao verificar localStorage:", error)
-      return null
-    }
-  }
-
-  // Monitoramento principal
   useEffect(() => {
-    if (
-      !externalId ||
-      status === "confirmed" ||
-      status === "denied" ||
-      status === "expired" ||
-      status === "canceled" ||
-      status === "refunded"
-    ) {
-      log("🚫 Monitoramento não iniciado:", { externalId, status })
-      return
-    }
+    if (!externalId) return
 
-    log("🔄 Iniciando monitoramento puro para:", externalId)
-    setStatus("monitoring")
-    setIsWaitingForWebhook(true)
+    let intervalId: NodeJS.Timeout
+    let isMounted = true
 
-    const checkPaymentStatus = () => {
-      const paymentData = checkLocalStorageForPayment()
-      setLastCheck(new Date())
+    const checkPaymentStatus = async () => {
+      if (attempts >= maxAttempts) {
+        console.log(`⏰ Máximo de tentativas atingido para ${externalId}`)
+        setIsLoading(false)
+        return
+      }
 
-      if (paymentData) {
-        log("📋 Dados de pagamento encontrados:", paymentData)
+      try {
+        console.log(`🔍 Verificando status via webhook: ${externalId} (tentativa ${attempts + 1})`)
 
-        if (paymentData.isPaid) {
-          log("🎉 PAGAMENTO CONFIRMADO!")
-          setStatus("confirmed")
-          setIsWaitingForWebhook(false)
-          onPaymentConfirmed?.(paymentData)
-        } else if (paymentData.isDenied) {
-          log("❌ PAGAMENTO NEGADO!")
-          setStatus("denied")
-          setIsWaitingForWebhook(false)
-          onPaymentDenied?.(paymentData)
-        } else if (paymentData.isExpired) {
-          log("⏰ PAGAMENTO VENCIDO!")
-          setStatus("expired")
-          setIsWaitingForWebhook(false)
-          onPaymentExpired?.(paymentData)
-        } else if (paymentData.isCanceled) {
-          log("🚫 PAGAMENTO CANCELADO!")
-          setStatus("canceled")
-          setIsWaitingForWebhook(false)
-          onPaymentCanceled?.(paymentData)
-        } else if (paymentData.isRefunded) {
-          log("💰 PAGAMENTO REEMBOLSADO!")
-          setStatus("refunded")
-          setIsWaitingForWebhook(false)
-          onPaymentRefunded?.(paymentData)
+        const response = await fetch(`/api/superpaybr/payment-status?externalId=${externalId}`)
+        const result = await response.json()
+
+        if (!isMounted) return
+
+        setAttempts((prev) => prev + 1)
+
+        if (result.success && result.data) {
+          const paymentData = result.data
+          setStatus(paymentData)
+          setError(null)
+
+          console.log(`📊 Status obtido: ${paymentData.statusName} (${paymentData.statusCode})`)
+
+          // Verificar status finais
+          if (paymentData.isPaid) {
+            console.log(`🎉 Pagamento confirmado via webhook: ${externalId}`)
+            setIsLoading(false)
+            onPaymentConfirmed?.(paymentData)
+            return
+          }
+
+          if (paymentData.isDenied) {
+            console.log(`❌ Pagamento negado: ${externalId}`)
+            setIsLoading(false)
+            onPaymentDenied?.(paymentData)
+            return
+          }
+
+          if (paymentData.isExpired) {
+            console.log(`⏰ Pagamento expirado: ${externalId}`)
+            setIsLoading(false)
+            onPaymentExpired?.(paymentData)
+            return
+          }
+
+          if (paymentData.isCanceled || paymentData.isRefunded) {
+            console.log(`🚫 Pagamento cancelado/estornado: ${externalId}`)
+            setIsLoading(false)
+            return
+          }
+        } else {
+          console.log(`⏳ Aguardando confirmação via webhook: ${externalId}`)
+          setError(null)
         }
-      } else {
-        log("⏳ Ainda aguardando webhook para:", externalId)
+      } catch (err) {
+        console.log(`❌ Erro ao verificar status: ${err}`)
+        setError(err instanceof Error ? err.message : "Erro desconhecido")
       }
     }
 
-    // Verificar imediatamente
+    // Primeira verificação imediata
     checkPaymentStatus()
 
-    // Verificar a cada intervalo definido
-    intervalRef.current = setInterval(checkPaymentStatus, checkInterval)
+    // Configurar intervalo de verificação
+    intervalId = setInterval(checkPaymentStatus, checkInterval)
 
     return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current)
-        log("🛑 Parando monitoramento para:", externalId)
+      isMounted = false
+      if (intervalId) {
+        clearInterval(intervalId)
       }
     }
-  }, [externalId, status, checkInterval])
-
-  // Cleanup ao desmontar
-  useEffect(() => {
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current)
-      }
-    }
-  }, [])
+  }, [externalId, onPaymentConfirmed, onPaymentDenied, onPaymentExpired, checkInterval, maxAttempts, attempts])
 
   return {
     status,
-    isWaitingForWebhook,
+    isLoading,
     error,
-    lastCheck,
+    attempts,
+    maxAttempts,
   }
 }

@@ -2,112 +2,111 @@
 
 import { useState, useEffect } from "react"
 import Image from "next/image"
-import { AlertCircle, RefreshCw } from "lucide-react"
 
 interface SmartQRCodeProps {
-  invoice: {
-    id: string
-    pix: {
-      qr_code?: string
-      image?: string
-      payload?: string
-    }
-    type?: string
-  }
-  width?: number
-  height?: number
+  qrCodeUrl?: string
+  pixCode?: string
+  fallbackText?: string
+  size?: number
   className?: string
 }
 
-export function SmartQRCode({ invoice, width = 200, height = 200, className = "" }: SmartQRCodeProps) {
-  const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+export function SmartQRCode({
+  qrCodeUrl,
+  pixCode,
+  fallbackText = "QR Code PIX",
+  size = 250,
+  className = "",
+}: SmartQRCodeProps) {
+  const [imageUrl, setImageUrl] = useState<string>("")
+  const [isLoading, setIsLoading] = useState(true)
+  const [hasError, setHasError] = useState(false)
 
   useEffect(() => {
-    generateQRCode()
-  }, [invoice])
+    const generateQRCode = () => {
+      setIsLoading(true)
+      setHasError(false)
 
-  const generateQRCode = () => {
-    console.log("🔄 Gerando QR Code PIX com QuickChart.io...")
-
-    try {
-      // Usar o payload PIX se disponível, senão usar um código de emergência
-      let pixCode = invoice.pix.payload
-
-      if (!pixCode) {
-        // Gerar código PIX de emergência se não houver payload
-        const amount = "34.90" // valor padrão
-        pixCode = `00020101021226580014br.gov.bcb.pix2536pix.quickchart.io/emergency/${Date.now()}520400005303986540${amount}5802BR5909SHEIN5011SAO PAULO62070503***6304QRCD`
-        console.log("⚠️ Usando código PIX de emergência")
+      // Prioridade 1: URL do QR Code fornecida
+      if (qrCodeUrl && qrCodeUrl.startsWith("http")) {
+        setImageUrl(qrCodeUrl)
+        setIsLoading(false)
+        return
       }
 
-      // Gerar QR Code usando QuickChart.io
-      const encodedPixCode = encodeURIComponent(pixCode)
-      const quickChartUrl = `https://quickchart.io/qr?text=${encodedPixCode}&size=${width}&margin=1&format=png`
+      // Prioridade 2: Gerar QR Code a partir do código PIX
+      if (pixCode) {
+        const quickChartUrl = `https://quickchart.io/qr?text=${encodeURIComponent(pixCode)}&size=${size}&format=png&margin=1`
+        setImageUrl(quickChartUrl)
+        setIsLoading(false)
+        return
+      }
 
-      console.log("✅ QR Code gerado com QuickChart.io:", quickChartUrl.substring(0, 100) + "...")
-
-      setQrCodeUrl(quickChartUrl)
-      setLoading(false)
-      setError(null)
-    } catch (error) {
-      console.error("❌ Erro ao gerar QR Code:", error)
-      setError("Erro ao gerar QR Code")
-      setLoading(false)
+      // Prioridade 3: QR Code de placeholder
+      const placeholderUrl = `/placeholder.svg?height=${size}&width=${size}&text=${encodeURIComponent(fallbackText)}`
+      setImageUrl(placeholderUrl)
+      setIsLoading(false)
     }
-  }
 
-  const retry = () => {
-    setLoading(true)
-    setError(null)
-    setQrCodeUrl(null)
     generateQRCode()
+  }, [qrCodeUrl, pixCode, size, fallbackText])
+
+  const handleImageError = () => {
+    console.log("❌ Erro ao carregar QR Code, usando fallback")
+    setHasError(true)
+    setIsLoading(false)
+
+    // Fallback para placeholder
+    const placeholderUrl = `/placeholder.svg?height=${size}&width=${size}&text=${encodeURIComponent("QR Code Indisponível")}`
+    setImageUrl(placeholderUrl)
   }
 
-  if (loading) {
-    return (
-      <div
-        className={`flex flex-col items-center justify-center bg-gray-100 rounded-lg ${className}`}
-        style={{ width, height }}
-      >
-        <RefreshCw className="w-8 h-8 text-gray-400 animate-spin mb-2" />
-        <p className="text-sm text-gray-600">Gerando QR Code...</p>
-      </div>
-    )
-  }
-
-  if (error && !qrCodeUrl) {
-    return (
-      <div
-        className={`flex flex-col items-center justify-center bg-red-50 rounded-lg p-4 ${className}`}
-        style={{ width, height }}
-      >
-        <AlertCircle className="w-8 h-8 text-red-500 mb-2" />
-        <p className="text-sm text-red-600 text-center mb-2">{error}</p>
-        <button
-          onClick={retry}
-          className="text-xs bg-red-500 text-white px-3 py-1 rounded hover:bg-red-600 transition-colors"
-        >
-          Tentar Novamente
-        </button>
-      </div>
-    )
+  const handleImageLoad = () => {
+    console.log("✅ QR Code carregado com sucesso")
+    setIsLoading(false)
+    setHasError(false)
   }
 
   return (
-    <div className={className}>
-      <Image
-        src={qrCodeUrl || "/placeholder.svg?height=200&width=200"}
-        alt="QR Code PIX"
-        width={width}
-        height={height}
-        className="rounded-lg"
-        onError={() => {
-          console.log("❌ Erro ao carregar QR Code, tentando novamente...")
-          retry()
-        }}
-      />
+    <div className={`flex flex-col items-center justify-center ${className}`}>
+      <div
+        className="relative border-2 border-gray-200 rounded-lg p-4 bg-white"
+        style={{ width: size + 32, height: size + 32 }}
+      >
+        {isLoading && (
+          <div
+            className="absolute inset-4 flex items-center justify-center bg-gray-100 rounded animate-pulse"
+            style={{ width: size, height: size }}
+          >
+            <div className="text-gray-500 text-sm">Carregando...</div>
+          </div>
+        )}
+
+        <Image
+          src={imageUrl || "/placeholder.svg"}
+          alt="QR Code PIX"
+          width={size}
+          height={size}
+          className={`rounded ${isLoading ? "opacity-0" : "opacity-100"} transition-opacity duration-300`}
+          onLoad={handleImageLoad}
+          onError={handleImageError}
+          priority
+        />
+
+        {hasError && (
+          <div className="absolute inset-4 flex items-center justify-center bg-red-50 border border-red-200 rounded">
+            <div className="text-red-600 text-sm text-center">
+              <div>❌</div>
+              <div>QR Code</div>
+              <div>Indisponível</div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-2 text-sm text-gray-600 text-center">
+        {hasError ? "QR Code temporariamente indisponível" : "Escaneie o QR Code com seu app do banco"}
+      </div>
     </div>
   )
 }
