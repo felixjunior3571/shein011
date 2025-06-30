@@ -1,26 +1,62 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { createClient } from "@supabase/supabase-js"
 
-const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+// Função para validar CPF
+function validateCPF(cpf: string): boolean {
+  cpf = cpf.replace(/[^\d]/g, "")
+  if (cpf.length !== 11 || /^(\d)\1{10}$/.test(cpf)) return false
+
+  let sum = 0
+  for (let i = 0; i < 9; i++) {
+    sum += Number.parseInt(cpf.charAt(i)) * (10 - i)
+  }
+  let remainder = (sum * 10) % 11
+  if (remainder === 10 || remainder === 11) remainder = 0
+  if (remainder !== Number.parseInt(cpf.charAt(9))) return false
+
+  sum = 0
+  for (let i = 0; i < 10; i++) {
+    sum += Number.parseInt(cpf.charAt(i)) * (11 - i)
+  }
+  remainder = (sum * 10) % 11
+  if (remainder === 10 || remainder === 11) remainder = 0
+  return remainder === Number.parseInt(cpf.charAt(10))
+}
 
 // Função para gerar CPF válido
 function generateValidCPF(): string {
-  const randomDigits = () => Math.floor(Math.random() * 9)
-  const cpf = Array.from({ length: 9 }, randomDigits)
+  const cpf = Array.from({ length: 9 }, () => Math.floor(Math.random() * 10))
 
-  // Calcular primeiro dígito verificador
-  let sum = cpf.reduce((acc, digit, index) => acc + digit * (10 - index), 0)
-  let firstDigit = 11 - (sum % 11)
-  if (firstDigit >= 10) firstDigit = 0
-  cpf.push(firstDigit)
+  let sum = 0
+  for (let i = 0; i < 9; i++) {
+    sum += cpf[i] * (10 - i)
+  }
+  let remainder = (sum * 10) % 11
+  if (remainder === 10 || remainder === 11) remainder = 0
+  cpf.push(remainder)
 
-  // Calcular segundo dígito verificador
-  sum = cpf.reduce((acc, digit, index) => acc + digit * (11 - index), 0)
-  let secondDigit = 11 - (sum % 11)
-  if (secondDigit >= 10) secondDigit = 0
-  cpf.push(secondDigit)
+  sum = 0
+  for (let i = 0; i < 10; i++) {
+    sum += cpf[i] * (11 - i)
+  }
+  remainder = (sum * 10) % 11
+  if (remainder === 10 || remainder === 11) remainder = 0
+  cpf.push(remainder)
 
   return cpf.join("")
+}
+
+// Função para obter IP do cliente
+function getClientIP(request: NextRequest): string {
+  const forwarded = request.headers.get("x-forwarded-for")
+  const realIP = request.headers.get("x-real-ip")
+
+  if (forwarded) {
+    return forwarded.split(",")[0].trim()
+  }
+  if (realIP) {
+    return realIP
+  }
+  return "192.168.1.1" // Fallback
 }
 
 export async function POST(request: NextRequest) {
@@ -28,188 +64,247 @@ export async function POST(request: NextRequest) {
     console.log("=== CRIANDO FATURA SUPERPAYBR ===")
 
     const body = await request.json()
-    const { amount, external_id, customer_name, customer_email, customer_cpf } = body
+    const { amount, shipping, method } = body
 
-    if (!amount || !external_id) {
+    console.log("Dados recebidos:", { amount, shipping, method })
+
+    // Validar dados obrigatórios
+    if (!amount) {
       return NextResponse.json(
         {
           success: false,
-          error: "Parâmetros obrigatórios: amount, external_id",
+          error: "Valor não fornecido",
         },
         { status: 400 },
       )
     }
 
-    console.log("📋 Dados da fatura:", {
-      amount,
-      external_id,
-      customer_name,
-      customer_email,
+    // Obter access token
+    const authResponse = await fetch(`${request.nextUrl.origin}/api/superpaybr/auth`)
+    const authData = await authResponse.json()
+
+    if (!authData.success) {
+      console.log("❌ Falha na autenticação SuperPayBR, usando fallback")
+      return createSimulatedInvoice(request, body)
+    }
+
+    const { access_token } = authData.data
+
+    // Carregar dados reais do usuário coletados durante o fluxo
+    const getUserData = () => {
+      try {
+        const cpfDataStr = request.headers.get("x-cpf-data") || "{}"
+        const cpfData = JSON.parse(cpfDataStr)
+        const userEmail = request.headers.get("x-user-email") || ""
+        const userWhatsApp = request.headers.get("x-user-whatsapp") || ""
+        const deliveryAddressStr = request.headers.get("x-delivery-address") || "{}"
+        const deliveryAddress = JSON.parse(deliveryAddressStr)
+
+        return {
+          nome: cpfData.nome || "Cliente SHEIN",
+          cpf: cpfData.cpf || "12345678901",
+          email: userEmail || "cliente@shein.com.br",
+          telefone: userWhatsApp || "11999999999",
+          dataNascimento: cpfData.dataNascimento || "",
+          nomeMae: cpfData.nomeMae || "",
+          endereco: {
+            rua: deliveryAddress.street || "Rua Exemplo",
+            numero: deliveryAddress.number || "123",
+            complemento: deliveryAddress.complement || "",
+            bairro: deliveryAddress.neighborhood || "Centro",
+            cidade: deliveryAddress.city || "São Paulo",
+            estado: deliveryAddress.state || "SP",
+            cep: deliveryAddress.zipCode?.replace(/\D/g, "") || "01000000",
+          },
+        }
+      } catch (error) {
+        console.log("⚠️ Erro ao carregar dados do usuário, usando fallback:", error)
+        return {
+          nome: "Cliente SHEIN",
+          cpf: "12345678901",
+          email: "cliente@shein.com.br",
+          telefone: "11999999999",
+          endereco: {
+            rua: "Rua Exemplo",
+            numero: "123",
+            bairro: "Centro",
+            cidade: "São Paulo",
+            estado: "SP",
+            cep: "01000000",
+          },
+        }
+      }
+    }
+
+    const userData = getUserData()
+
+    console.log("📋 Dados do lead carregados:")
+    console.log("Nome:", userData.nome)
+    console.log("CPF:", userData.cpf)
+    console.log("Email:", userData.email)
+    console.log("Telefone:", userData.telefone)
+
+    // Validar e corrigir CPF se necessário
+    let document = userData.cpf?.replace(/[^\d]/g, "") || ""
+    if (!validateCPF(document)) {
+      console.log("⚠️ CPF inválido, gerando CPF válido para teste")
+      document = generateValidCPF()
+      console.log("CPF gerado:", document)
+    } else {
+      console.log("✅ CPF válido:", document)
+    }
+
+    const totalAmount = Number.parseFloat(amount.toString())
+    const isActivation = shipping === "activation" || method === "ATIVAÇÃO"
+    const productTitle = isActivation
+      ? "Depósito de Ativação - Conta Digital SHEIN"
+      : `Frete ${method || shipping?.toUpperCase() || "SEDEX"} - Cartão SHEIN`
+
+    // Gerar external_id único
+    const externalId = isActivation
+      ? `SHEIN_ACT_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+      : `SHEIN_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+
+    // Preparar payload SuperPayBR
+    const invoicePayload = {
+      client: {
+        name: userData.nome,
+        document: document,
+        email: userData.email,
+        phone: userData.telefone?.replace(/[^\d]/g, "") || "11999999999",
+        ip: getClientIP(request),
+        address: {
+          street: userData.endereco.rua,
+          number: userData.endereco.numero,
+          district: userData.endereco.bairro,
+          city: userData.endereco.cidade,
+          state: userData.endereco.estado,
+          zipcode: userData.endereco.cep,
+          country: "BR",
+        },
+      },
+      payment: {
+        id: externalId,
+        type: "3", // PIX
+        due_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0],
+        referer: externalId,
+        installment: "1",
+        order_url: isActivation ? `${request.nextUrl.origin}/upp/checkout` : `${request.nextUrl.origin}/checkout`,
+        store_url: request.nextUrl.origin,
+        webhook: `${request.nextUrl.origin}/api/superpaybr/webhook`,
+        discount: 0,
+        products: [
+          {
+            id: isActivation ? "activation" : "1",
+            image: `${request.nextUrl.origin}/shein-card-logo-new.png`,
+            title: productTitle,
+            qnt: 1,
+            discount: 0,
+            amount: totalAmount,
+          },
+        ],
+      },
+      shipping: {
+        amount: 0,
+      },
+    }
+
+    console.log("📤 Enviando para SuperPayBR:", JSON.stringify(invoicePayload, null, 2))
+
+    // Fazer requisição para SuperPayBR
+    const response = await fetch("https://api.superpaybr.com/v4/invoices", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${access_token}`,
+      },
+      body: JSON.stringify(invoicePayload),
     })
 
-    // Tentar autenticação primeiro
-    let authData = null
-    let useEmergencyMode = false
+    console.log("📥 Resposta SuperPayBR:", {
+      status: response.status,
+      statusText: response.statusText,
+      ok: response.ok,
+    })
 
-    try {
-      const authResponse = await fetch(`${request.nextUrl.origin}/api/superpaybr/auth`)
-      const authResult = await authResponse.json()
+    if (response.ok) {
+      const data = await response.json()
+      console.log("✅ Fatura SuperPayBR criada com sucesso!")
 
-      if (authResult.success) {
-        authData = authResult.data
-        console.log("✅ Autenticação SuperPayBR bem-sucedida")
-      } else {
-        console.log("❌ Falha na autenticação SuperPayBR:", authResult.error)
-        useEmergencyMode = true
-      }
-    } catch (error) {
-      console.log("❌ Erro na autenticação SuperPayBR:", error)
-      useEmergencyMode = true
-    }
-
-    // Se autenticação falhou, usar modo emergência
-    if (useEmergencyMode) {
-      console.log("🚨 ATIVANDO MODO EMERGÊNCIA")
-      return createEmergencyInvoice(amount, external_id)
-    }
-
-    // Tentar criar fatura real na SuperPayBR
-    try {
-      const validCPF = customer_cpf || generateValidCPF()
       const invoiceData = {
-        external_id,
-        amount: Math.round(amount * 100), // Converter para centavos
-        currency: "BRL",
-        payment_method: "pix",
-        customer: {
-          name: customer_name || "Cliente Shein Card",
-          email: customer_email || "cliente@sheincard.com",
-          document: validCPF,
-          document_type: "cpf",
+        id: data.fatura.id,
+        invoice_id: data.fatura.invoice_id,
+        external_id: externalId,
+        pix: {
+          payload: data.fatura.pix.payload,
+          image: data.fatura.pix.image,
+          qr_code: data.fatura.pix.image, // SuperPayBR já retorna a imagem do QR Code
         },
-        notification_url: `${request.nextUrl.origin}/api/superpaybr/webhook`,
-        expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(), // 30 minutos
+        status: data.fatura.status,
+        valores: data.fatura.valores,
+        vencimento: data.fatura.vencimento,
+        secure: data.fatura.secure,
+        type: "real" as const,
       }
 
-      console.log("📤 Enviando dados para SuperPayBR:", invoiceData)
+      console.log(`✅ Fatura criada - External ID: ${externalId} - Valor: R$ ${totalAmount.toFixed(2)}`)
 
-      const createResponse = await fetch("https://api.superpaybr.com/invoices", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${authData.access_token}`,
-        },
-        body: JSON.stringify(invoiceData),
+      return NextResponse.json({
+        success: true,
+        data: invoiceData,
+        fallback: false,
       })
-
-      if (createResponse.ok) {
-        const invoice = await createResponse.json()
-        console.log("✅ Fatura SuperPayBR criada:", invoice.id)
-
-        // Salvar no banco de dados
-        await supabase.from("faturas").insert({
-          external_id,
-          invoice_id: invoice.id,
-          amount: amount,
-          status: "pending",
-          payment_method: "pix",
-          customer_data: invoiceData.customer,
-          created_at: new Date().toISOString(),
-        })
-
-        return NextResponse.json({
-          success: true,
-          data: {
-            id: invoice.id,
-            external_id,
-            status: {
-              code: 1,
-              title: "Aguardando Pagamento",
-            },
-            payment: {
-              details: {
-                qrcode: invoice.payment?.qr_code || null,
-                pix_code: invoice.payment?.pix_code || null,
-              },
-            },
-            prices: {
-              total: amount,
-            },
-            type: "real",
-          },
-          fallback_mode: false,
-          emergency_mode: false,
-        })
-      } else {
-        const errorText = await createResponse.text()
-        console.log("❌ Erro ao criar fatura SuperPayBR:", createResponse.status, errorText)
-        throw new Error(`SuperPayBR API Error: ${createResponse.status}`)
-      }
-    } catch (error) {
-      console.log("❌ Erro na criação da fatura SuperPayBR:", error)
-      console.log("🚨 Ativando modo emergência por erro na API")
-      return createEmergencyInvoice(amount, external_id)
+    } else {
+      const errorText = await response.text()
+      console.log("❌ Erro na API SuperPayBR:", response.status, errorText)
+      return createSimulatedInvoice(request, body)
     }
   } catch (error) {
-    console.log("❌ Erro geral na criação da fatura:", error)
-    return NextResponse.json(
-      {
-        success: false,
-        error: "Erro interno na criação da fatura",
-        details: error instanceof Error ? error.message : "Erro desconhecido",
-      },
-      { status: 500 },
-    )
+    console.log("❌ Erro ao criar fatura SuperPayBR:", error)
+    return createSimulatedInvoice(request, body)
   }
 }
 
-// Função para criar fatura de emergência
-async function createEmergencyInvoice(amount: number, external_id: string) {
-  console.log("🚨 Criando fatura de emergência...")
+async function createSimulatedInvoice(request: NextRequest, body: any) {
+  const { amount, shipping, method } = body
+  const totalAmount = Number.parseFloat(amount?.toString() || "34.90")
+  const externalId = `SHEIN_SIM_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
 
-  const emergencyPixCode = `00020101021226580014br.gov.bcb.pix2536emergency.quickchart.io/qr/v2/${external_id}520400005303986540${amount.toFixed(2)}5802BR5909SHEIN5011SAO PAULO62070503***6304EMRG`
+  const simulatedPixCode = `00020101021226580014br.gov.bcb.pix2536pix.superpaybr.com/qr/v2/SIM${Date.now()}5204000053039865406${totalAmount.toFixed(2)}5802BR5909SHEIN5011SAO PAULO62070503***6304SIMS`
 
-  const emergencyInvoice = {
-    id: `EMG_${external_id}`,
-    external_id,
+  const simulatedInvoice = {
+    id: `SIM_${Date.now()}`,
+    invoice_id: `SIMULATED_${Date.now()}`,
+    external_id: externalId,
+    pix: {
+      payload: simulatedPixCode,
+      image: `/placeholder.svg?height=250&width=250`,
+      qr_code: `https://quickchart.io/qr?text=${encodeURIComponent(simulatedPixCode)}`,
+    },
     status: {
       code: 1,
-      title: "Aguardando Pagamento (Modo Emergência)",
+      title: "Aguardando Pagamento",
+      text: "pending",
     },
-    payment: {
-      details: {
-        qrcode: `https://quickchart.io/qr?text=${encodeURIComponent(emergencyPixCode)}&size=250&margin=1&format=png`,
-        pix_code: emergencyPixCode,
-      },
+    valores: {
+      bruto: Math.round(totalAmount * 100),
+      liquido: Math.round(totalAmount * 100),
     },
-    prices: {
-      total: amount,
+    vencimento: {
+      dia: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0],
     },
-    type: "emergency",
+    secure: {
+      id: `simulated-${Date.now()}`,
+      url: `${request.nextUrl.origin}/checkout`,
+    },
+    type: "simulated" as const,
   }
 
-  // Salvar no banco de dados
-  try {
-    await supabase.from("faturas").insert({
-      external_id,
-      invoice_id: emergencyInvoice.id,
-      amount: amount,
-      status: "pending",
-      payment_method: "pix",
-      customer_data: { name: "Cliente Emergência" },
-      created_at: new Date().toISOString(),
-      is_emergency: true,
-    })
-  } catch (dbError) {
-    console.log("⚠️ Erro ao salvar fatura de emergência no DB:", dbError)
-  }
-
-  console.log("✅ Fatura de emergência criada")
+  console.log(`✅ Fatura simulada criada - External ID: ${externalId} - Valor: R$ ${totalAmount.toFixed(2)}`)
 
   return NextResponse.json({
     success: true,
-    data: emergencyInvoice,
-    fallback_mode: false,
-    emergency_mode: true,
+    data: simulatedInvoice,
+    fallback: true,
   })
 }

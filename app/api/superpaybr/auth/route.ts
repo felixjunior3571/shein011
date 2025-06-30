@@ -13,7 +13,6 @@ export async function GET() {
         {
           success: false,
           error: "Credenciais SuperPayBR não configuradas",
-          details: "SUPERPAYBR_TOKEN e SUPERPAYBR_SECRET_KEY devem estar configurados",
         },
         { status: 500 },
       )
@@ -23,16 +22,14 @@ export async function GET() {
     console.log("Token:", token.substring(0, 10) + "...")
     console.log("Secret:", secretKey.substring(0, 20) + "...")
 
-    // Fazer autenticação na SuperPayBR usando Basic Auth
-    const authResponse = await fetch("https://api.superpaybr.com/oauth/token", {
-      method: "POST",
+    // Fazer autenticação na SuperPayBR
+    const authResponse = await fetch("https://api.superpaybr.com/auth", {
+      method: "GET",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Basic ${Buffer.from(`${token}:${secretKey}`).toString("base64")}`,
+        scope: "invoice.write, customer.write, webhook.write",
       },
-      body: JSON.stringify({
-        grant_type: "client_credentials",
-      }),
     })
 
     console.log("📥 Resposta auth SuperPayBR:", {
@@ -44,8 +41,9 @@ export async function GET() {
     if (authResponse.ok) {
       const authData = await authResponse.json()
       console.log("✅ Autenticação SuperPayBR bem-sucedida!")
-      console.log("Token Type:", authData.token_type)
-      console.log("Expires In:", authData.expires_in)
+      console.log("Account:", authData.account)
+      console.log("Working:", authData.working)
+      console.log("Expires:", new Date(authData.expires_in * 1000).toISOString())
 
       return NextResponse.json({
         success: true,
@@ -53,6 +51,8 @@ export async function GET() {
           access_token: authData.access_token,
           token_type: authData.token_type,
           expires_in: authData.expires_in,
+          account: authData.account,
+          working: authData.working,
           scope: authData.scope,
         },
       })
@@ -60,13 +60,10 @@ export async function GET() {
       const errorText = await authResponse.text()
       console.log("❌ Erro na autenticação SuperPayBR:", authResponse.status, errorText)
 
-      // Retornar erro específico para debugging
       return NextResponse.json(
         {
           success: false,
-          error: `Erro na autenticação SuperPayBR: ${authResponse.status}`,
-          details: errorText,
-          status_code: authResponse.status,
+          error: `Erro na autenticação SuperPayBR: ${authResponse.status} - ${errorText}`,
         },
         { status: authResponse.status },
       )
@@ -77,7 +74,6 @@ export async function GET() {
       {
         success: false,
         error: "Erro interno na autenticação SuperPayBR",
-        details: error instanceof Error ? error.message : "Erro desconhecido",
       },
       { status: 500 },
     )
