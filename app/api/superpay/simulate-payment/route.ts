@@ -5,99 +5,120 @@ export async function POST(request: NextRequest) {
     console.log("🧪 Simulando pagamento SuperPay...")
 
     const body = await request.json()
-    const { externalId, amount = 34.9, statusCode = 5 } = body
+    const { externalId, statusCode, amount } = body
 
-    if (!externalId) {
+    if (!externalId || !statusCode) {
       return NextResponse.json(
         {
           success: false,
-          error: "externalId é obrigatório",
+          error: "Parâmetros obrigatórios ausentes",
+          message: "externalId e statusCode são obrigatórios",
         },
         { status: 400 },
       )
     }
 
-    console.log("🎯 Simulando webhook SuperPay:", {
-      externalId,
-      amount,
-      statusCode,
-    })
-
     // Simular webhook SuperPay
     const webhookData = {
-      external_id: externalId,
-      invoice_id: `INV_${Date.now()}`,
-      status: statusCode,
-      amount: amount,
-      payment_date: statusCode === 5 ? new Date().toISOString() : null,
-      customer_name: "Cliente Teste",
-      customer_email: "teste@exemplo.com",
-      payment_method: "pix",
-      created_at: new Date().toISOString(),
+      event: {
+        type: "payment_status_changed",
+        date: new Date().toISOString(),
+      },
+      invoices: {
+        id: `INV_${Date.now()}`,
+        external_id: externalId,
+        amount: amount || 29.9,
+        status: {
+          code: statusCode,
+          title: getStatusName(statusCode),
+        },
+        payment:
+          statusCode === 5
+            ? {
+                payDate: new Date().toISOString(),
+              }
+            : undefined,
+      },
     }
 
     // Enviar para o próprio webhook
     const webhookUrl = `${process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"}/api/superpay/webhook`
 
-    console.log("📤 Enviando para webhook SuperPay:", webhookUrl)
+    try {
+      const webhookResponse = await fetch(webhookUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(webhookData),
+      })
 
-    const webhookResponse = await fetch(webhookUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(webhookData),
-    })
+      const webhookResult = await webhookResponse.json()
 
-    if (!webhookResponse.ok) {
-      throw new Error(`Webhook failed: ${webhookResponse.status}`)
+      console.log("✅ Webhook simulado enviado:", webhookResult)
+
+      return NextResponse.json({
+        success: true,
+        message: "Pagamento simulado com sucesso",
+        data: {
+          external_id: externalId,
+          status_code: statusCode,
+          status_name: getStatusName(statusCode),
+          amount: amount || 29.9,
+          webhook_sent: webhookResult.success,
+        },
+        timestamp: new Date().toISOString(),
+      })
+    } catch (webhookError) {
+      console.error("❌ Erro ao enviar webhook simulado:", webhookError)
+
+      return NextResponse.json({
+        success: true,
+        message: "Pagamento simulado (webhook falhou)",
+        data: {
+          external_id: externalId,
+          status_code: statusCode,
+          status_name: getStatusName(statusCode),
+          amount: amount || 29.9,
+          webhook_sent: false,
+          webhook_error: webhookError instanceof Error ? webhookError.message : "Erro desconhecido",
+        },
+        timestamp: new Date().toISOString(),
+      })
     }
-
-    const webhookResult = await webhookResponse.json()
-    console.log("✅ Webhook SuperPay simulado com sucesso:", webhookResult)
-
-    return NextResponse.json({
-      success: true,
-      message: "Pagamento SuperPay simulado com sucesso",
-      data: {
-        external_id: externalId,
-        status_code: statusCode,
-        status_name: webhookResult.data?.status_name || `Status ${statusCode}`,
-        amount: amount,
-        token: webhookResult.data?.token,
-        expires_at: webhookResult.data?.expires_at,
-        webhook_sent: true,
-      },
-      timestamp: new Date().toISOString(),
-    })
   } catch (error) {
     console.error("❌ Erro na simulação SuperPay:", error)
 
     return NextResponse.json(
       {
         success: false,
-        error: "Erro na simulação",
+        error: "Erro interno do servidor",
         message: error instanceof Error ? error.message : "Erro desconhecido",
         timestamp: new Date().toISOString(),
       },
-      { status: 200 }, // Retornar 200 para evitar "Failed to fetch"
+      { status: 200 },
     )
   }
 }
 
-export async function GET(request: NextRequest) {
-  return NextResponse.json({
-    success: true,
-    message: "Simulação SuperPay endpoint ativo",
-    available_status: {
-      1: "Aguardando Pagamento",
-      2: "Em Processamento",
-      5: "Pago",
-      6: "Cancelado",
-      9: "Estornado",
-      12: "Negado",
-      15: "Vencido",
-    },
-    timestamp: new Date().toISOString(),
-  })
+function getStatusName(statusCode: number): string {
+  const statusMap: { [key: number]: string } = {
+    1: "Aguardando Pagamento",
+    2: "Em Processamento",
+    3: "Processando",
+    4: "Aprovado",
+    5: "Pago",
+    6: "Cancelado",
+    7: "Contestado",
+    8: "Chargeback",
+    9: "Estornado",
+    10: "Falha",
+    11: "Bloqueado",
+    12: "Negado",
+    13: "Análise",
+    14: "Análise Manual",
+    15: "Vencido",
+  }
+
+  return statusMap[statusCode] || "Status Desconhecido"
 }

@@ -1,36 +1,23 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import {
-  RefreshCw,
-  Search,
-  CheckCircle,
-  XCircle,
-  Clock,
-  AlertTriangle,
-  DollarSign,
-  Activity,
-  Database,
-  Zap,
-  Timer,
-  Shield,
-} from "lucide-react"
+import { RefreshCw, Database, TestTube, Zap, XCircle } from "lucide-react"
 
-interface WebhookRecord {
+interface SuperPayWebhook {
   id: number
   external_id: string
   invoice_id: string
   status_code: number
   status_name: string
   amount: number
-  payment_date: string | null
+  payment_date?: string
   processed_at: string
   is_paid: boolean
   is_denied: boolean
@@ -38,31 +25,12 @@ interface WebhookRecord {
   is_canceled: boolean
   is_refunded: boolean
   is_critical: boolean
-  gateway: string
   token: string
   expires_at: string
   webhook_data: any
 }
 
-interface PaymentStatus {
-  isPaid: boolean
-  isDenied: boolean
-  isExpired: boolean
-  isCanceled: boolean
-  isRefunded: boolean
-  statusCode: number | null
-  statusName: string
-  amount: number
-  paymentDate: string | null
-  lastUpdate: string
-  externalId?: string
-  token?: string
-  expiresAt?: string
-  source: string
-  error?: string
-}
-
-interface Stats {
+interface SuperPayStats {
   total: number
   paid: number
   denied: number
@@ -75,14 +43,8 @@ interface Stats {
 }
 
 export default function SuperPayWebhooksDebugPage() {
-  const [webhooks, setWebhooks] = useState<WebhookRecord[]>([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [searchTerm, setSearchTerm] = useState("")
-  const [testExternalId, setTestExternalId] = useState("TEST_SUPERPAY_001")
-  const [testResult, setTestResult] = useState<PaymentStatus | null>(null)
-  const [simulationResult, setSimulationResult] = useState<any>(null)
-  const [stats, setStats] = useState<Stats>({
+  const [webhooks, setWebhooks] = useState<SuperPayWebhook[]>([])
+  const [stats, setStats] = useState<SuperPayStats>({
     total: 0,
     paid: 0,
     denied: 0,
@@ -93,123 +55,83 @@ export default function SuperPayWebhooksDebugPage() {
     expiredTokens: 0,
     totalAmount: 0,
   })
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+  const [searchTerm, setSearchTerm] = useState("")
+  const [testExternalId, setTestExternalId] = useState("")
+  const [testResult, setTestResult] = useState<any>(null)
+  const [simulateExternalId, setSimulateExternalId] = useState("")
+  const [simulateStatusCode, setSimulateStatusCode] = useState(5)
+  const [simulateAmount, setSimulateAmount] = useState(29.9)
+  const [simulateResult, setSimulateResult] = useState<any>(null)
 
-  // Carregar webhooks do Supabase
   const loadWebhooks = async () => {
-    setLoading(true)
-    setError(null)
-
     try {
+      setIsLoading(true)
+      setError(null)
+      setMessage(null)
+
       console.log("🔍 Carregando webhooks SuperPay...")
 
-      const response = await fetch("/api/debug/superpay-webhooks", {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-        },
-      })
+      const response = await fetch("/api/debug/superpay-webhooks")
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`)
       }
 
       const data = await response.json()
-      console.log("📥 Resposta da API:", data)
 
       if (data.success) {
         setWebhooks(data.webhooks || [])
-        setStats(
-          data.stats || {
-            total: 0,
-            paid: 0,
-            denied: 0,
-            expired: 0,
-            canceled: 0,
-            refunded: 0,
-            critical: 0,
-            expiredTokens: 0,
-            totalAmount: 0,
-          },
-        )
+        setStats(data.stats || stats)
 
         if (data.message) {
-          setError(data.message)
+          setMessage(data.message)
         }
+
+        console.log(`✅ ${data.webhooks?.length || 0} webhooks carregados`)
       } else {
-        throw new Error(data.error || "Erro ao carregar webhooks")
+        throw new Error(data.message || "Erro ao carregar webhooks")
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Erro desconhecido"
-      console.error("❌ Erro ao carregar webhooks SuperPay:", err)
       setError(errorMessage)
-
-      // Definir dados vazios em caso de erro
-      setWebhooks([])
-      setStats({
-        total: 0,
-        paid: 0,
-        denied: 0,
-        expired: 0,
-        canceled: 0,
-        refunded: 0,
-        critical: 0,
-        expiredTokens: 0,
-        totalAmount: 0,
-      })
+      console.error("❌ Erro ao carregar webhooks:", errorMessage)
     } finally {
-      setLoading(false)
+      setIsLoading(false)
     }
   }
 
-  // Testar consulta de status
   const testPaymentStatus = async () => {
-    if (!testExternalId.trim()) return
-
-    setLoading(true)
-    setTestResult(null)
-    setError(null)
+    if (!testExternalId.trim()) {
+      setTestResult({ error: "External ID é obrigatório" })
+      return
+    }
 
     try {
-      console.log("🔍 Testando consulta de status:", testExternalId)
+      setTestResult({ loading: true })
 
-      const response = await fetch(`/api/superpay/payment-status?externalId=${encodeURIComponent(testExternalId)}`, {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-        },
-      })
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-      }
-
+      const response = await fetch(`/api/superpay/payment-status?externalId=${encodeURIComponent(testExternalId)}`)
       const data = await response.json()
-      console.log("📥 Resultado do teste:", data)
 
-      if (data.success) {
-        setTestResult(data.data)
-      } else {
-        throw new Error(data.error || "Erro na consulta")
-      }
+      setTestResult(data)
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Erro desconhecido"
-      console.error("❌ Erro no teste de status:", err)
-      setError(errorMessage)
-    } finally {
-      setLoading(false)
+      setTestResult({
+        success: false,
+        error: err instanceof Error ? err.message : "Erro desconhecido",
+      })
     }
   }
 
-  // Simular pagamento
-  const simulatePayment = async (statusCode = 5) => {
-    if (!testExternalId.trim()) return
-
-    setLoading(true)
-    setSimulationResult(null)
-    setError(null)
+  const simulatePayment = async () => {
+    if (!simulateExternalId.trim()) {
+      setSimulateResult({ error: "External ID é obrigatório" })
+      return
+    }
 
     try {
-      console.log("🧪 Simulando pagamento:", { testExternalId, statusCode })
+      setSimulateResult({ loading: true })
 
       const response = await fetch("/api/superpay/simulate-payment", {
         method: "POST",
@@ -217,36 +139,54 @@ export default function SuperPayWebhooksDebugPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          externalId: testExternalId,
-          amount: 34.9,
-          statusCode: statusCode,
+          externalId: simulateExternalId,
+          statusCode: simulateStatusCode,
+          amount: simulateAmount,
         }),
       })
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-      }
-
       const data = await response.json()
-      console.log("📥 Resultado da simulação:", data)
+      setSimulateResult(data)
 
+      // Recarregar webhooks após simulação
       if (data.success) {
-        setSimulationResult(data.data)
-        // Recarregar webhooks após simulação
         setTimeout(loadWebhooks, 1000)
-      } else {
-        throw new Error(data.error || "Erro na simulação")
       }
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Erro desconhecido"
-      console.error("❌ Erro na simulação:", err)
-      setError(errorMessage)
-    } finally {
-      setLoading(false)
+      setSimulateResult({
+        success: false,
+        error: err instanceof Error ? err.message : "Erro desconhecido",
+      })
     }
   }
 
-  // Filtrar webhooks
+  const clearTestData = async () => {
+    try {
+      setIsLoading(true)
+
+      const response = await fetch("/api/debug/superpay-webhooks?action=clear_test_data", {
+        method: "DELETE",
+      })
+
+      const data = await response.json()
+
+      if (data.success) {
+        setMessage("Dados de teste removidos com sucesso")
+        loadWebhooks()
+      } else {
+        setError(data.message || "Erro ao limpar dados")
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro desconhecido")
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadWebhooks()
+  }, [])
+
   const filteredWebhooks = webhooks.filter(
     (webhook) =>
       webhook.external_id.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -254,467 +194,347 @@ export default function SuperPayWebhooksDebugPage() {
       webhook.status_name.toLowerCase().includes(searchTerm.toLowerCase()),
   )
 
-  // Carregar dados iniciais
-  useEffect(() => {
-    loadWebhooks()
-  }, [])
-
-  // Função para obter cor do status
-  const getStatusColor = (webhook: WebhookRecord) => {
-    if (webhook.is_paid) return "bg-green-500"
-    if (webhook.is_denied) return "bg-red-500"
-    if (webhook.is_expired) return "bg-orange-500"
-    if (webhook.is_canceled) return "bg-gray-500"
-    if (webhook.is_refunded) return "bg-blue-500"
-    return "bg-yellow-500"
+  const getStatusBadge = (webhook: SuperPayWebhook) => {
+    if (webhook.is_paid) {
+      return <Badge className="bg-green-100 text-green-800 border-green-200">✅ Pago</Badge>
+    }
+    if (webhook.is_denied) {
+      return <Badge className="bg-red-100 text-red-800 border-red-200">❌ Negado</Badge>
+    }
+    if (webhook.is_expired) {
+      return <Badge className="bg-orange-100 text-orange-800 border-orange-200">⏰ Vencido</Badge>
+    }
+    if (webhook.is_canceled) {
+      return <Badge className="bg-gray-100 text-gray-800 border-gray-200">🚫 Cancelado</Badge>
+    }
+    if (webhook.is_refunded) {
+      return <Badge className="bg-blue-100 text-blue-800 border-blue-200">🔄 Estornado</Badge>
+    }
+    if (webhook.is_critical) {
+      return <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200">⚠️ Crítico</Badge>
+    }
+    return <Badge className="bg-gray-100 text-gray-600 border-gray-200">⏳ Pendente</Badge>
   }
 
-  // Função para verificar se token expirou
-  const isTokenExpired = (expiresAt: string) => {
-    return new Date() > new Date(expiresAt)
+  const getTokenStatus = (expiresAt: string) => {
+    const now = new Date()
+    const expiry = new Date(expiresAt)
+
+    if (expiry < now) {
+      return <Badge variant="destructive">🔴 Expirado</Badge>
+    }
+
+    const minutesLeft = Math.floor((expiry.getTime() - now.getTime()) / (1000 * 60))
+    if (minutesLeft < 5) {
+      return <Badge className="bg-orange-100 text-orange-800">⚠️ {minutesLeft}min</Badge>
+    }
+
+    return <Badge className="bg-green-100 text-green-800">✅ {minutesLeft}min</Badge>
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4">
-      <div className="max-w-7xl mx-auto space-y-6">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900">Debug SuperPay Webhooks</h1>
-            <p className="text-gray-600">Monitoramento e teste do sistema de pagamentos SuperPay</p>
+    <div className="container mx-auto p-6 space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold">Debug SuperPay Webhooks</h1>
+          <p className="text-muted-foreground">Sistema de monitoramento e debug para webhooks SuperPay</p>
+        </div>
+        <Button onClick={loadWebhooks} disabled={isLoading}>
+          <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
+          Atualizar
+        </Button>
+      </div>
+
+      {error && (
+        <Alert className="border-red-200 bg-red-50">
+          <XCircle className="h-4 w-4 text-red-600" />
+          <AlertDescription className="text-red-800">
+            <strong>Erro:</strong> {error}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {message && (
+        <Alert className="border-blue-200 bg-blue-50">
+          <Database className="h-4 w-4 text-blue-600" />
+          <AlertDescription className="text-blue-800">
+            <strong>Info:</strong> {message}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {/* Estatísticas */}
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4">
+        <Card>
+          <CardContent className="p-4 text-center">
+            <div className="text-2xl font-bold text-blue-600">{stats.total}</div>
+            <div className="text-sm text-muted-foreground">Total</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4 text-center">
+            <div className="text-2xl font-bold text-green-600">{stats.paid}</div>
+            <div className="text-sm text-muted-foreground">Pagos</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4 text-center">
+            <div className="text-2xl font-bold text-red-600">{stats.denied}</div>
+            <div className="text-sm text-muted-foreground">Negados</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4 text-center">
+            <div className="text-2xl font-bold text-orange-600">{stats.expired}</div>
+            <div className="text-sm text-muted-foreground">Vencidos</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4 text-center">
+            <div className="text-2xl font-bold text-gray-600">{stats.canceled}</div>
+            <div className="text-sm text-muted-foreground">Cancelados</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4 text-center">
+            <div className="text-2xl font-bold text-blue-600">{stats.refunded}</div>
+            <div className="text-sm text-muted-foreground">Estornados</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4 text-center">
+            <div className="text-2xl font-bold text-yellow-600">{stats.critical}</div>
+            <div className="text-sm text-muted-foreground">Críticos</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4 text-center">
+            <div className="text-2xl font-bold text-purple-600">R$ {stats.totalAmount.toFixed(2)}</div>
+            <div className="text-sm text-muted-foreground">Total</div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Tabs defaultValue="webhooks" className="space-y-4">
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="webhooks">
+            <Database className="w-4 h-4 mr-2" />
+            Webhooks ({webhooks.length})
+          </TabsTrigger>
+          <TabsTrigger value="test">
+            <TestTube className="w-4 h-4 mr-2" />
+            Teste
+          </TabsTrigger>
+          <TabsTrigger value="simulate">
+            <Zap className="w-4 h-4 mr-2" />
+            Simulação
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="webhooks" className="space-y-4">
+          <div className="flex items-center space-x-4">
+            <div className="flex-1">
+              <Label htmlFor="search">Buscar webhooks</Label>
+              <Input
+                id="search"
+                placeholder="External ID, Invoice ID ou Status..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
+            <Button onClick={clearTestData} variant="outline" className="mt-6 bg-transparent">
+              Limpar Dados de Teste
+            </Button>
           </div>
-          <Button onClick={loadWebhooks} disabled={loading} className="flex items-center gap-2">
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-            Atualizar
-          </Button>
-        </div>
 
-        {/* Error Alert */}
-        {error && (
-          <Alert variant={error.includes("não encontrada") ? "default" : "destructive"}>
-            <AlertTriangle className="h-4 w-4" />
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
-
-        {/* Stats Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4">
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2">
-                <Database className="h-4 w-4 text-blue-500" />
-                <div>
-                  <p className="text-sm text-gray-600">Total</p>
-                  <p className="text-2xl font-bold">{stats.total}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2">
-                <CheckCircle className="h-4 w-4 text-green-500" />
-                <div>
-                  <p className="text-sm text-gray-600">Pagos</p>
-                  <p className="text-2xl font-bold">{stats.paid}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2">
-                <XCircle className="h-4 w-4 text-red-500" />
-                <div>
-                  <p className="text-sm text-gray-600">Negados</p>
-                  <p className="text-2xl font-bold">{stats.denied}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2">
-                <Clock className="h-4 w-4 text-orange-500" />
-                <div>
-                  <p className="text-sm text-gray-600">Vencidos</p>
-                  <p className="text-2xl font-bold">{stats.expired}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2">
-                <Activity className="h-4 w-4 text-purple-500" />
-                <div>
-                  <p className="text-sm text-gray-600">Críticos</p>
-                  <p className="text-2xl font-bold">{stats.critical}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2">
-                <Timer className="h-4 w-4 text-yellow-500" />
-                <div>
-                  <p className="text-sm text-gray-600">Tokens Exp.</p>
-                  <p className="text-2xl font-bold">{stats.expiredTokens}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2">
-                <DollarSign className="h-4 w-4 text-green-600" />
-                <div>
-                  <p className="text-sm text-gray-600">Total R$</p>
-                  <p className="text-2xl font-bold">{stats.totalAmount?.toFixed(2) || "0.00"}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2">
-                <Shield className="h-4 w-4 text-blue-600" />
-                <div>
-                  <p className="text-sm text-gray-600">Gateway</p>
-                  <p className="text-lg font-bold">SuperPay</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Tabs */}
-        <Tabs defaultValue="webhooks" className="space-y-4">
-          <TabsList>
-            <TabsTrigger value="webhooks">Webhooks</TabsTrigger>
-            <TabsTrigger value="test">Teste de API</TabsTrigger>
-            <TabsTrigger value="simulate">Simulação</TabsTrigger>
-          </TabsList>
-
-          {/* Webhooks Tab */}
-          <TabsContent value="webhooks" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Database className="h-5 w-5" />
-                  Webhooks SuperPay ({filteredWebhooks.length})
-                </CardTitle>
-                <CardDescription>
-                  Histórico de webhooks recebidos do SuperPay com rate limiting e tokens de segurança
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {/* Search */}
-                <div className="mb-4">
-                  <Label htmlFor="search">Buscar</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      id="search"
-                      placeholder="External ID, Invoice ID ou Status..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                    />
-                    <Button variant="outline" size="icon">
-                      <Search className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-
-                {/* Webhooks List */}
-                <div className="space-y-3 max-h-96 overflow-y-auto">
-                  {filteredWebhooks.map((webhook) => (
-                    <div key={webhook.id} className="border rounded-lg p-4 bg-white hover:bg-gray-50 transition-colors">
-                      <div className="flex items-start justify-between">
-                        <div className="space-y-2">
-                          <div className="flex items-center gap-2">
-                            <Badge className={getStatusColor(webhook)}>{webhook.status_name}</Badge>
-                            {webhook.is_critical && <Badge variant="destructive">CRÍTICO</Badge>}
-                            {webhook.expires_at && isTokenExpired(webhook.expires_at) && (
-                              <Badge variant="outline" className="text-orange-600">
-                                TOKEN EXPIRADO
-                              </Badge>
-                            )}
-                          </div>
-
-                          <div className="grid grid-cols-2 gap-4 text-sm">
-                            <div>
-                              <p className="font-medium">External ID:</p>
-                              <p className="text-gray-600 font-mono">{webhook.external_id}</p>
-                            </div>
-                            <div>
-                              <p className="font-medium">Invoice ID:</p>
-                              <p className="text-gray-600 font-mono">{webhook.invoice_id}</p>
-                            </div>
-                            <div>
-                              <p className="font-medium">Valor:</p>
-                              <p className="text-gray-600">R$ {webhook.amount.toFixed(2)}</p>
-                            </div>
-                            <div>
-                              <p className="font-medium">Status Code:</p>
-                              <p className="text-gray-600">{webhook.status_code}</p>
-                            </div>
-                            {webhook.token && (
-                              <div>
-                                <p className="font-medium">Token:</p>
-                                <p className="text-gray-600 font-mono text-xs">{webhook.token}</p>
-                              </div>
-                            )}
-                            {webhook.expires_at && (
-                              <div>
-                                <p className="font-medium">Expira em:</p>
-                                <p className="text-gray-600 text-xs">{new Date(webhook.expires_at).toLocaleString()}</p>
-                              </div>
-                            )}
-                          </div>
-
-                          <div className="text-xs text-gray-500">
-                            Processado: {new Date(webhook.processed_at).toLocaleString()}
-                            {webhook.payment_date && (
-                              <span> | Pago: {new Date(webhook.payment_date).toLocaleString()}</span>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="flex flex-col items-end gap-1">
-                          {webhook.is_paid && <CheckCircle className="h-5 w-5 text-green-500" />}
-                          {webhook.is_denied && <XCircle className="h-5 w-5 text-red-500" />}
-                          {webhook.is_expired && <Clock className="h-5 w-5 text-orange-500" />}
-                          {webhook.is_canceled && <XCircle className="h-5 w-5 text-gray-500" />}
-                          {webhook.is_refunded && <RefreshCw className="h-5 w-5 text-blue-500" />}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-
-                  {filteredWebhooks.length === 0 && !loading && (
-                    <div className="text-center py-8 text-gray-500">
-                      <Database className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                      <p>Nenhum webhook encontrado</p>
-                      <p className="text-sm">
-                        {stats.total === 0
-                          ? "Execute os scripts SQL primeiro para criar a tabela"
-                          : "Tente ajustar os filtros ou aguarde novos webhooks"}
+          <div className="space-y-4">
+            {filteredWebhooks.length === 0 ? (
+              <Card>
+                <CardContent className="p-8 text-center">
+                  <Database className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
+                  <h3 className="text-lg font-semibold mb-2">Nenhum webhook encontrado</h3>
+                  <p className="text-muted-foreground mb-4">
+                    {webhooks.length === 0
+                      ? "Execute os scripts SQL para criar dados de teste"
+                      : "Nenhum webhook corresponde aos critérios de busca"}
+                  </p>
+                  {webhooks.length === 0 && (
+                    <div className="text-sm text-muted-foreground space-y-1">
+                      <p>
+                        1. Execute: <code>scripts/create-superpay-webhooks-table.sql</code>
+                      </p>
+                      <p>
+                        2. Execute: <code>scripts/test-superpay-system.sql</code>
                       </p>
                     </div>
                   )}
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* Test Tab */}
-          <TabsContent value="test" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Search className="h-5 w-5" />
-                  Teste de Consulta de Status
-                </CardTitle>
-                <CardDescription>Teste a API de consulta de status de pagamento SuperPay</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div>
-                  <Label htmlFor="testExternalId">External ID</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      id="testExternalId"
-                      placeholder="TEST_SUPERPAY_001"
-                      value={testExternalId}
-                      onChange={(e) => setTestExternalId(e.target.value)}
-                    />
-                    <Button onClick={testPaymentStatus} disabled={loading || !testExternalId.trim()}>
-                      <Search className="h-4 w-4 mr-2" />
-                      Consultar
-                    </Button>
-                  </div>
-                </div>
-
-                {testResult && (
-                  <div className="border rounded-lg p-4 bg-gray-50">
-                    <h4 className="font-medium mb-2">Resultado da Consulta:</h4>
-                    <div className="grid grid-cols-2 gap-4 text-sm">
+                </CardContent>
+              </Card>
+            ) : (
+              filteredWebhooks.map((webhook) => (
+                <Card key={webhook.id}>
+                  <CardHeader>
+                    <div className="flex items-center justify-between">
                       <div>
-                        <p className="font-medium">Status:</p>
-                        <Badge
-                          className={
-                            testResult.isPaid ? "bg-green-500" : testResult.isDenied ? "bg-red-500" : "bg-yellow-500"
-                          }
-                        >
-                          {testResult.statusName}
-                        </Badge>
+                        <CardTitle className="text-lg">{webhook.external_id}</CardTitle>
+                        <CardDescription>
+                          Invoice: {webhook.invoice_id} • Status: {webhook.status_code}
+                        </CardDescription>
                       </div>
-                      <div>
-                        <p className="font-medium">Valor:</p>
-                        <p>R$ {testResult.amount.toFixed(2)}</p>
+                      <div className="flex items-center space-x-2">
+                        {getStatusBadge(webhook)}
+                        {getTokenStatus(webhook.expires_at)}
                       </div>
-                      <div>
-                        <p className="font-medium">Pago:</p>
-                        <p>{testResult.isPaid ? "✅ Sim" : "❌ Não"}</p>
-                      </div>
-                      <div>
-                        <p className="font-medium">Fonte:</p>
-                        <p>{testResult.source}</p>
-                      </div>
-                      {testResult.token && (
-                        <div className="col-span-2">
-                          <p className="font-medium">Token:</p>
-                          <p className="font-mono text-xs">{testResult.token}</p>
-                        </div>
-                      )}
-                      {testResult.error && (
-                        <div className="col-span-2">
-                          <p className="font-medium text-red-600">Erro:</p>
-                          <p className="text-red-600">{testResult.error}</p>
-                        </div>
-                      )}
                     </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                      <div>
+                        <Label className="text-muted-foreground">Status</Label>
+                        <div className="font-medium">{webhook.status_name}</div>
+                      </div>
+                      <div>
+                        <Label className="text-muted-foreground">Valor</Label>
+                        <div className="font-medium">R$ {webhook.amount.toFixed(2)}</div>
+                      </div>
+                      <div>
+                        <Label className="text-muted-foreground">Processado</Label>
+                        <div className="font-medium">{new Date(webhook.processed_at).toLocaleString("pt-BR")}</div>
+                      </div>
+                      <div>
+                        <Label className="text-muted-foreground">Token Expira</Label>
+                        <div className="font-medium">{new Date(webhook.expires_at).toLocaleString("pt-BR")}</div>
+                      </div>
+                    </div>
 
-          {/* Simulate Tab */}
-          <TabsContent value="simulate" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Zap className="h-5 w-5" />
-                  Simulação de Pagamento
-                </CardTitle>
-                <CardDescription>Simule diferentes status de pagamento SuperPay para teste</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
+                    {webhook.payment_date && (
+                      <div className="mt-4 pt-4 border-t">
+                        <Label className="text-muted-foreground">Data do Pagamento</Label>
+                        <div className="font-medium text-green-600">
+                          {new Date(webhook.payment_date).toLocaleString("pt-BR")}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="mt-4 pt-4 border-t">
+                      <Label className="text-muted-foreground">Estados</Label>
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {webhook.is_paid && <Badge className="bg-green-100 text-green-800">Pago</Badge>}
+                        {webhook.is_denied && <Badge className="bg-red-100 text-red-800">Negado</Badge>}
+                        {webhook.is_expired && <Badge className="bg-orange-100 text-orange-800">Vencido</Badge>}
+                        {webhook.is_canceled && <Badge className="bg-gray-100 text-gray-800">Cancelado</Badge>}
+                        {webhook.is_refunded && <Badge className="bg-blue-100 text-blue-800">Estornado</Badge>}
+                        {webhook.is_critical && <Badge className="bg-yellow-100 text-yellow-800">Crítico</Badge>}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))
+            )}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="test" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Testar Consulta de Status</CardTitle>
+              <CardDescription>Consulte o status de um pagamento pelo External ID</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <Label htmlFor="testExternalId">External ID</Label>
+                <Input
+                  id="testExternalId"
+                  placeholder="Ex: TEST_SUPERPAY_005"
+                  value={testExternalId}
+                  onChange={(e) => setTestExternalId(e.target.value)}
+                />
+              </div>
+              <Button onClick={testPaymentStatus} disabled={!testExternalId.trim()}>
+                <TestTube className="w-4 h-4 mr-2" />
+                Consultar Status
+              </Button>
+
+              {testResult && (
+                <div className="mt-4 p-4 bg-gray-50 rounded-lg">
+                  <Label className="text-muted-foreground">Resultado:</Label>
+                  <pre className="mt-2 text-sm overflow-auto">{JSON.stringify(testResult, null, 2)}</pre>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="simulate" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Simular Pagamento</CardTitle>
+              <CardDescription>Simule um webhook SuperPay para testar o sistema</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <Label htmlFor="simulateExternalId">External ID</Label>
                   <Input
                     id="simulateExternalId"
-                    placeholder="TEST_SUPERPAY_001"
-                    value={testExternalId}
-                    onChange={(e) => setTestExternalId(e.target.value)}
+                    placeholder="Ex: SHEIN_123456789_abc"
+                    value={simulateExternalId}
+                    onChange={(e) => setSimulateExternalId(e.target.value)}
                   />
                 </div>
-
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                  <Button
-                    onClick={() => simulatePayment(5)}
-                    disabled={loading || !testExternalId.trim()}
-                    className="bg-green-600 hover:bg-green-700"
+                <div>
+                  <Label htmlFor="simulateStatusCode">Status Code</Label>
+                  <select
+                    id="simulateStatusCode"
+                    className="w-full p-2 border rounded-md"
+                    value={simulateStatusCode}
+                    onChange={(e) => setSimulateStatusCode(Number(e.target.value))}
                   >
-                    Simular Pago
-                  </Button>
-                  <Button
-                    onClick={() => simulatePayment(12)}
-                    disabled={loading || !testExternalId.trim()}
-                    className="bg-red-600 hover:bg-red-700"
-                  >
-                    Simular Negado
-                  </Button>
-                  <Button
-                    onClick={() => simulatePayment(15)}
-                    disabled={loading || !testExternalId.trim()}
-                    className="bg-orange-600 hover:bg-orange-700"
-                  >
-                    Simular Vencido
-                  </Button>
-                  <Button
-                    onClick={() => simulatePayment(6)}
-                    disabled={loading || !testExternalId.trim()}
-                    className="bg-gray-600 hover:bg-gray-700"
-                  >
-                    Simular Cancelado
-                  </Button>
-                  <Button
-                    onClick={() => simulatePayment(9)}
-                    disabled={loading || !testExternalId.trim()}
-                    className="bg-blue-600 hover:bg-blue-700"
-                  >
-                    Simular Estornado
-                  </Button>
+                    <option value={1}>1 - Aguardando Pagamento</option>
+                    <option value={2}>2 - Em Processamento</option>
+                    <option value={3}>3 - Processando</option>
+                    <option value={4}>4 - Aprovado</option>
+                    <option value={5}>5 - Pago</option>
+                    <option value={6}>6 - Cancelado</option>
+                    <option value={7}>7 - Contestado</option>
+                    <option value={8}>8 - Chargeback</option>
+                    <option value={9}>9 - Estornado</option>
+                    <option value={10}>10 - Falha</option>
+                    <option value={11}>11 - Bloqueado</option>
+                    <option value={12}>12 - Negado</option>
+                    <option value={13}>13 - Análise</option>
+                    <option value={14}>14 - Análise Manual</option>
+                    <option value={15}>15 - Vencido</option>
+                  </select>
                 </div>
-
-                {simulationResult && (
-                  <div className="border rounded-lg p-4 bg-green-50">
-                    <h4 className="font-medium mb-2 text-green-800">Simulação Concluída:</h4>
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <p className="font-medium">External ID:</p>
-                        <p className="font-mono">{simulationResult.external_id}</p>
-                      </div>
-                      <div>
-                        <p className="font-medium">Status:</p>
-                        <Badge>{simulationResult.status_name}</Badge>
-                      </div>
-                      <div>
-                        <p className="font-medium">Valor:</p>
-                        <p>R$ {simulationResult.amount.toFixed(2)}</p>
-                      </div>
-                      <div>
-                        <p className="font-medium">Token:</p>
-                        <p className="font-mono text-xs">{simulationResult.token}</p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
-
-        {/* Instructions */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Instruções de Uso</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-              <div>
-                <h4 className="font-medium mb-2">Para começar:</h4>
-                <ol className="space-y-1 text-gray-600 list-decimal list-inside">
-                  <li>
-                    Execute o script <code>scripts/create-superpay-webhooks-table.sql</code>
-                  </li>
-                  <li>
-                    Execute o script <code>scripts/test-superpay-system.sql</code>
-                  </li>
-                  <li>Use a aba "Simulação" para criar dados de teste</li>
-                  <li>Monitore os webhooks na aba "Webhooks"</li>
-                </ol>
+                <div>
+                  <Label htmlFor="simulateAmount">Valor (R$)</Label>
+                  <Input
+                    id="simulateAmount"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={simulateAmount}
+                    onChange={(e) => setSimulateAmount(Number(e.target.value))}
+                  />
+                </div>
               </div>
-              <div>
-                <h4 className="font-medium mb-2">Endpoints disponíveis:</h4>
-                <ul className="space-y-1 text-gray-600">
-                  <li>
-                    • <code>/api/superpay/webhook</code> - Recebe webhooks
-                  </li>
-                  <li>
-                    • <code>/api/superpay/payment-status</code> - Consulta status
-                  </li>
-                  <li>
-                    • <code>/api/superpay/simulate-payment</code> - Simula pagamentos
-                  </li>
-                  <li>
-                    • <code>/debug/superpay-webhooks</code> - Esta página
-                  </li>
-                </ul>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+
+              <Button onClick={simulatePayment} disabled={!simulateExternalId.trim()}>
+                <Zap className="w-4 h-4 mr-2" />
+                Simular Pagamento
+              </Button>
+
+              {simulateResult && (
+                <div className="mt-4 p-4 bg-gray-50 rounded-lg">
+                  <Label className="text-muted-foreground">Resultado da Simulação:</Label>
+                  <pre className="mt-2 text-sm overflow-auto">{JSON.stringify(simulateResult, null, 2)}</pre>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }
