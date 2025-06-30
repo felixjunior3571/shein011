@@ -3,235 +3,148 @@ import { createClient } from "@supabase/supabase-js"
 
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
-// Cache em memória para notificações ativas (para múltiplos usuários)
-const activeNotifications = new Map<string, any>()
-const sseConnections = new Map<string, ReadableStreamDefaultController>()
+// Cache em memória para notificações ativas (otimização para múltiplos usuários)
+export const activeNotifications = new Map<
+  string,
+  {
+    external_id: string
+    payment_confirmed: boolean
+    status: string
+    redirect_url: string | null
+    redirect_type: string
+    amount: number
+    paid_at: string | null
+    gateway?: string
+    pay_id?: string
+    webhook_received_at: string
+    last_update: string
+  }
+>()
+
+// Conexões SSE ativas
+export const sseConnections = new Map<string, ReadableStreamDefaultController>()
+
+// Cleanup automático de notificações antigas (executar a cada 5 minutos)
+setInterval(
+  () => {
+    const now = Date.now()
+    const fiveMinutesAgo = now - 5 * 60 * 1000
+
+    for (const [key, notification] of activeNotifications.entries()) {
+      const notificationTime = new Date(notification.webhook_received_at).getTime()
+      if (notificationTime < fiveMinutesAgo) {
+        console.log(`🧹 Removendo notificação expirada: ${key}`)
+        activeNotifications.delete(key)
+        sseConnections.delete(key)
+      }
+    }
+  },
+  5 * 60 * 1000,
+)
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("🔔 Webhook SuperPayBR recebido")
+    console.log("🔔 Webhook SuperPayBR recebido!")
 
-    // Parse do payload
-    const payload = await request.json()
-    console.log("📦 Payload completo:", JSON.stringify(payload, null, 2))
+    const body = await request.json()
+    console.log("📦 Dados do webhook:", JSON.stringify(body, null, 2))
 
-    // Validar estrutura do payload SuperPayBR
-    if (!payload.invoices || !payload.invoices.external_id || !payload.invoices.status) {
-      console.error("❌ Payload inválido - campos obrigatórios ausentes")
-      return NextResponse.json({ error: "Payload inválido" }, { status: 400 })
+    // Extrair dados do webhook SuperPayBR
+    const { external_id, status, amount, gateway, pay_id, paid_at, redirect_url, redirect_type = "checkout" } = body
+
+    if (!external_id) {
+      console.log("❌ External ID não encontrado no webhook")
+      return NextResponse.json({ error: "External ID obrigatório" }, { status: 400 })
     }
 
-    const invoice = payload.invoices
-    const externalId = invoice.external_id
-    const statusCode = invoice.status.code
-    const statusTitle = invoice.status.title
-    const statusDescription = invoice.status.description
-    const paymentDate = invoice.payment?.payDate || invoice.date || new Date().toISOString()
-    const gateway = invoice.payment?.gateway || "pix"
-    const payId = invoice.payment?.payId
-    const amount = invoice.prices?.total || 0
-
-    console.log(`🔍 Processando fatura SuperPayBR: ${externalId}`)
-    console.log(`📊 Status: ${statusCode} - ${statusTitle}`)
-    console.log(`💰 Valor: R$ ${(amount / 100).toFixed(2)}`)
-    console.log(`💳 Gateway: ${gateway} | PayID: ${payId}`)
-
-    // Mapear status code SuperPayBR para status legível
-    const statusMap = {
-      1: "pendente",
-      2: "processando",
-      3: "aguardando",
-      4: "em_analise",
-      5: "pago", // ✅ PAGAMENTO CONFIRMADO
-      6: "recusado", // ❌ RECUSADO
-      7: "cancelado", // ❌ CANCELADO
-      8: "estornado", // ❌ ESTORNADO
-      9: "vencido", // ❌ VENCIDO
-      10: "contestado", // ❌ CONTESTADO
+    const webhookData = {
+      external_id,
+      payment_confirmed: status === "pago" || status === "paid" || status === "approved",
+      status: status || "pending",
+      redirect_url: redirect_url || null,
+      redirect_type: redirect_type || "checkout",
+      amount: typeof amount === "number" ? amount : Number.parseFloat(amount) || 0,
+      paid_at: paid_at || null,
+      gateway: gateway || "superpaybr",
+      pay_id: pay_id || null,
+      webhook_received_at: new Date().toISOString(),
+      last_update: new Date().toISOString(),
     }
 
-    const newStatus = statusMap[statusCode] || "desconhecido"
-    console.log(`🔄 Mapeando status ${statusCode} → ${newStatus}`)
+    console.log(`📊 Processando webhook: ${external_id} - Status: ${status}`)
 
-    // Buscar fatura no Supabase pelo external_id
-    const { data: existingInvoice, error: fetchError } = await supabase
-      .from("faturas")
-      .select("*")
-      .eq("external_id", externalId)
-      .single()
+    // Salvar no cache em memória para acesso rápido
+    activeNotifications.set(external_id, webhookData)
+    console.log(`💾 Notificação salva no cache: ${external_id}`)
 
-    if (fetchError) {
-      console.error("❌ Erro ao buscar fatura:", fetchError)
-      return NextResponse.json({ error: "Fatura não encontrada" }, { status: 404 })
-    }
+    // Salvar no banco de dados
+    try {
+      const { error: dbError } = await supabase.from("webhook_notifications").upsert({
+        external_id,
+        payment_confirmed: webhookData.payment_confirmed,
+        status: webhookData.status,
+        redirect_url: webhookData.redirect_url,
+        redirect_type: webhookData.redirect_type,
+        amount: webhookData.amount,
+        paid_at: webhookData.paid_at,
+        gateway: webhookData.gateway,
+        pay_id: webhookData.pay_id,
+        webhook_received_at: webhookData.webhook_received_at,
+        last_update: webhookData.last_update,
+        webhook_data: body,
+      })
 
-    console.log(`📋 Fatura encontrada: ID ${existingInvoice.id} | Status atual: ${existingInvoice.status}`)
-    console.log(`🎯 Tipo de redirecionamento: ${existingInvoice.redirect_type || "checkout"}`)
-
-    // Preparar dados para atualização
-    const updateData = {
-      status: newStatus,
-      updated_at: new Date().toISOString(),
-      superpay_status_code: statusCode,
-      superpay_status_title: statusTitle,
-      superpay_status_description: statusDescription,
-      gateway: gateway,
-      pay_id: payId,
-    }
-
-    // Se pagamento confirmado, adicionar paid_at e processar redirecionamento
-    if (statusCode === 5) {
-      updateData.paid_at = paymentDate
-      console.log("✅ PAGAMENTO CONFIRMADO! Marcando paid_at:", paymentDate)
-
-      // Determinar URL de redirecionamento baseado no tipo
-      const redirectType = existingInvoice.redirect_type || "checkout"
-      let redirectUrl = "/upp/001" // default para checkout
-
-      if (redirectType === "checkout") {
-        redirectUrl = "/upp/001"
-        console.log("🚀 Tipo CHECKOUT - Cliente será redirecionado para /upp/001")
-      } else if (redirectType === "activation") {
-        redirectUrl = "/upp10"
-        console.log("🚀 Tipo ACTIVATION - Cliente será redirecionado para /upp10")
-      }
-
-      // Criar notificação de redirecionamento
-      const webhookNotification = {
-        external_id: externalId,
-        status: "paid",
-        redirect_url: redirectUrl,
-        redirect_type: redirectType,
-        payment_confirmed: true,
-        amount: amount / 100,
-        paid_at: paymentDate,
-        gateway: gateway,
-        pay_id: payId,
-        webhook_received_at: new Date().toISOString(),
-        expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(), // 15 minutos
-      }
-
-      // Salvar no cache em memória para acesso rápido
-      activeNotifications.set(externalId, webhookNotification)
-      console.log(`💾 Notificação salva no cache para: ${externalId}`)
-
-      // Enviar via SSE para usuários conectados
-      const sseController = sseConnections.get(externalId)
-      if (sseController) {
-        try {
-          const sseData = `data: ${JSON.stringify({
-            type: "payment_confirmed",
-            external_id: externalId,
-            redirect_url: redirectUrl,
-            amount: amount / 100,
-            timestamp: new Date().toISOString(),
-          })}\n\n`
-
-          sseController.enqueue(new TextEncoder().encode(sseData))
-          console.log(`📡 SSE enviado para: ${externalId}`)
-        } catch (sseError) {
-          console.error("❌ Erro ao enviar SSE:", sseError)
-          sseConnections.delete(externalId)
-        }
-      }
-
-      // Salvar notificação no banco (backup)
-      const { error: notificationError } = await supabase
-        .from("webhook_notifications")
-        .upsert(webhookNotification, { onConflict: "external_id" })
-
-      if (notificationError) {
-        console.error("❌ Erro ao salvar notificação:", notificationError)
+      if (dbError) {
+        console.error("❌ Erro ao salvar no banco:", dbError)
       } else {
-        console.log("✅ Notificação de webhook salva no banco para external_id:", externalId)
+        console.log(`✅ Webhook salvo no banco: ${external_id}`)
       }
+    } catch (dbError) {
+      console.error("💥 Erro na operação do banco:", dbError)
     }
 
-    // Atualizar fatura no Supabase
-    const { data: updatedInvoice, error: updateError } = await supabase
-      .from("faturas")
-      .update(updateData)
-      .eq("external_id", externalId)
-      .select()
-      .single()
-
-    if (updateError) {
-      console.error("❌ Erro ao atualizar fatura:", updateError)
-      return NextResponse.json({ error: "Erro ao atualizar fatura" }, { status: 500 })
-    }
-
-    console.log("✅ Fatura atualizada com sucesso:", updatedInvoice)
-
-    // Enviar notificação para callback URL se fornecida
-    if (existingInvoice.callback_url) {
+    // Enviar notificação via SSE se houver conexão ativa
+    const sseController = sseConnections.get(external_id)
+    if (sseController) {
       try {
-        console.log(`📞 Enviando notificação para callback: ${existingInvoice.callback_url}`)
+        const sseData = `data: ${JSON.stringify({
+          type: webhookData.payment_confirmed ? "payment_confirmed" : "payment_updated",
+          external_id,
+          status: webhookData.status,
+          payment_confirmed: webhookData.payment_confirmed,
+          redirect_url: webhookData.redirect_url,
+          amount: webhookData.amount,
+          paid_at: webhookData.paid_at,
+          timestamp: webhookData.webhook_received_at,
+        })}\n\n`
 
-        const callbackPayload = {
-          external_id: externalId,
-          status: newStatus,
-          status_code: statusCode,
-          status_title: statusTitle,
-          amount: amount / 100,
-          paid_at: statusCode === 5 ? paymentDate : null,
-          gateway: gateway,
-          pay_id: payId,
-          redirect_type: existingInvoice.redirect_type || "checkout",
-          webhook_timestamp: new Date().toISOString(),
-        }
-
-        const callbackResponse = await fetch(existingInvoice.callback_url, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "User-Agent": "SuperPayBR-Webhook/1.0",
-          },
-          body: JSON.stringify(callbackPayload),
-          signal: AbortSignal.timeout(10000), // 10 segundos timeout
-        })
-
-        if (callbackResponse.ok) {
-          console.log("✅ Callback enviado com sucesso")
-        } else {
-          console.log(`⚠️ Callback retornou status ${callbackResponse.status}`)
-        }
-      } catch (callbackError) {
-        console.error("❌ Erro ao enviar callback:", callbackError)
-        // Não falhar o webhook por erro de callback
+        sseController.enqueue(new TextEncoder().encode(sseData))
+        console.log(`📡 Notificação SSE enviada: ${external_id}`)
+      } catch (sseError) {
+        console.error(`❌ Erro ao enviar SSE: ${sseError}`)
+        sseConnections.delete(external_id)
       }
+    } else {
+      console.log(`📡 Nenhuma conexão SSE ativa para: ${external_id}`)
     }
 
-    // Log específico para diferentes status
-    switch (statusCode) {
-      case 5:
-        console.log("🎉 PAGAMENTO CONFIRMADO! Sistema de redirecionamento ativado")
-        break
-      case 6:
-        console.log("❌ PAGAMENTO RECUSADO")
-        break
-      case 7:
-        console.log("❌ PAGAMENTO CANCELADO")
-        break
-      case 8:
-        console.log("❌ PAGAMENTO ESTORNADO")
-        break
-      case 9:
-        console.log("❌ PAGAMENTO VENCIDO")
-        break
-      default:
-        console.log(`ℹ️ Status ${statusCode}: ${statusTitle}`)
+    // Log do resultado
+    if (webhookData.payment_confirmed) {
+      console.log(`🎉 PAGAMENTO CONFIRMADO: ${external_id} - R$ ${webhookData.amount.toFixed(2)}`)
+    } else {
+      console.log(`📋 Status atualizado: ${external_id} - ${webhookData.status}`)
     }
 
-    // Resposta de sucesso para SuperPayBR
     return NextResponse.json({
       success: true,
       message: "Webhook processado com sucesso",
-      external_id: externalId,
-      status: newStatus,
-      redirect_type: existingInvoice.redirect_type || "checkout",
-      processed_at: new Date().toISOString(),
-      active_connections: sseConnections.size,
-      cached_notifications: activeNotifications.size,
+      data: {
+        external_id,
+        status: webhookData.status,
+        payment_confirmed: webhookData.payment_confirmed,
+        cached: true,
+        sse_sent: !!sseController,
+      },
     })
   } catch (error) {
     console.error("💥 Erro no webhook SuperPayBR:", error)
@@ -245,20 +158,20 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// Permitir apenas POST
+// Endpoint para obter estatísticas (usado pelo teste de escalabilidade)
 export async function GET() {
-  return NextResponse.json(
-    {
-      error: "Método não permitido",
-      message: "Este endpoint aceita apenas POST",
-      stats: {
-        active_connections: sseConnections.size,
-        cached_notifications: activeNotifications.size,
-      },
+  return NextResponse.json({
+    success: true,
+    stats: {
+      active_notifications: activeNotifications.size,
+      active_connections: sseConnections.size,
+      cached_notifications: activeNotifications.size,
     },
-    { status: 405 },
-  )
+    notifications: Array.from(activeNotifications.entries()).map(([key, value]) => ({
+      external_id: key,
+      status: value.status,
+      payment_confirmed: value.payment_confirmed,
+      webhook_received_at: value.webhook_received_at,
+    })),
+  })
 }
-
-// Exportar para uso em outros módulos
-export { activeNotifications, sseConnections }

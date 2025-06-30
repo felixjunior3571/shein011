@@ -9,19 +9,19 @@ const RATE_LIMITS = {
   webhook: { windowMs: 0, maxRequests: Number.POSITIVE_INFINITY },
 
   // SSE Stream - limite alto para suportar múltiplos usuários
-  sse: { windowMs: 60 * 1000, maxRequests: 100 }, // 100 conexões por minuto
+  sse: { windowMs: 60 * 1000, maxRequests: 200 }, // 200 conexões por minuto
 
   // Check status - limite médio (cache reduz necessidade)
-  status: { windowMs: 60 * 1000, maxRequests: 200 }, // 200 verificações por minuto
+  status: { windowMs: 60 * 1000, maxRequests: 300 }, // 300 verificações por minuto
 
   // Create invoice - limite baixo (operação custosa)
-  create: { windowMs: 60 * 1000, maxRequests: 10 }, // 10 criações por minuto
+  create: { windowMs: 60 * 1000, maxRequests: 20 }, // 20 criações por minuto
 
   // APIs gerais - limite padrão
-  api: { windowMs: 60 * 1000, maxRequests: 60 }, // 60 requests por minuto
+  api: { windowMs: 60 * 1000, maxRequests: 100 }, // 100 requests por minuto
 
   // Checkout pages - limite alto
-  checkout: { windowMs: 60 * 1000, maxRequests: 300 }, // 300 acessos por minuto
+  checkout: { windowMs: 60 * 1000, maxRequests: 500 }, // 500 acessos por minuto
 }
 
 function getRateLimitKey(request: NextRequest): string {
@@ -34,7 +34,7 @@ function isRateLimited(ip: string, limit: number, windowMs: number): boolean {
   if (limit === Number.POSITIVE_INFINITY) return false // Sem limite
 
   const now = Date.now()
-  const key = ip
+  const key = `${ip}_${windowMs}_${limit}`
 
   const current = rateLimitMap.get(key)
 
@@ -93,9 +93,9 @@ export function middleware(request: NextRequest) {
   // Obter configuração de rate limit
   const config = getRateLimitConfig(pathname)
 
-  // Log para debugging
-  if (pathname.includes("/api/superpaybr")) {
-    console.log(`🔒 Rate limit check: ${pathname} | IP: ${ip} | Limit: ${config.maxRequests}/${config.windowMs}ms`)
+  // Log apenas para endpoints críticos
+  if (pathname.includes("/api/superpaybr") && process.env.NODE_ENV === "development") {
+    console.log(`🔒 Rate limit: ${pathname} | IP: ${ip} | Limit: ${config.maxRequests}/${config.windowMs}ms`)
   }
 
   // Aplicar rate limiting
@@ -105,9 +105,11 @@ export function middleware(request: NextRequest) {
     return NextResponse.json(
       {
         error: "Rate limit exceeded",
-        message: "Muitas requisições. Tente novamente em alguns segundos.",
+        message: "Muitas requisições. Aguarde alguns segundos e tente novamente.",
         retryAfter: Math.ceil(config.windowMs / 1000),
         endpoint: pathname,
+        limit: config.maxRequests,
+        window: config.windowMs,
       },
       {
         status: 429,
@@ -122,7 +124,7 @@ export function middleware(request: NextRequest) {
   }
 
   // Adicionar headers de rate limit para respostas bem-sucedidas
-  const current = rateLimitMap.get(ip)
+  const current = rateLimitMap.get(`${ip}_${config.windowMs}_${config.maxRequests}`)
   const response = NextResponse.next()
 
   if (current && config.maxRequests !== Number.POSITIVE_INFINITY) {

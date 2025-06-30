@@ -10,120 +10,106 @@ export async function GET(request: NextRequest) {
     const externalId = searchParams.get("external_id")
 
     if (!externalId) {
-      return NextResponse.json({ error: "external_id é obrigatório" }, { status: 400 })
+      return NextResponse.json(
+        {
+          success: false,
+          error: "external_id é obrigatório",
+        },
+        { status: 400 },
+      )
     }
 
-    console.log(`🔍 Verificação rápida para: ${externalId}`)
+    console.log(`🔍 Verificando status do pagamento: ${externalId}`)
 
-    // 1. PRIMEIRO: Verificar cache em memória (mais rápido)
+    // 1. Verificar cache em memória primeiro (mais rápido)
     const cachedNotification = activeNotifications.get(externalId)
     if (cachedNotification) {
-      console.log(`⚡ Notificação encontrada no cache: ${externalId}`)
-
-      // Verificar se não expirou
-      const now = new Date()
-      const expiresAt = new Date(cachedNotification.expires_at)
-
-      if (now <= expiresAt) {
-        return NextResponse.json({
-          success: true,
-          data: {
-            external_id: cachedNotification.external_id,
-            status: cachedNotification.status,
-            payment_confirmed: cachedNotification.payment_confirmed,
-            redirect_url: cachedNotification.redirect_url,
-            redirect_type: cachedNotification.redirect_type,
-            amount: cachedNotification.amount,
-            paid_at: cachedNotification.paid_at,
-            gateway: cachedNotification.gateway,
-            pay_id: cachedNotification.pay_id,
-            last_update: cachedNotification.webhook_received_at,
-            source: "memory_cache",
-          },
-        })
-      } else {
-        // Remover do cache se expirou
-        activeNotifications.delete(externalId)
-        console.log(`⏰ Notificação expirada removida do cache: ${externalId}`)
-      }
+      console.log(`⚡ Encontrado no cache: ${externalId} - ${cachedNotification.status}`)
+      return NextResponse.json({
+        success: true,
+        data: {
+          ...cachedNotification,
+          source: "memory_cache",
+        },
+      })
     }
 
-    // 2. SEGUNDO: Verificar banco de dados (webhook_notifications)
-    const { data: notification, error: notificationError } = await supabase
+    // 2. Verificar no banco de dados
+    console.log(`🔍 Buscando no banco: ${externalId}`)
+
+    const { data: webhookData, error } = await supabase
       .from("webhook_notifications")
       .select("*")
       .eq("external_id", externalId)
-      .order("webhook_received_at", { ascending: false })
+      .order("created_at", { ascending: false })
       .limit(1)
       .single()
 
-    if (!notificationError && notification) {
-      // Verificar se a notificação não expirou
-      const now = new Date()
-      const expiresAt = new Date(notification.expires_at)
+    if (error && error.code !== "PGRST116") {
+      // PGRST116 = no rows found
+      console.error(`❌ Erro na consulta: ${error.message}`)
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Erro na consulta ao banco de dados",
+        },
+        { status: 500 },
+      )
+    }
 
-      if (now <= expiresAt) {
-        console.log(`📋 Notificação encontrada no banco: ${externalId}`)
+    if (webhookData) {
+      console.log(`📊 Encontrado no banco: ${externalId} - ${webhookData.status}`)
 
-        // Adicionar ao cache para próximas consultas
-        activeNotifications.set(externalId, notification)
-
-        return NextResponse.json({
-          success: true,
-          data: {
-            external_id: notification.external_id,
-            status: notification.status,
-            payment_confirmed: notification.payment_confirmed,
-            redirect_url: notification.redirect_url,
-            redirect_type: notification.redirect_type,
-            amount: notification.amount,
-            paid_at: notification.paid_at,
-            gateway: notification.gateway,
-            pay_id: notification.pay_id,
-            last_update: notification.webhook_received_at,
-            source: "database_cache",
-          },
-        })
-      } else {
-        // Remover notificação expirada
-        await supabase.from("webhook_notifications").delete().eq("external_id", externalId)
-        console.log(`⏰ Notificação expirada removida do banco: ${externalId}`)
+      // Adicionar ao cache para próximas consultas
+      const cacheData = {
+        external_id: webhookData.external_id,
+        payment_confirmed: webhookData.payment_confirmed,
+        status: webhookData.status,
+        redirect_url: webhookData.redirect_url,
+        redirect_type: webhookData.redirect_type,
+        amount: webhookData.amount,
+        paid_at: webhookData.paid_at,
+        gateway: webhookData.gateway,
+        pay_id: webhookData.pay_id,
+        webhook_received_at: webhookData.webhook_received_at,
+        last_update: webhookData.last_update,
       }
+
+      activeNotifications.set(externalId, cacheData)
+
+      return NextResponse.json({
+        success: true,
+        data: {
+          ...cacheData,
+          source: "database_cache",
+        },
+      })
     }
 
-    // 3. TERCEIRO: Verificar tabela de faturas (fallback)
-    const { data: invoice, error: invoiceError } = await supabase
-      .from("faturas")
-      .select("*")
-      .eq("external_id", externalId)
-      .single()
-
-    if (invoiceError) {
-      console.error("❌ Erro ao buscar fatura:", invoiceError)
-      return NextResponse.json({ error: "Fatura não encontrada" }, { status: 404 })
-    }
-
-    console.log(`📄 Consultando fatura diretamente: ${externalId} - Status: ${invoice.status}`)
-
+    // 3. Não encontrado
+    console.log(`❌ Pagamento não encontrado: ${externalId}`)
     return NextResponse.json({
       success: true,
       data: {
         external_id: externalId,
-        status: invoice.status || "pendente",
-        payment_confirmed: invoice.status === "pago",
-        redirect_url:
-          invoice.status === "pago" ? (invoice.redirect_type === "activation" ? "/upp10" : "/upp/001") : null,
-        redirect_type: invoice.redirect_type || "checkout",
-        amount: invoice.amount || 0,
-        paid_at: invoice.paid_at,
-        last_update: invoice.updated_at,
+        payment_confirmed: false,
+        status: "pending",
+        redirect_url: null,
+        redirect_type: "checkout",
+        amount: 0,
+        paid_at: null,
+        gateway: "superpaybr",
+        pay_id: null,
+        webhook_received_at: null,
+        last_update: new Date().toISOString(),
         source: "database_direct",
       },
     })
   } catch (error) {
-    console.error("💥 Erro ao verificar status webhook:", error)
+    console.error("💥 Erro ao verificar status:", error)
     return NextResponse.json(
       {
+        success: false,
         error: "Erro interno do servidor",
         message: error instanceof Error ? error.message : "Erro desconhecido",
       },
