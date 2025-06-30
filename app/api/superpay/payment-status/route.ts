@@ -4,11 +4,6 @@ import { createClient } from "@supabase/supabase-js"
 // Supabase client
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
-function isTokenExpired(expiresAt: string | null): boolean {
-  if (!expiresAt) return false
-  return new Date() > new Date(expiresAt)
-}
-
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
@@ -16,7 +11,7 @@ export async function GET(request: NextRequest) {
     const invoiceId = searchParams.get("invoiceId")
     const token = searchParams.get("token")
 
-    console.log("🔍 Consultando status SuperPay:", {
+    console.log("🔍 Consultando status SuperPay no Supabase:", {
       externalId,
       invoiceId,
       token,
@@ -32,26 +27,26 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Construir query para Supabase
+    // Build query for Supabase ONLY
     let query = supabase
       .from("payment_webhooks")
       .select("*")
       .eq("gateway", "superpay")
       .order("processed_at", { ascending: false })
 
-    // Adicionar condições de busca
+    // Add search conditions
     if (externalId) {
       query = query.eq("external_id", externalId)
     } else if (invoiceId) {
       query = query.eq("invoice_id", invoiceId)
     } else if (token) {
-      query = query.eq("token", token)
+      query = query.or(`external_id.eq.${token},invoice_id.eq.${token}`)
     }
 
     const { data: records, error } = await query.limit(1)
 
     if (error) {
-      console.error("❌ Erro na consulta Supabase SuperPay:", error)
+      console.error("❌ Erro na consulta Supabase:", error)
       throw error
     }
 
@@ -73,34 +68,7 @@ export async function GET(request: NextRequest) {
           amount: 0,
           paymentDate: null,
           lastUpdate: new Date().toISOString(),
-          source: "supabase",
-        },
-      })
-    }
-
-    // Verificar se token expirou
-    if (record.expires_at && isTokenExpired(record.expires_at)) {
-      console.log("⏰ Token SuperPay expirado no Supabase:", {
-        external_id: record.external_id,
-        expires_at: record.expires_at,
-      })
-
-      return NextResponse.json({
-        success: true,
-        found: false,
-        data: {
-          isPaid: false,
-          isDenied: false,
-          isExpired: false,
-          isCanceled: false,
-          isRefunded: false,
-          statusCode: null,
-          statusName: "Token expirado",
-          amount: 0,
-          paymentDate: null,
-          lastUpdate: new Date().toISOString(),
-          source: "token_expired",
-          error: "Token de verificação expirado (15 minutos)",
+          source: "supabase_only",
         },
       })
     }
@@ -110,11 +78,9 @@ export async function GET(request: NextRequest) {
       external_id: record.external_id,
       status: record.status_name,
       is_paid: record.is_paid,
-      token: record.token,
-      expires_at: record.expires_at,
     })
 
-    // Retornar resposta padronizada
+    // Return standardized response
     const response = {
       success: true,
       found: true,
@@ -131,11 +97,8 @@ export async function GET(request: NextRequest) {
         lastUpdate: record.processed_at,
         externalId: record.external_id,
         invoiceId: record.invoice_id,
-        token: record.token,
-        expiresAt: record.expires_at,
         webhookData: record.webhook_data,
-        isCritical: record.is_critical || false,
-        source: "supabase",
+        source: "supabase_only",
       },
     }
 
@@ -143,7 +106,6 @@ export async function GET(request: NextRequest) {
       external_id: response.data.externalId,
       is_paid: response.data.isPaid,
       status: response.data.statusName,
-      token: response.data.token,
       source: response.data.source,
     })
 
@@ -180,7 +142,7 @@ export async function POST(request: NextRequest) {
 
     console.log("🔍 Consulta em lote SuperPay no Supabase:", externalIds)
 
-    // Query multiple records from Supabase
+    // Query multiple records from Supabase ONLY
     const { data: records, error } = await supabase
       .from("payment_webhooks")
       .select("*")
@@ -211,28 +173,7 @@ export async function POST(request: NextRequest) {
           amount: 0,
           paymentDate: null,
           lastUpdate: new Date().toISOString(),
-          source: "supabase",
-        }
-      }
-
-      // Verificar se token expirou
-      if (record.expires_at && isTokenExpired(record.expires_at)) {
-        return {
-          externalId: record.external_id,
-          found: false,
-          isPaid: false,
-          isDenied: false,
-          isExpired: false,
-          isCanceled: false,
-          isRefunded: false,
-          statusCode: null,
-          statusName: "Token expirado",
-          amount: 0,
-          paymentDate: null,
-          lastUpdate: new Date().toISOString(),
-          token: record.token,
-          expiresAt: record.expires_at,
-          source: "token_expired",
+          source: "supabase_only",
         }
       }
 
@@ -250,10 +191,7 @@ export async function POST(request: NextRequest) {
         paymentDate: record.payment_date,
         lastUpdate: record.processed_at,
         invoiceId: record.invoice_id,
-        token: record.token,
-        expiresAt: record.expires_at,
-        isCritical: record.is_critical || false,
-        source: "supabase",
+        source: "supabase_only",
       }
     })
 
@@ -268,8 +206,7 @@ export async function POST(request: NextRequest) {
         total: externalIds.length,
         found: results.filter((r) => r.found).length,
         paid: results.filter((r) => r.isPaid).length,
-        expired_tokens: results.filter((r) => r.source === "token_expired").length,
-        source: "supabase",
+        source: "supabase_only",
       },
     })
   } catch (error) {
