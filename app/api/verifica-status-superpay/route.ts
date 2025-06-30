@@ -49,14 +49,27 @@ export async function GET(request: NextRequest) {
     }
 
     console.log(`📊 Status atual: ${invoice.status} | External ID: ${invoice.external_id}`)
+    console.log(`🎯 Tipo de redirecionamento: ${invoice.redirect_type}`)
 
     // Verificar status do pagamento
     switch (invoice.status) {
       case "pago":
         console.log("✅ PAGAMENTO CONFIRMADO! Liberando redirecionamento")
+
+        // Determinar URL de redirecionamento baseado no tipo
+        let redirectUrl = "/obrigado" // fallback
+        if (invoice.redirect_type === "checkout") {
+          redirectUrl = "/upp/001"
+          console.log("🚀 Redirecionando para /upp/001 (checkout)")
+        } else if (invoice.redirect_type === "activation") {
+          redirectUrl = "/upp10"
+          console.log("🚀 Redirecionando para /upp10 (activation)")
+        }
+
         return NextResponse.json({
           paid: true,
-          redirect: "/obrigado",
+          redirect: redirectUrl,
+          redirect_type: invoice.redirect_type,
           external_id: invoice.external_id,
           paid_at: invoice.paid_at,
           gateway: invoice.gateway,
@@ -71,6 +84,7 @@ export async function GET(request: NextRequest) {
           status: "aguardando",
           message: "Aguardando confirmação do pagamento",
           external_id: invoice.external_id,
+          redirect_type: invoice.redirect_type,
           created_at: invoice.created_at,
         })
 

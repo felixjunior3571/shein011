@@ -2,23 +2,41 @@
 
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 
-export default function SuperPayWebhookTest() {
-  const [result, setResult] = useState(null)
+export default function SuperPayWebhookTestPage() {
   const [loading, setLoading] = useState(false)
+  const [result, setResult] = useState(null)
+  const [error, setError] = useState(null)
 
   const testWebhook = async () => {
     setLoading(true)
+    setError(null)
+    setResult(null)
+
     try {
+      console.log("🧪 Iniciando teste de webhook SuperPay...")
+
       const response = await fetch("/api/superpay/test-webhook", {
         method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
       })
+
       const data = await response.json()
-      setResult(data)
-    } catch (error) {
-      setResult({ error: error.message })
+
+      if (response.ok) {
+        setResult(data)
+        console.log("✅ Teste concluído:", data)
+      } else {
+        setError(data.message || "Erro no teste")
+        console.error("❌ Erro no teste:", data)
+      }
+    } catch (err) {
+      setError(err.message)
+      console.error("💥 Erro:", err)
     } finally {
       setLoading(false)
     }
@@ -26,13 +44,19 @@ export default function SuperPayWebhookTest() {
 
   const testStatusCheck = async () => {
     setLoading(true)
+    setError(null)
+
     try {
-      // Usar token de exemplo
+      console.log("🔍 Testando verificação de status...")
+
       const response = await fetch("/api/verifica-status-superpay?token=Z2VyaGFyZG9zCg==")
       const data = await response.json()
-      setResult(data)
-    } catch (error) {
-      setResult({ error: error.message })
+
+      console.log("📊 Status response:", data)
+      setResult({ status_check: data })
+    } catch (err) {
+      setError(err.message)
+      console.error("💥 Erro:", err)
     } finally {
       setLoading(false)
     }
@@ -40,44 +64,87 @@ export default function SuperPayWebhookTest() {
 
   return (
     <div className="container mx-auto p-6 max-w-4xl">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            🔔 Teste Webhook SuperPay
-            <Badge variant="outline">Debug</Badge>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex gap-4">
-            <Button onClick={testWebhook} disabled={loading} className="flex-1">
-              {loading ? "Testando..." : "🧪 Testar Webhook"}
-            </Button>
+      <div className="mb-6">
+        <h1 className="text-3xl font-bold mb-2">SuperPay Webhook Test</h1>
+        <p className="text-gray-600">Teste o sistema de webhook da SuperPay com payload real</p>
+      </div>
 
-            <Button onClick={testStatusCheck} disabled={loading} variant="outline" className="flex-1 bg-transparent">
-              {loading ? "Verificando..." : "🔍 Testar Verificação Status"}
-            </Button>
-          </div>
+      <div className="grid gap-6">
+        {/* Controles de Teste */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Testes Disponíveis</CardTitle>
+            <CardDescription>Execute testes do sistema de webhook</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex gap-4">
+              <Button onClick={testWebhook} disabled={loading} className="flex-1">
+                {loading ? "Testando..." : "🔔 Testar Webhook"}
+              </Button>
+              <Button onClick={testStatusCheck} disabled={loading} variant="outline" className="flex-1 bg-transparent">
+                {loading ? "Verificando..." : "🔍 Testar Status"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
 
-          {result && (
-            <Card className="mt-6">
-              <CardHeader>
-                <CardTitle className="text-lg">{result.success ? "✅ Resultado" : "❌ Erro"}</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <pre className="bg-gray-100 p-4 rounded-lg overflow-auto text-sm">
-                  {JSON.stringify(result, null, 2)}
-                </pre>
-              </CardContent>
-            </Card>
-          )}
+        {/* Fluxo de Redirecionamento */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Fluxo de Redirecionamento</CardTitle>
+            <CardDescription>Como funciona o redirecionamento baseado no tipo</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <div className="flex items-center gap-3">
+                <Badge variant="default">checkout</Badge>
+                <span className="text-sm">
+                  <code>/checkout</code> → quando pago → redireciona para <code>/upp/001</code>
+                </span>
+              </div>
+              <div className="flex items-center gap-3">
+                <Badge variant="secondary">activation</Badge>
+                <span className="text-sm">
+                  <code>/upp/checkout</code> → quando pago → redireciona para <code>/upp10</code>
+                </span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
-          <Card className="mt-6">
+        {/* Resultado */}
+        {result && (
+          <Card>
             <CardHeader>
-              <CardTitle className="text-lg">📋 Payload de Exemplo</CardTitle>
+              <CardTitle className="text-green-600">✅ Resultado do Teste</CardTitle>
             </CardHeader>
             <CardContent>
-              <pre className="bg-gray-50 p-4 rounded-lg overflow-auto text-sm">
-                {`{
+              <pre className="bg-gray-100 p-4 rounded-lg overflow-auto text-sm">{JSON.stringify(result, null, 2)}</pre>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Erro */}
+        {error && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-red-600">❌ Erro</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-red-600">{error}</p>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Payload de Exemplo */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Payload SuperPay Real</CardTitle>
+            <CardDescription>Estrutura do webhook que a SuperPay envia</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <pre className="bg-gray-100 p-4 rounded-lg overflow-auto text-sm">
+              {`{
   "event": {
     "type": "invoice.update",
     "date": "2024-06-28 19:32:20"
@@ -98,42 +165,10 @@ export default function SuperPayWebhookTest() {
     }
   }
 }`}
-              </pre>
-            </CardContent>
-          </Card>
-
-          <div className="grid grid-cols-2 gap-4 mt-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-sm">🎯 Status Codes</CardTitle>
-              </CardHeader>
-              <CardContent className="text-sm space-y-1">
-                <div>1: Pendente</div>
-                <div>2: Processando</div>
-                <div>3: Aguardando</div>
-                <div>4: Em Análise</div>
-                <div className="font-bold text-green-600">5: Pago ✅</div>
-                <div className="text-red-600">6: Recusado ❌</div>
-                <div className="text-red-600">7: Cancelado ❌</div>
-                <div className="text-red-600">8: Estornado ❌</div>
-                <div className="text-red-600">9: Vencido ❌</div>
-                <div className="text-red-600">10: Contestado ❌</div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-sm">🔗 Endpoints</CardTitle>
-              </CardHeader>
-              <CardContent className="text-sm space-y-1">
-                <div>POST /api/superpay/webhook</div>
-                <div>GET /api/verifica-status-superpay</div>
-                <div>POST /api/superpay/test-webhook</div>
-              </CardContent>
-            </Card>
-          </div>
-        </CardContent>
-      </Card>
+            </pre>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   )
 }

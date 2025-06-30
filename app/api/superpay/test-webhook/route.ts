@@ -2,7 +2,9 @@ import { type NextRequest, NextResponse } from "next/server"
 
 export async function POST(request: NextRequest) {
   try {
-    // Payload de teste baseado no exemplo fornecido
+    console.log("🧪 Testando webhook SuperPay com payload real")
+
+    // Payload real da SuperPay
     const testPayload = {
       event: {
         type: "invoice.update",
@@ -39,12 +41,11 @@ export async function POST(request: NextRequest) {
       },
     }
 
-    console.log("🧪 Enviando payload de teste para webhook SuperPay")
+    console.log("📦 Enviando payload de teste:", JSON.stringify(testPayload, null, 2))
 
     // Chamar o webhook real
-    const webhookUrl = `${process.env.NEXT_PUBLIC_SITE_URL}/api/superpay/webhook`
-
-    const response = await fetch(webhookUrl, {
+    const webhookUrl = new URL("/api/superpay/webhook", request.url)
+    const response = await fetch(webhookUrl.toString(), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -54,17 +55,20 @@ export async function POST(request: NextRequest) {
 
     const result = await response.json()
 
+    console.log("✅ Resposta do webhook:", result)
+
     return NextResponse.json({
       success: true,
       message: "Teste de webhook executado",
+      payload_sent: testPayload,
       webhook_response: result,
-      test_payload: testPayload,
+      webhook_status: response.status,
     })
   } catch (error) {
     console.error("❌ Erro no teste de webhook:", error)
     return NextResponse.json(
       {
-        error: "Erro no teste de webhook",
+        error: "Erro no teste",
         message: error.message,
       },
       { status: 500 },
@@ -75,8 +79,8 @@ export async function POST(request: NextRequest) {
 export async function GET() {
   return NextResponse.json({
     message: "Endpoint de teste do webhook SuperPay",
-    usage: "POST para executar teste",
-    example_payload: {
+    usage: "POST para executar teste com payload real",
+    test_payload: {
       event: {
         type: "invoice.update",
         date: "2024-06-28 19:32:20",
@@ -86,11 +90,6 @@ export async function GET() {
         status: {
           code: 5,
           title: "Pagamento Confirmado!",
-        },
-        payment: {
-          gateway: "gerencianet",
-          payId: "1687715304",
-          payDate: "2024-06-28 19:33:03",
         },
       },
     },

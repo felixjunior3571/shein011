@@ -60,6 +60,7 @@ export async function POST(request: NextRequest) {
     }
 
     console.log(`📋 Fatura encontrada: ID ${existingInvoice.id} | Status atual: ${existingInvoice.status}`)
+    console.log(`🎯 Tipo de redirecionamento: ${existingInvoice.redirect_type}`)
 
     // Preparar dados para atualização
     const updateData = {
@@ -76,6 +77,13 @@ export async function POST(request: NextRequest) {
     if (statusCode === 5) {
       updateData.paid_at = paymentDate
       console.log("✅ PAGAMENTO CONFIRMADO! Marcando paid_at:", paymentDate)
+
+      // Determinar redirecionamento baseado no tipo
+      if (existingInvoice.redirect_type === "checkout") {
+        console.log("🚀 Tipo CHECKOUT - Cliente será redirecionado para /upp/001")
+      } else if (existingInvoice.redirect_type === "activation") {
+        console.log("🚀 Tipo ACTIVATION - Cliente será redirecionado para /upp10")
+      }
     }
 
     // Atualizar fatura no Supabase
@@ -96,7 +104,7 @@ export async function POST(request: NextRequest) {
     // Log específico para diferentes status
     switch (statusCode) {
       case 5:
-        console.log("🎉 PAGAMENTO CONFIRMADO! Cliente pode ser redirecionado para /obrigado")
+        console.log("🎉 PAGAMENTO CONFIRMADO! Cliente pode ser redirecionado")
         break
       case 6:
         console.log("❌ PAGAMENTO RECUSADO")
@@ -120,6 +128,7 @@ export async function POST(request: NextRequest) {
       message: "Webhook processado com sucesso",
       external_id: externalId,
       status: newStatus,
+      redirect_type: existingInvoice.redirect_type,
       processed_at: new Date().toISOString(),
     })
   } catch (error) {
