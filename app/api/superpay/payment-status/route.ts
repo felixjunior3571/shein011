@@ -1,9 +1,13 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
-import { getSuperPayPaymentConfirmation, isTokenExpired } from "@/lib/superpay-payment-storage"
 
 // Supabase client
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+
+function isTokenExpired(expiresAt: string | null): boolean {
+  if (!expiresAt) return false
+  return new Date() > new Date(expiresAt)
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -28,76 +32,7 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Primeiro, tentar obter da memória (mais rápido)
-    let memoryConfirmation = null
-    if (externalId) {
-      memoryConfirmation = getSuperPayPaymentConfirmation(externalId)
-    } else if (invoiceId) {
-      memoryConfirmation = getSuperPayPaymentConfirmation(invoiceId)
-    } else if (token) {
-      memoryConfirmation = getSuperPayPaymentConfirmation(token)
-    }
-
-    if (memoryConfirmation) {
-      // Verificar se token não expirou
-      if (isTokenExpired(memoryConfirmation.expiresAt)) {
-        console.log("⏰ Token SuperPay expirado na memória:", {
-          external_id: memoryConfirmation.externalId,
-          expires_at: memoryConfirmation.expiresAt,
-        })
-
-        return NextResponse.json({
-          success: true,
-          found: false,
-          data: {
-            isPaid: false,
-            isDenied: false,
-            isExpired: false,
-            isCanceled: false,
-            isRefunded: false,
-            statusCode: null,
-            statusName: "Token expirado",
-            amount: 0,
-            paymentDate: null,
-            lastUpdate: new Date().toISOString(),
-            source: "token_expired",
-            error: "Token de verificação expirado (15 minutos)",
-          },
-        })
-      }
-
-      console.log("✅ Pagamento SuperPay encontrado na memória:", {
-        external_id: memoryConfirmation.externalId,
-        status: memoryConfirmation.statusName,
-        is_paid: memoryConfirmation.isPaid,
-        token: memoryConfirmation.token,
-        expires_at: memoryConfirmation.expiresAt,
-      })
-
-      return NextResponse.json({
-        success: true,
-        found: true,
-        data: {
-          isPaid: memoryConfirmation.isPaid,
-          isDenied: memoryConfirmation.isDenied,
-          isExpired: memoryConfirmation.isExpired,
-          isCanceled: memoryConfirmation.isCanceled,
-          isRefunded: memoryConfirmation.isRefunded,
-          statusCode: memoryConfirmation.statusCode,
-          statusName: memoryConfirmation.statusName,
-          amount: memoryConfirmation.amount,
-          paymentDate: memoryConfirmation.paymentDate,
-          lastUpdate: memoryConfirmation.receivedAt,
-          externalId: memoryConfirmation.externalId,
-          invoiceId: memoryConfirmation.invoiceId,
-          token: memoryConfirmation.token,
-          expiresAt: memoryConfirmation.expiresAt,
-          source: "memory",
-        },
-      })
-    }
-
-    // Se não encontrado na memória, tentar Supabase
+    // Construir query para Supabase
     let query = supabase
       .from("payment_webhooks")
       .select("*")
@@ -123,7 +58,7 @@ export async function GET(request: NextRequest) {
     const record = records?.[0]
 
     if (!record) {
-      console.log("❌ Pagamento SuperPay não encontrado")
+      console.log("❌ Pagamento SuperPay não encontrado no Supabase")
       return NextResponse.json({
         success: true,
         found: false,
@@ -138,12 +73,12 @@ export async function GET(request: NextRequest) {
           amount: 0,
           paymentDate: null,
           lastUpdate: new Date().toISOString(),
-          source: "not_found",
+          source: "supabase_only",
         },
       })
     }
 
-    // Verificar se token expirou no Supabase
+    // Verificar se token expirou
     if (record.expires_at && isTokenExpired(record.expires_at)) {
       console.log("⏰ Token SuperPay expirado no Supabase:", {
         external_id: record.external_id,
@@ -242,147 +177,81 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    console.log("🔍 Consulta em lote SuperPay:", externalIds)
+    console.log("🔍 Consulta em lote SuperPay no Supabase:", externalIds)
 
-    // Tentar memória primeiro para todos os IDs
-    const memoryResults = externalIds.map((externalId) => {
-      const confirmation = getSuperPayPaymentConfirmation(externalId)
-      return confirmation
-        ? { externalId, confirmation, source: "memory" }
-        : { externalId, confirmation: null, source: "not_found" }
-    })
+    // Query multiple records from Supabase
+    const { data: records, error } = await supabase
+      .from("payment_webhooks")
+      .select("*")
+      .eq("gateway", "superpay")
+      .in("external_id", externalIds)
+      .order("processed_at", { ascending: false })
 
-    const foundInMemory = memoryResults.filter((r) => r.confirmation)
-    const notFoundInMemory = memoryResults.filter((r) => !r.confirmation).map((r) => r.externalId)
-
-    console.log(`📊 Memória SuperPay: ${foundInMemory.length}/${externalIds.length} encontrados`)
-
-    // Consultar Supabase para registros não encontrados
-    let supabaseResults: any[] = []
-    if (notFoundInMemory.length > 0) {
-      const { data: records, error } = await supabase
-        .from("payment_webhooks")
-        .select("*")
-        .eq("gateway", "superpay")
-        .in("external_id", notFoundInMemory)
-        .order("processed_at", { ascending: false })
-
-      if (error) {
-        console.error("❌ Erro na consulta em lote Supabase SuperPay:", error)
-        throw error
-      }
-
-      supabaseResults = records || []
-      console.log(`📊 Supabase SuperPay: ${supabaseResults.length}/${notFoundInMemory.length} encontrados`)
+    if (error) {
+      console.error("❌ Erro na consulta em lote Supabase:", error)
+      throw error
     }
 
-    // Mapear resultados
+    // Map results
     const results = externalIds.map((externalId) => {
-      // Verificar memória primeiro
-      const memoryResult = memoryResults.find((r) => r.externalId === externalId)
-      if (memoryResult?.confirmation) {
-        const conf = memoryResult.confirmation
+      const record = records?.find((r) => r.external_id === externalId)
 
-        // Verificar se token expirou
-        if (isTokenExpired(conf.expiresAt)) {
-          return {
-            externalId: conf.externalId,
-            found: false,
-            isPaid: false,
-            isDenied: false,
-            isExpired: false,
-            isCanceled: false,
-            isRefunded: false,
-            statusCode: null,
-            statusName: "Token expirado",
-            amount: 0,
-            paymentDate: null,
-            lastUpdate: new Date().toISOString(),
-            token: conf.token,
-            expiresAt: conf.expiresAt,
-            source: "token_expired",
-          }
-        }
-
+      if (!record) {
         return {
-          externalId: conf.externalId,
-          found: true,
-          isPaid: conf.isPaid,
-          isDenied: conf.isDenied,
-          isExpired: conf.isExpired,
-          isCanceled: conf.isCanceled,
-          isRefunded: conf.isRefunded,
-          statusCode: conf.statusCode,
-          statusName: conf.statusName,
-          amount: conf.amount,
-          paymentDate: conf.paymentDate,
-          lastUpdate: conf.receivedAt,
-          invoiceId: conf.invoiceId,
-          token: conf.token,
-          expiresAt: conf.expiresAt,
-          source: "memory",
+          externalId,
+          found: false,
+          isPaid: false,
+          isDenied: false,
+          isExpired: false,
+          isCanceled: false,
+          isRefunded: false,
+          statusCode: null,
+          statusName: "Não encontrado",
+          amount: 0,
+          paymentDate: null,
+          lastUpdate: new Date().toISOString(),
+          source: "supabase_only",
         }
       }
 
-      // Verificar Supabase
-      const supabaseRecord = supabaseResults.find((r) => r.external_id === externalId)
-      if (supabaseRecord) {
-        // Verificar se token expirou
-        if (supabaseRecord.expires_at && isTokenExpired(supabaseRecord.expires_at)) {
-          return {
-            externalId: supabaseRecord.external_id,
-            found: false,
-            isPaid: false,
-            isDenied: false,
-            isExpired: false,
-            isCanceled: false,
-            isRefunded: false,
-            statusCode: null,
-            statusName: "Token expirado",
-            amount: 0,
-            paymentDate: null,
-            lastUpdate: new Date().toISOString(),
-            token: supabaseRecord.token,
-            expiresAt: supabaseRecord.expires_at,
-            source: "token_expired",
-          }
-        }
-
+      // Verificar se token expirou
+      if (record.expires_at && isTokenExpired(record.expires_at)) {
         return {
-          externalId: supabaseRecord.external_id,
-          found: true,
-          isPaid: supabaseRecord.is_paid || false,
-          isDenied: supabaseRecord.is_denied || false,
-          isExpired: supabaseRecord.is_expired || false,
-          isCanceled: supabaseRecord.is_canceled || false,
-          isRefunded: supabaseRecord.is_refunded || false,
-          statusCode: supabaseRecord.status_code,
-          statusName: supabaseRecord.status_name,
-          amount: supabaseRecord.amount || 0,
-          paymentDate: supabaseRecord.payment_date,
-          lastUpdate: supabaseRecord.processed_at,
-          invoiceId: supabaseRecord.invoice_id,
-          token: supabaseRecord.token,
-          expiresAt: supabaseRecord.expires_at,
-          source: "supabase",
+          externalId: record.external_id,
+          found: false,
+          isPaid: false,
+          isDenied: false,
+          isExpired: false,
+          isCanceled: false,
+          isRefunded: false,
+          statusCode: null,
+          statusName: "Token expirado",
+          amount: 0,
+          paymentDate: null,
+          lastUpdate: new Date().toISOString(),
+          token: record.token,
+          expiresAt: record.expires_at,
+          source: "token_expired",
         }
       }
 
-      // Não encontrado
       return {
-        externalId,
-        found: false,
-        isPaid: false,
-        isDenied: false,
-        isExpired: false,
-        isCanceled: false,
-        isRefunded: false,
-        statusCode: null,
-        statusName: "Não encontrado",
-        amount: 0,
-        paymentDate: null,
-        lastUpdate: new Date().toISOString(),
-        source: "not_found",
+        externalId: record.external_id,
+        found: true,
+        isPaid: record.is_paid || false,
+        isDenied: record.is_denied || false,
+        isExpired: record.is_expired || false,
+        isCanceled: record.is_canceled || false,
+        isRefunded: record.is_refunded || false,
+        statusCode: record.status_code,
+        statusName: record.status_name,
+        amount: record.amount || 0,
+        paymentDate: record.payment_date,
+        lastUpdate: record.processed_at,
+        invoiceId: record.invoice_id,
+        token: record.token,
+        expiresAt: record.expires_at,
+        source: "supabase",
       }
     })
 
@@ -397,9 +266,7 @@ export async function POST(request: NextRequest) {
         total: externalIds.length,
         found: results.filter((r) => r.found).length,
         paid: results.filter((r) => r.isPaid).length,
-        expired_tokens: results.filter((r) => r.source === "token_expired").length,
-        memory_hits: foundInMemory.length,
-        supabase_hits: supabaseResults.length,
+        source: "supabase_only",
       },
     })
   } catch (error) {

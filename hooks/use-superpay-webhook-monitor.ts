@@ -42,8 +42,8 @@ export function useSuperPayWebhookMonitor(options: SuperPayWebhookMonitorOptions
     externalId,
     invoiceId,
     token,
-    checkInterval = 3000, // 3 segundos
-    maxChecks = 300, // 15 minutos máximo (300 * 3s = 900s = 15min)
+    checkInterval = 2000, // 2 segundos
+    maxChecks = 450, // 15 minutos máximo (450 * 2s = 900s = 15min)
     onPaymentConfirmed,
     onPaymentDenied,
     onPaymentExpired,
@@ -51,7 +51,7 @@ export function useSuperPayWebhookMonitor(options: SuperPayWebhookMonitorOptions
     onPaymentRefunded,
     onTokenExpired,
     onError,
-    enableDebug = false,
+    enableDebug = true, // Debug sempre ativo
   } = options
 
   const [paymentStatus, setPaymentStatus] = useState<SuperPayPaymentStatus>({
