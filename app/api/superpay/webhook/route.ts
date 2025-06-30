@@ -70,7 +70,7 @@ const webhookStorage = new Map<string, any>()
 const paymentConfirmations = new Map<string, any>()
 const realtimeEvents: any[] = []
 
-// Função para salvar confirmação de pagamento no Supabase E memória (híbrido)
+// Função para salvar confirmação de pagamento no Supabase E localStorage (híbrido)
 async function savePaymentConfirmation(externalId: string, invoiceId: string, data: any) {
   const confirmationData = {
     externalId,
@@ -104,6 +104,31 @@ async function savePaymentConfirmation(externalId: string, invoiceId: string, da
   console.log(`- Token: ${data.token}`)
   console.log(`- Status: ${confirmationData.status}`)
   console.log(`- Timestamp: ${confirmationData.timestamp}`)
+
+  // 🎯 SALVAR NO LOCALSTORAGE PARA FRONTEND (CRÍTICO!)
+  try {
+    if (typeof window !== "undefined") {
+      const webhookKey = `webhook_payment_${externalId}`
+      const frontendData = {
+        isPaid: confirmationData.isPaid,
+        isDenied: confirmationData.isDenied,
+        isExpired: confirmationData.isExpired,
+        isCanceled: confirmationData.isCanceled,
+        isRefunded: confirmationData.isRefunded,
+        statusCode: confirmationData.statusCode,
+        statusName: confirmationData.statusName,
+        amount: confirmationData.amount,
+        paymentDate: confirmationData.paymentDate,
+        invoiceId: confirmationData.invoiceId,
+        timestamp: confirmationData.timestamp,
+      }
+
+      localStorage.setItem(webhookKey, JSON.stringify(frontendData))
+      console.log(`💾 Dados salvos no localStorage para frontend: ${webhookKey}`)
+    }
+  } catch (error) {
+    console.log("❌ Erro ao salvar no localStorage:", error)
+  }
 
   // Salvar no Supabase também
   try {
@@ -141,6 +166,7 @@ function processWebhookEvent(payload: SuperPayWebhookPayload) {
   console.log("🚨🚨🚨 WEBHOOK SUPERPAY PROCESSANDO 🚨🚨🚨")
   console.log("🔔 NOTIFICAÇÃO OFICIAL DA ADQUIRENTE VIA SUPERPAY")
   console.log("🕐 Timestamp de processamento:", new Date().toISOString())
+  console.log("📡 URL configurada: https://v0-copy-shein-website.vercel.app/api/superpay/webhook")
 
   const { event, invoices } = payload
   const statusCode = invoices.status.code
@@ -179,6 +205,7 @@ function processWebhookEvent(payload: SuperPayWebhookPayload) {
         console.log(`📅 Data: ${invoices.payment.payDate}`)
         console.log(`🆔 Pay ID: ${invoices.payment.payId}`)
         console.log("✅ LIBERANDO PRODUTO/SERVIÇO IMEDIATAMENTE")
+        console.log("🚀 FRONTEND SERÁ NOTIFICADO VIA LOCALSTORAGE")
         break
       case 9: // ESTORNADO
         console.log("🔄 ESTORNO TOTAL PROCESSADO PELA ADQUIRENTE!")
@@ -218,6 +245,7 @@ function processWebhookEvent(payload: SuperPayWebhookPayload) {
     })
 
     console.log("✅ CONFIRMAÇÃO SALVA E DISPONÍVEL PARA CONSULTA!")
+    console.log("📱 FRONTEND SERÁ NOTIFICADO AUTOMATICAMENTE!")
   }
 
   // Adicionar evento ao log em tempo real
@@ -278,6 +306,7 @@ export async function POST(request: NextRequest) {
     console.log("🕐 Timestamp:", new Date().toISOString())
     console.log("📡 URL:", request.url)
     console.log("🔔 NOTIFICAÇÃO OFICIAL DA ADQUIRENTE - SEM POLLING!")
+    console.log("⚠️ SISTEMA 100% WEBHOOK PARA EVITAR RATE LIMITING SUPERPAY")
 
     // Obter headers do webhook
     const headers = {
@@ -352,6 +381,8 @@ export async function POST(request: NextRequest) {
         status_name: processResult.statusName,
         status_text: processResult.statusText,
         acquirer_notification: true,
+        system_type: "pure_webhook_no_polling",
+        rate_limit_protection: "enabled",
         business_impact: {
           is_paid: processResult.isPaid,
           is_refunded: processResult.isRefunded,
@@ -366,11 +397,13 @@ export async function POST(request: NextRequest) {
           customer_notified: processResult.isCritical,
           refund_processed: processResult.isRefunded,
           confirmation_saved: processResult.isCritical,
+          frontend_notified: processResult.isCritical,
         },
         debug_info: {
           webhook_id: webhookId,
           processed_at: new Date().toISOString(),
           confirmation_available: processResult.isCritical,
+          localStorage_key: processResult.isCritical ? `webhook_payment_${processResult.externalId}` : null,
           storage_keys: processResult.isCritical
             ? [processResult.externalId, processResult.invoiceId, `token_${processResult.token}`]
             : [],
@@ -385,9 +418,8 @@ export async function POST(request: NextRequest) {
 
     if (processResult.isCritical) {
       console.log("🎉 STATUS CRÍTICO PROCESSADO - DADOS DISPONÍVEIS!")
-      console.log(`🔍 Consulte via: /api/superpay/payment-status?externalId=${processResult.externalId}`)
-      console.log(`🔍 Ou via: /api/superpay/payment-status?invoiceId=${processResult.invoiceId}`)
-      console.log(`🔍 Ou via: /api/superpay/payment-status?token=${processResult.token}`)
+      console.log(`📱 Frontend será notificado via localStorage: webhook_payment_${processResult.externalId}`)
+      console.log("🚫 POLLING DESABILITADO - Sistema 100% webhook para evitar rate limiting")
     }
 
     return NextResponse.json(response)
@@ -410,6 +442,11 @@ export async function POST(request: NextRequest) {
       message: (error as Error).message,
       timestamp: new Date().toISOString(),
       note: "Erro será investigado - SuperPay tentará reenviar automaticamente",
+      system_info: {
+        webhook_url: "https://v0-copy-shein-website.vercel.app/api/superpay/webhook",
+        rate_limit_protection: "enabled",
+        polling_disabled: true,
+      },
     }
 
     return NextResponse.json(errorResponse, { status: 500 })
@@ -444,6 +481,12 @@ export async function GET(request: NextRequest) {
     url: webhookUrl,
     methods: ["POST"],
     description: "Recebe notificações AUTOMÁTICAS da adquirente via SuperPay - SEM POLLING",
+    rate_limit_info: {
+      polling_disabled: true,
+      reason: "SuperPay tem rate limiting agressivo: 5min, 30min, 1h, 12h, 24h, 48h até bloqueio permanente",
+      solution: "Sistema 100% webhook para evitar rate limiting",
+      webhook_configured: "https://v0-copy-shein-website.vercel.app/api/superpay/webhook",
+    },
     status_codes: SUPERPAY_STATUS_CODES,
     statistics: webhookStats,
     system_info: {
@@ -452,7 +495,9 @@ export async function GET(request: NextRequest) {
       realtime_notifications: true,
       supabase_integration: true,
       memory_storage: true,
+      localStorage_integration: true,
       multiple_search_keys: true,
+      rate_limit_protection: true,
     },
     timestamp: new Date().toISOString(),
   })

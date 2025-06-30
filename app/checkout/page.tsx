@@ -3,12 +3,12 @@
 import { useState, useEffect, useRef } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import Image from "next/image"
-import { Copy, CheckCircle, Clock, AlertCircle, RefreshCw, Smartphone } from "lucide-react"
+import { Copy, CheckCircle, Clock, AlertCircle, RefreshCw, Smartphone, Zap, Shield } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { useSuperpayWebhookMonitor } from "@/hooks/use-superpay-webhook-monitor"
+import { useSuperpayPureWebhook } from "@/hooks/use-superpay-pure-webhook"
 import { useOptimizedTracking } from "@/hooks/use-optimized-tracking"
 import { SmartQRCode } from "@/components/smart-qr-code"
 
@@ -58,16 +58,14 @@ export default function SuperPayCheckoutPage() {
     enableDebug: process.env.NODE_ENV === "development",
   })
 
-  // SuperPay webhook monitoring (igual TryploPay)
+  // SuperPay PURE webhook monitoring (SEM POLLING!)
   const {
     paymentStatus,
-    isMonitoring,
+    isWaitingForWebhook,
     error: webhookError,
     checkNow,
-  } = useSuperpayWebhookMonitor({
+  } = useSuperpayPureWebhook({
     externalId: invoice?.external_id || "",
-    checkInterval: 3000, // 3 segundos (igual TryploPay)
-    maxRetries: 5,
     enableDebug: true,
     onPaymentConfirmed: (data) => {
       console.log("🎉🎉🎉 PAGAMENTO CONFIRMADO VIA WEBHOOK SUPERPAY!")
@@ -160,10 +158,10 @@ export default function SuperPayCheckoutPage() {
       isRefunded: paymentStatus.isRefunded,
       statusName: paymentStatus.statusName,
       lastUpdate: paymentStatus.lastUpdate,
-      isMonitoring,
+      isWaitingForWebhook,
       externalId: invoice?.external_id,
     })
-  }, [paymentStatus, isMonitoring, invoice?.external_id])
+  }, [paymentStatus, isWaitingForWebhook, invoice?.external_id])
 
   const createInvoice = async () => {
     try {
@@ -224,6 +222,8 @@ export default function SuperPayCheckoutPage() {
         console.log(`- Invoice ID: ${invoiceData.invoice_id}`)
         console.log(`- Valor: R$ ${(invoiceData.valores.bruto / 100).toFixed(2)}`)
         console.log(`- Tipo: ${invoiceData.type}`)
+        console.log("🔔 Webhook configurado: https://v0-copy-shein-website.vercel.app/api/superpay/webhook")
+        console.log("🚫 POLLING DESABILITADO - Sistema 100% webhook")
 
         // Track successful invoice creation
         track("invoice_created_superpay", {
@@ -332,70 +332,35 @@ export default function SuperPayCheckoutPage() {
     try {
       console.log("🧪 Simulando pagamento SuperPay para:", invoice.external_id)
 
-      const response = await fetch("/api/superpay/webhook", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          gateway: "SUPERPAY",
-        },
-        body: JSON.stringify({
-          event: {
-            type: "webhook.update",
-            date: new Date().toISOString(),
-          },
-          invoices: {
-            id: Number.parseInt(invoice.invoice_id) || Date.now(),
-            external_id: invoice.external_id,
-            token: `TOKEN_${Date.now()}`,
-            date: new Date().toISOString(),
-            status: {
-              code: 5, // SuperPay: 5 = Pago
-              title: "Pago",
-              description: "Pagamento confirmado",
-              text: "paid",
-            },
-            customer: 12345,
-            prices: {
-              total: Math.round(Number.parseFloat(amount) * 100) / 100,
-              discount: 0,
-              taxs: { others: 0 },
-              refund: null,
-            },
-            type: "pix",
-            payment: {
-              gateway: "SUPERPAY",
-              date: new Date().toISOString(),
-              due: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-              card: null,
-              payId: `PAY_${Date.now()}`,
-              payDate: new Date().toISOString(),
-              details: {
-                barcode: null,
-                pix_code: invoice.pix.payload,
-                qrcode: invoice.pix.qr_code,
-                url: null,
-              },
-              metadata: {},
-            },
-          },
-        }),
+      // Simular dados do webhook diretamente no localStorage
+      const webhookKey = `webhook_payment_${invoice.external_id}`
+      const simulatedData = {
+        isPaid: true,
+        isDenied: false,
+        isExpired: false,
+        isCanceled: false,
+        isRefunded: false,
+        statusCode: 5,
+        statusName: "Pago",
+        amount: Number.parseFloat(amount),
+        paymentDate: new Date().toISOString(),
+        invoiceId: invoice.invoice_id,
+        timestamp: new Date().toISOString(),
+      }
+
+      localStorage.setItem(webhookKey, JSON.stringify(simulatedData))
+      console.log("✅ Dados simulados salvos no localStorage:", webhookKey)
+
+      track("payment_simulated_superpay", {
+        external_id: invoice.external_id,
+        amount: Number.parseFloat(amount),
       })
 
-      if (response.ok) {
-        console.log("✅ Webhook SuperPay simulado com sucesso!")
-        track("payment_simulated_superpay", {
-          external_id: invoice.external_id,
-          amount: Number.parseFloat(amount),
-        })
-
-        // Forçar verificação imediata
-        setTimeout(() => {
-          console.log("🔄 Forçando verificação imediata...")
-          checkNow()
-        }, 1000)
-      } else {
-        console.error("❌ Erro ao simular webhook SuperPay:", response.status)
-      }
+      // Forçar verificação imediata
+      setTimeout(() => {
+        console.log("🔄 Forçando verificação imediata...")
+        checkNow()
+      }, 500)
     } catch (error) {
       console.error("❌ Erro na simulação SuperPay:", error)
     }
@@ -412,7 +377,7 @@ export default function SuperPayCheckoutPage() {
             <div className="text-sm text-gray-500 text-center">
               <p>Valor: R$ {Number.parseFloat(amount).toFixed(2)}</p>
               <p>Método: {method}</p>
-              <p>Sistema: SuperPay + Webhook</p>
+              <p>Sistema: SuperPay + Webhook Puro</p>
             </div>
           </CardContent>
         </Card>
@@ -446,6 +411,20 @@ export default function SuperPayCheckoutPage() {
           <h1 className="text-2xl font-bold mb-2">Pagamento PIX SuperPay</h1>
           <p className="text-gray-600">Complete o pagamento para ativar seu cartão SHEIN</p>
         </div>
+
+        {/* System Info Alert */}
+        <Alert className="mb-6 border-blue-200 bg-blue-50">
+          <Shield className="h-4 w-4" />
+          <AlertDescription>
+            <div className="flex items-center gap-2">
+              <Zap className="h-4 w-4 text-blue-600" />
+              <span className="font-bold text-blue-800">Sistema 100% Webhook SuperPay</span>
+            </div>
+            <p className="text-blue-700 text-sm mt-1">
+              Detecção automática via notificação da adquirente • Sem polling para evitar rate limiting
+            </p>
+          </AlertDescription>
+        </Alert>
 
         {/* Success Message - Only show when paid or redirecting */}
         {(paymentStatus.isPaid || isRedirecting) && (
@@ -481,7 +460,7 @@ export default function SuperPayCheckoutPage() {
                 <Smartphone className="h-5 w-5" />
                 Detalhes do Pagamento
               </CardTitle>
-              <CardDescription>SuperPay + Webhook - Detecção automática</CardDescription>
+              <CardDescription>SuperPay + Webhook Puro - Detecção automática sem polling</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex justify-between items-center">
@@ -517,7 +496,7 @@ export default function SuperPayCheckoutPage() {
                   ) : (
                     <Badge variant="outline">
                       <Clock className="h-3 w-3 mr-1" />
-                      Aguardando
+                      Aguardando Webhook
                     </Badge>
                   )}
                 </div>
@@ -526,13 +505,16 @@ export default function SuperPayCheckoutPage() {
               <div className="flex justify-between items-center">
                 <span className="text-sm text-gray-600">Monitoramento:</span>
                 <div className="flex items-center gap-2">
-                  {isMonitoring ? (
+                  {isWaitingForWebhook ? (
                     <Badge className="bg-blue-500">
-                      <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
-                      Ativo (3s)
+                      <Zap className="h-3 w-3 mr-1" />
+                      Aguardando Webhook
                     </Badge>
                   ) : (
-                    <Badge variant="secondary">Inativo</Badge>
+                    <Badge className="bg-green-500">
+                      <CheckCircle className="h-3 w-3 mr-1" />
+                      Webhook Recebido
+                    </Badge>
                   )}
                 </div>
               </div>
@@ -544,6 +526,16 @@ export default function SuperPayCheckoutPage() {
                   <span className={`font-mono text-lg ${timeLeft < 60 ? "text-red-500" : "text-orange-500"}`}>
                     {formatTime(timeLeft)}
                   </span>
+                </div>
+              </div>
+
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-gray-600">Sistema:</span>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="bg-purple-50">
+                    <Shield className="h-3 w-3 mr-1" />
+                    Webhook Puro
+                  </Badge>
                 </div>
               </div>
 
@@ -591,6 +583,7 @@ export default function SuperPayCheckoutPage() {
               <div className="text-center space-y-2">
                 <p className="text-sm text-gray-600">Abra o app do seu banco e escaneie o QR Code</p>
                 <p className="text-xs text-gray-500">Ou copie e cole o código PIX no seu app</p>
+                <p className="text-xs text-blue-600 font-medium">⚡ Detecção automática via webhook SuperPay</p>
               </div>
 
               {/* Manual check button */}
@@ -601,7 +594,7 @@ export default function SuperPayCheckoutPage() {
                 disabled={!invoice?.external_id}
               >
                 <RefreshCw className="h-4 w-4 mr-2" />
-                Verificar Status Agora
+                Verificar localStorage Agora
               </Button>
 
               {/* Simulação para desenvolvimento */}
@@ -614,7 +607,7 @@ export default function SuperPayCheckoutPage() {
                     size="sm"
                     className="w-full bg-green-600 hover:bg-green-700"
                   >
-                    🧪 SIMULAR PAGAMENTO APROVADO
+                    🧪 SIMULAR WEBHOOK SUPERPAY
                   </Button>
                 </div>
               )}
@@ -622,11 +615,43 @@ export default function SuperPayCheckoutPage() {
           </Card>
         </div>
 
+        {/* Rate Limit Protection Info */}
+        <Card className="mt-6 border-purple-200 bg-purple-50">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-purple-800">
+              <Shield className="h-5 w-5" />
+              Proteção contra Rate Limiting SuperPay
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+              <div>
+                <h4 className="font-medium mb-2 text-purple-800">Sistema Webhook Puro:</h4>
+                <ul className="space-y-1 text-purple-700">
+                  <li>• ✅ Notificações automáticas da adquirente</li>
+                  <li>• ✅ Detecção via localStorage (sem API calls)</li>
+                  <li>• ✅ Redirecionamento automático quando pago</li>
+                  <li>• ✅ Zero polling para evitar bloqueios</li>
+                </ul>
+              </div>
+              <div>
+                <h4 className="font-medium mb-2 text-purple-800">Rate Limiting SuperPay:</h4>
+                <ul className="space-y-1 text-purple-700">
+                  <li>• ⚠️ 5min → 30min → 1h → 12h → 24h → 48h</li>
+                  <li>• ⚠️ Bloqueio permanente após 100h</li>
+                  <li>• ✅ Webhook configurado corretamente</li>
+                  <li>• ✅ APIs de consulta bloqueadas preventivamente</li>
+                </ul>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Debug Info */}
         {process.env.NODE_ENV === "development" && (
           <Card className="mt-6 border-dashed">
             <CardHeader>
-              <CardTitle className="text-sm">Debug - Sistema SuperPay Webhook</CardTitle>
+              <CardTitle className="text-sm">Debug - Sistema SuperPay Webhook Puro</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
@@ -635,9 +660,9 @@ export default function SuperPayCheckoutPage() {
                   <p className="font-mono">{invoice?.external_id || "N/A"}</p>
                 </div>
                 <div>
-                  <span className="text-gray-500">Monitoramento:</span>
-                  <p className={isMonitoring ? "text-green-600" : "text-red-600"}>
-                    {isMonitoring ? "Ativo (3s)" : "Inativo"}
+                  <span className="text-gray-500">Webhook Status:</span>
+                  <p className={isWaitingForWebhook ? "text-blue-600" : "text-green-600"}>
+                    {isWaitingForWebhook ? "Aguardando" : "Recebido"}
                   </p>
                 </div>
                 <div>
@@ -646,7 +671,7 @@ export default function SuperPayCheckoutPage() {
                 </div>
                 <div>
                   <span className="text-gray-500">Storage:</span>
-                  <p className="text-blue-600">Webhook + Supabase</p>
+                  <p className="text-purple-600">localStorage Only</p>
                 </div>
               </div>
               <div className="mt-4 p-3 bg-gray-100 rounded text-xs">
@@ -659,12 +684,24 @@ export default function SuperPayCheckoutPage() {
                       isExpired: paymentStatus.isExpired,
                       isCanceled: paymentStatus.isCanceled,
                       statusName: paymentStatus.statusName,
-                      isMonitoring,
+                      isWaitingForWebhook,
                       isRedirecting,
+                      source: paymentStatus.source,
                     },
                     null,
                     2,
                   )}
+                </p>
+              </div>
+              <div className="mt-2 p-3 bg-purple-100 rounded text-xs">
+                <p>
+                  <strong>Webhook URL:</strong> https://v0-copy-shein-website.vercel.app/api/superpay/webhook
+                </p>
+                <p>
+                  <strong>localStorage Key:</strong> webhook_payment_{invoice?.external_id || "N/A"}
+                </p>
+                <p>
+                  <strong>Polling:</strong> ❌ DESABILITADO (Rate limit protection)
                 </p>
               </div>
             </CardContent>

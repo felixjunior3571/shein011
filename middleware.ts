@@ -38,13 +38,44 @@ function isRateLimited(ip: string, limit: number, windowMs: number): boolean {
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  // NEVER rate limit webhook endpoint - CRITICAL!
-  if (pathname === "/api/tryplopay/webhook") {
-    console.log("🔔 Webhook endpoint - NO rate limiting applied")
+  // NEVER rate limit webhook endpoints - CRITICAL!
+  if (
+    pathname === "/api/tryplopay/webhook" ||
+    pathname === "/api/superpay/webhook" ||
+    pathname === "/api/superpaybr/webhook"
+  ) {
+    console.log("🔔 Webhook endpoint - NO rate limiting applied:", pathname)
     return NextResponse.next()
   }
 
-  // Apply rate limiting only to API routes and checkout
+  // BLOCK SuperPay polling APIs completely (except webhook and invoice creation)
+  if (pathname.includes("/superpay/") || pathname.includes("/superpaybr/")) {
+    // Allow only invoice creation and webhook endpoints
+    if (
+      pathname.includes("/create-invoice") ||
+      pathname.includes("/create-activation-invoice") ||
+      pathname.includes("/create-iof-invoice") ||
+      pathname.includes("/webhook")
+    ) {
+      console.log("✅ SuperPay invoice creation/webhook allowed:", pathname)
+      return NextResponse.next()
+    }
+
+    // BLOCK all other SuperPay APIs to prevent rate limiting
+    console.log("🚫 BLOCKING SuperPay API to prevent rate limiting:", pathname)
+    return NextResponse.json(
+      {
+        error: "SuperPay API blocked",
+        message: "Sistema 100% webhook - Polling desabilitado para evitar rate limiting da SuperPay",
+        note: "SuperPay tem rate limiting agressivo: 5min, 30min, 1h, 12h, 24h, 48h até bloqueio permanente",
+        webhook_url: "https://v0-copy-shein-website.vercel.app/api/superpay/webhook",
+        system_type: "webhook_only",
+      },
+      { status: 403 },
+    )
+  }
+
+  // Apply rate limiting only to other API routes and checkout
   if (pathname.startsWith("/api") || pathname.startsWith("/checkout")) {
     const ip = getRateLimitKey(request)
 
@@ -52,11 +83,11 @@ export function middleware(request: NextRequest) {
     let limit = 30 // requests per minute
     let windowMs = 60 * 1000 // 1 minute
 
-    // VERY strict limits for TryploPay APIs (except webhook)
+    // STRICT limits for TryploPay APIs (except webhook)
     if (pathname.includes("/tryplopay/") && !pathname.includes("/webhook")) {
-      limit = 3 // Only 3 requests per minute for TryploPay APIs
+      limit = 10 // 10 requests per minute for TryploPay APIs
       windowMs = 60 * 1000
-      console.log(`🔒 Applying STRICT rate limit (${limit}/min) to TryploPay API: ${pathname}`)
+      console.log(`🔒 Applying rate limit (${limit}/min) to TryploPay API: ${pathname}`)
     }
 
     if (isRateLimited(ip, limit, windowMs)) {
