@@ -1,13 +1,13 @@
--- Criar tabela para webhooks SuperPay se não existir
+-- Criar tabela payment_webhooks se não existir
 CREATE TABLE IF NOT EXISTS payment_webhooks (
     id BIGSERIAL PRIMARY KEY,
     external_id VARCHAR(255) NOT NULL,
-    invoice_id VARCHAR(255),
+    invoice_id VARCHAR(255) NOT NULL,
     status_code INTEGER NOT NULL,
     status_name VARCHAR(100) NOT NULL,
     amount DECIMAL(10,2) DEFAULT 0,
-    payment_date TIMESTAMP WITH TIME ZONE,
-    processed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    payment_date TIMESTAMPTZ,
+    processed_at TIMESTAMPTZ DEFAULT NOW(),
     is_paid BOOLEAN DEFAULT FALSE,
     is_denied BOOLEAN DEFAULT FALSE,
     is_expired BOOLEAN DEFAULT FALSE,
@@ -16,10 +16,10 @@ CREATE TABLE IF NOT EXISTS payment_webhooks (
     is_critical BOOLEAN DEFAULT FALSE,
     gateway VARCHAR(50) NOT NULL DEFAULT 'superpay',
     token VARCHAR(255),
-    expires_at TIMESTAMP WITH TIME ZONE,
+    expires_at TIMESTAMPTZ,
     webhook_data JSONB,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Criar índices para performance
@@ -35,7 +35,7 @@ CREATE INDEX IF NOT EXISTS idx_payment_webhooks_is_critical ON payment_webhooks(
 
 -- Criar índice composto para consultas otimizadas
 CREATE INDEX IF NOT EXISTS idx_payment_webhooks_gateway_external_id ON payment_webhooks(gateway, external_id);
-CREATE INDEX IF NOT EXISTS idx_payment_webhooks_gateway_token ON payment_webhooks(gateway, token);
+CREATE INDEX IF NOT EXISTS idx_payment_webhooks_gateway_status ON payment_webhooks(gateway, status_code);
 
 -- Função para atualizar updated_at automaticamente
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -60,85 +60,36 @@ DECLARE
     deleted_count INTEGER;
 BEGIN
     DELETE FROM payment_webhooks 
-    WHERE gateway = 'superpay' 
-    AND expires_at < NOW() - INTERVAL '1 hour';
+    WHERE expires_at < NOW() - INTERVAL '24 hours'
+    AND gateway = 'superpay'
+    AND NOT is_critical;
     
     GET DIAGNOSTICS deleted_count = ROW_COUNT;
+    
+    RAISE NOTICE 'Limpeza automática: % tokens expirados removidos', deleted_count;
     RETURN deleted_count;
 END;
 $$ LANGUAGE plpgsql;
 
 -- Comentários para documentação
-COMMENT ON TABLE payment_webhooks IS 'Tabela para armazenar webhooks de pagamento do SuperPay com rate limiting';
-COMMENT ON COLUMN payment_webhooks.external_id IS 'ID externo único do pagamento';
-COMMENT ON COLUMN payment_webhooks.token IS 'Token de segurança com expiração de 15 minutos';
-COMMENT ON COLUMN payment_webhooks.expires_at IS 'Data de expiração do token de segurança';
-COMMENT ON COLUMN payment_webhooks.is_critical IS 'Indica se o status é crítico (pago, negado, etc.)';
+COMMENT ON TABLE payment_webhooks IS 'Tabela para armazenar webhooks de pagamento do SuperPay com rate limiting e tokens seguros';
+COMMENT ON COLUMN payment_webhooks.external_id IS 'ID externo único do pagamento (ex: SHEIN_1234567890_abc123)';
+COMMENT ON COLUMN payment_webhooks.token IS 'Token único de segurança com expiração de 15 minutos';
+COMMENT ON COLUMN payment_webhooks.expires_at IS 'Data/hora de expiração do token (15 minutos após criação)';
+COMMENT ON COLUMN payment_webhooks.is_critical IS 'Indica se o status é crítico (pago, negado, cancelado, etc.)';
 COMMENT ON COLUMN payment_webhooks.gateway IS 'Gateway de pagamento (superpay)';
 
--- Inserir dados de exemplo para teste
-INSERT INTO payment_webhooks (
-    external_id, 
-    invoice_id, 
-    status_code, 
-    status_name, 
-    amount, 
-    is_paid, 
-    is_critical, 
-    gateway, 
-    token, 
-    expires_at,
-    webhook_data
-) VALUES 
-(
-    'TEST_SUPERPAY_001', 
-    'INV_TEST_001', 
-    5, 
-    'Pago', 
-    34.90, 
-    TRUE, 
-    TRUE, 
-    'superpay', 
-    'SPY_' || EXTRACT(EPOCH FROM NOW())::BIGINT || '_' || SUBSTRING(MD5(RANDOM()::TEXT), 1, 8),
-    NOW() + INTERVAL '15 minutes',
-    '{"test": true, "amount": 34.90, "status": "paid"}'::jsonb
-),
-(
-    'TEST_SUPERPAY_002', 
-    'INV_TEST_002', 
-    12, 
-    'Negado', 
-    49.90, 
-    FALSE, 
-    TRUE, 
-    'superpay', 
-    'SPY_' || EXTRACT(EPOCH FROM NOW())::BIGINT || '_' || SUBSTRING(MD5(RANDOM()::TEXT), 1, 8),
-    NOW() + INTERVAL '15 minutes',
-    '{"test": true, "amount": 49.90, "status": "denied"}'::jsonb
-),
-(
-    'TEST_SUPERPAY_003', 
-    'INV_TEST_003', 
-    1, 
-    'Aguardando Pagamento', 
-    29.90, 
-    FALSE, 
-    FALSE, 
-    'superpay', 
-    'SPY_' || EXTRACT(EPOCH FROM NOW())::BIGINT || '_' || SUBSTRING(MD5(RANDOM()::TEXT), 1, 8),
-    NOW() + INTERVAL '15 minutes',
-    '{"test": true, "amount": 29.90, "status": "pending"}'::jsonb
-)
-ON CONFLICT (external_id) DO NOTHING;
-
--- Verificar se a tabela foi criada corretamente
-SELECT 
-    'payment_webhooks' as table_name,
-    COUNT(*) as total_records,
-    COUNT(*) FILTER (WHERE gateway = 'superpay') as superpay_records,
-    COUNT(*) FILTER (WHERE is_paid = TRUE) as paid_records,
-    COUNT(*) FILTER (WHERE is_critical = TRUE) as critical_records
-FROM payment_webhooks;
-
--- Mostrar estrutura da tabela
-\d payment_webhooks;
+-- Verificar se a tabela foi criada com sucesso
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'payment_webhooks') THEN
+        RAISE NOTICE '✅ Tabela payment_webhooks criada com sucesso!';
+        RAISE NOTICE '📊 Índices criados: % índices', (
+            SELECT COUNT(*) 
+            FROM pg_indexes 
+            WHERE tablename = 'payment_webhooks'
+        );
+    ELSE
+        RAISE EXCEPTION '❌ Erro: Tabela payment_webhooks não foi criada!';
+    END IF;
+END $$;
