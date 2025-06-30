@@ -11,7 +11,7 @@ const {
 
 /**
  * GET /api/verifica-status?token=...
- * Verifica status do pagamento via token (consulta apenas Supabase)
+ * Verifica status do pagamento via token (NUNCA consulta SuperPay)
  */
 router.get("/verifica-status", async (req, res) => {
   try {
@@ -31,22 +31,22 @@ router.get("/verifica-status", async (req, res) => {
     }
 
     // Verificar se token expirou
-    if (isTokenExpired(fatura.expires_at)) {
-      console.log("⏰ Token expirado:", fatura.external_id)
+    if (isTokenExpired(fatura.created_at)) {
       return res.status(410).json(formatErrorResponse("Token expirado", "TOKEN_EXPIRED"))
     }
 
     // Verificar status do pagamento
     if (isPaymentSuccessful(fatura.status)) {
-      console.log("💰 Pagamento confirmado:", fatura.external_id)
+      console.log("✅ Pagamento confirmado:", fatura.external_id)
+
       return res.json(
         formatSuccessResponse(
           {
             paid: true,
-            redirect: fatura.redirect_url,
             external_id: fatura.external_id,
-            paid_at: fatura.paid_at,
             amount: fatura.amount,
+            paid_at: fatura.paid_at,
+            redirect_url: fatura.redirect_url || "/obrigado",
           },
           "Pagamento confirmado",
         ),
@@ -54,32 +54,35 @@ router.get("/verifica-status", async (req, res) => {
     }
 
     if (isPaymentFailed(fatura.status)) {
-      console.log("❌ Pagamento falhou:", fatura.external_id, fatura.status)
+      const statusMessages = {
+        recusado: "Pagamento recusado",
+        cancelado: "Pagamento cancelado",
+        estornado: "Pagamento estornado",
+        vencido: "Pagamento vencido",
+      }
+
       return res.json(
-        formatSuccessResponse(
-          {
-            paid: false,
-            status: fatura.status,
-            external_id: fatura.external_id,
-            message: getStatusMessage(fatura.status),
-          },
-          "Status atualizado",
-        ),
+        formatErrorResponse(statusMessages[fatura.status] || "Pagamento não realizado", "PAYMENT_FAILED", {
+          status: fatura.status,
+        }),
       )
     }
 
-    // Status pendente
+    // Status pendente ou processando
     console.log("⏳ Pagamento pendente:", fatura.external_id)
+
     res.json(
       formatSuccessResponse(
         {
           paid: false,
-          status: "aguardando",
+          status: fatura.status,
           external_id: fatura.external_id,
+          amount: fatura.amount,
           expires_at: fatura.expires_at,
-          message: "Aguardando pagamento",
+          qr_code: fatura.qr_code,
+          pix_code: fatura.pix_code,
         },
-        "Pagamento pendente",
+        "Aguardando pagamento",
       ),
     )
   } catch (error) {
@@ -92,18 +95,21 @@ router.get("/verifica-status", async (req, res) => {
 })
 
 /**
- * Retorna mensagem amigável para cada status
+ * GET /api/status/health
+ * Health check específico para verificação de status
  */
-function getStatusMessage(status) {
-  const messages = {
-    recusado: "Pagamento recusado pelo banco. Tente outro método.",
-    cancelado: "Pagamento cancelado.",
-    estornado: "Pagamento estornado.",
-    vencido: "Pagamento vencido. Gere uma nova cobrança.",
-    pendente: "Aguardando pagamento.",
-  }
-
-  return messages[status] || "Status desconhecido"
-}
+router.get("/status/health", (req, res) => {
+  res.json(
+    formatSuccessResponse(
+      {
+        endpoint: "/api/verifica-status",
+        method: "GET",
+        parameters: ["token"],
+        status: "active",
+      },
+      "Endpoint de verificação ativo",
+    ),
+  )
+})
 
 module.exports = router

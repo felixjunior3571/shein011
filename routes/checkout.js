@@ -2,7 +2,12 @@ const express = require("express")
 const router = express.Router()
 const SuperPayService = require("../services/superpayService")
 const { createFatura } = require("../supabaseClient")
-const { generateFaturaData, formatErrorResponse, formatSuccessResponse } = require("../utils/generateToken")
+const {
+  validateCheckoutData,
+  generateFaturaData,
+  formatErrorResponse,
+  formatSuccessResponse,
+} = require("../utils/generateToken")
 
 const superPayService = new SuperPayService()
 
@@ -12,62 +17,74 @@ const superPayService = new SuperPayService()
  */
 router.post("/", async (req, res) => {
   try {
-    const { amount = 10.0, redirect_url = "/obrigado" } = req.body
+    console.log("💳 Iniciando checkout:", req.body)
 
-    // Validações
-    if (amount <= 0 || amount > 10000) {
-      return res
-        .status(400)
-        .json(formatErrorResponse("Valor deve estar entre R$ 0,01 e R$ 10.000,00", "INVALID_AMOUNT"))
-    }
+    // Validar dados de entrada
+    validateCheckoutData(req.body)
 
     // Gerar dados da fatura
-    const faturaData = generateFaturaData(amount, redirect_url)
+    const faturaData = generateFaturaData(req.body)
 
-    console.log("🔄 Iniciando checkout:", faturaData.external_id)
+    console.log("🔄 Criando fatura:", faturaData.external_id)
 
     // Criar fatura na SuperPay
     const superPayResult = await superPayService.createInvoice(faturaData)
 
     if (!superPayResult.success) {
-      throw new Error(`Erro SuperPay: ${superPayResult.error}`)
+      throw new Error(`SuperPay: ${superPayResult.error}`)
     }
 
-    // Salvar no Supabase
-    const faturaCompleta = {
+    // Adicionar dados da SuperPay à fatura
+    const completeFaturaData = {
       ...faturaData,
       superpay_id: superPayResult.data.superpay_id,
       qr_code: superPayResult.data.qr_code,
       pix_code: superPayResult.data.pix_code,
     }
 
-    const savedFatura = await createFatura(faturaCompleta)
+    // Salvar no Supabase
+    const savedFatura = await createFatura(completeFaturaData)
 
-    console.log("✅ Checkout concluído:", savedFatura.external_id)
+    console.log("✅ Checkout concluído:", {
+      external_id: savedFatura.external_id,
+      token: savedFatura.token,
+      amount: savedFatura.amount,
+    })
 
     // Resposta para o frontend
     res.json(
       formatSuccessResponse(
         {
-          token: savedFatura.token,
           external_id: savedFatura.external_id,
+          token: savedFatura.token,
           qr_code: savedFatura.qr_code,
           pix_code: savedFatura.pix_code,
           amount: savedFatura.amount,
           expires_at: savedFatura.expires_at,
           status_url: `/api/verifica-status?token=${savedFatura.token}`,
         },
-        "Fatura PIX criada com sucesso",
+        "Fatura criada com sucesso",
       ),
     )
   } catch (error) {
     console.error("❌ Erro no checkout:", error.message)
 
-    res.status(500).json(
-      formatErrorResponse("Erro ao processar checkout. Tente novamente.", "CHECKOUT_ERROR", {
-        message: error.message,
-      }),
-    )
+    // Tratamento específico de erros
+    let statusCode = 500
+    let errorCode = "CHECKOUT_ERROR"
+
+    if (error.message.includes("Campos obrigatórios")) {
+      statusCode = 400
+      errorCode = "VALIDATION_ERROR"
+    } else if (error.message.includes("SuperPay")) {
+      statusCode = 502
+      errorCode = "SUPERPAY_ERROR"
+    } else if (error.message.includes("Erro no banco")) {
+      statusCode = 503
+      errorCode = "DATABASE_ERROR"
+    }
+
+    res.status(statusCode).json(formatErrorResponse(error.message, errorCode))
   }
 })
 
@@ -80,13 +97,48 @@ router.get("/test", async (req, res) => {
     const result = await superPayService.testConnection()
 
     if (result.success) {
-      res.json(formatSuccessResponse(result.data, "Conexão SuperPay OK"))
+      res.json(
+        formatSuccessResponse(
+          {
+            superpay_status: "connected",
+            api_version: "v4",
+            timestamp: new Date().toISOString(),
+          },
+          "Conexão SuperPay OK",
+        ),
+      )
     } else {
-      res.status(500).json(formatErrorResponse("Falha na conexão SuperPay", "CONNECTION_ERROR", result))
+      res.status(502).json(formatErrorResponse("Falha na conexão SuperPay", "SUPERPAY_CONNECTION_ERROR", result))
     }
   } catch (error) {
-    console.error("❌ Erro no teste de conexão:", error.message)
-    res.status(500).json(formatErrorResponse("Erro interno no teste", "TEST_ERROR"))
+    console.error("❌ Erro no teste:", error.message)
+    res.status(500).json(formatErrorResponse(error.message, "TEST_ERROR"))
+  }
+})
+
+/**
+ * POST /api/checkout/simulate
+ * Simula um checkout para testes (desenvolvimento)
+ */
+router.post("/simulate", async (req, res) => {
+  if (process.env.NODE_ENV === "production") {
+    return res.status(403).json(formatErrorResponse("Endpoint disponível apenas em desenvolvimento", "FORBIDDEN"))
+  }
+
+  try {
+    const simulatedData = {
+      amount: req.body.amount || 29.9,
+      customer_name: "Cliente Teste",
+      customer_email: "teste@exemplo.com",
+      redirect_url: "/obrigado",
+    }
+
+    // Usar o endpoint normal de checkout
+    req.body = simulatedData
+    return router.handle(req, res)
+  } catch (error) {
+    console.error("❌ Erro na simulação:", error.message)
+    res.status(500).json(formatErrorResponse(error.message, "SIMULATION_ERROR"))
   }
 })
 

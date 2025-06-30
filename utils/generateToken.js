@@ -1,7 +1,14 @@
 const crypto = require("crypto")
 
 /**
- * Gera um external_id único no formato FRETE_timestamp_random
+ * Gera um token seguro para verificação de status
+ */
+function generateSecureToken() {
+  return crypto.randomBytes(32).toString("hex")
+}
+
+/**
+ * Gera external_id único no formato FRETE_timestamp_random
  */
 function generateExternalId() {
   const timestamp = Date.now()
@@ -10,100 +17,60 @@ function generateExternalId() {
 }
 
 /**
- * Gera um token seguro para verificação de status
- * Token válido por 15 minutos
- */
-function generateSecureToken() {
-  return crypto.randomBytes(32).toString("hex")
-}
-
-/**
- * Gera timestamp de expiração (15 minutos a partir de agora)
- */
-function generateExpirationTime() {
-  const now = new Date()
-  const expiration = new Date(now.getTime() + 15 * 60 * 1000) // 15 minutos
-  return expiration.toISOString()
-}
-
-/**
- * Verifica se um token está expirado
- */
-function isTokenExpired(expiresAt) {
-  const now = new Date()
-  const expiration = new Date(expiresAt)
-  return now > expiration
-}
-
-/**
- * Gera hash para validação de webhook
- */
-function generateWebhookHash(payload, secret) {
-  return crypto.createHmac("sha256", secret).update(JSON.stringify(payload)).digest("hex")
-}
-
-/**
- * Valida hash do webhook
- */
-function validateWebhookHash(payload, receivedHash, secret) {
-  const expectedHash = generateWebhookHash(payload, secret)
-  return crypto.timingSafeEqual(Buffer.from(receivedHash, "hex"), Buffer.from(expectedHash, "hex"))
-}
-
-/**
- * Gera dados completos para nova fatura
- */
-function generateFaturaData(amount = 10.0, redirectUrl = "/obrigado") {
-  return {
-    external_id: generateExternalId(),
-    token: generateSecureToken(),
-    status: "pendente",
-    expires_at: generateExpirationTime(),
-    redirect_url: redirectUrl,
-    amount: amount,
-    created_at: new Date().toISOString(),
-  }
-}
-
-/**
- * Mapeia códigos de status da SuperPayBR
+ * Mapeia códigos de status da SuperPay para status internos
  */
 function mapSuperpayStatus(statusCode) {
   const statusMap = {
-    5: "pago",
-    6: "recusado",
-    7: "cancelado",
-    8: "estornado",
-    9: "vencido",
+    1: "pendente", // Aguardando pagamento
+    2: "processando", // Processando
+    3: "pendente", // Aguardando
+    4: "processando", // Em análise
+    5: "pago", // Pago/Aprovado
+    6: "recusado", // Recusado
+    7: "cancelado", // Cancelado
+    8: "estornado", // Estornado
+    9: "vencido", // Vencido/Expirado
+    10: "cancelado", // Cancelado pelo usuário
   }
 
-  return statusMap[statusCode] || "pendente"
+  return statusMap[statusCode] || "desconhecido"
+}
+
+/**
+ * Verifica se o token está expirado (15 minutos)
+ */
+function isTokenExpired(createdAt) {
+  const now = new Date()
+  const created = new Date(createdAt)
+  const diffMinutes = (now - created) / (1000 * 60)
+
+  return diffMinutes > 15
 }
 
 /**
  * Verifica se o pagamento foi bem-sucedido
  */
 function isPaymentSuccessful(status) {
-  return status === "pago" || status === 5
+  return status === "pago"
 }
 
 /**
  * Verifica se o pagamento falhou
  */
 function isPaymentFailed(status) {
-  const failedStatuses = ["recusado", "cancelado", "estornado", "vencido"]
-  return failedStatuses.includes(status) || [6, 7, 8, 9].includes(status)
+  return ["recusado", "cancelado", "estornado", "vencido"].includes(status)
 }
 
 /**
  * Formata resposta de erro padronizada
  */
-function formatErrorResponse(message, code = "GENERIC_ERROR", details = null) {
+function formatErrorResponse(message, code = "ERROR", details = null) {
   return {
+    success: false,
     error: message,
     code: code,
-    timestamp: new Date().toISOString(),
     details: details,
+    timestamp: new Date().toISOString(),
   }
 }
 
@@ -119,17 +86,58 @@ function formatSuccessResponse(data, message = "Sucesso") {
   }
 }
 
+/**
+ * Valida dados obrigatórios do checkout
+ */
+function validateCheckoutData(data) {
+  const required = ["amount"]
+  const missing = required.filter((field) => !data[field])
+
+  if (missing.length > 0) {
+    throw new Error(`Campos obrigatórios ausentes: ${missing.join(", ")}`)
+  }
+
+  if (data.amount <= 0) {
+    throw new Error("Valor deve ser maior que zero")
+  }
+
+  if (data.amount > 10000) {
+    throw new Error("Valor máximo excedido (R$ 10.000)")
+  }
+
+  return true
+}
+
+/**
+ * Gera dados completos para nova fatura
+ */
+function generateFaturaData(inputData) {
+  const now = new Date()
+  const expiresAt = new Date(now.getTime() + 15 * 60 * 1000) // 15 minutos
+
+  return {
+    external_id: generateExternalId(),
+    token: generateSecureToken(),
+    status: "pendente",
+    amount: Number.parseFloat(inputData.amount),
+    customer_name: inputData.customer_name || "Cliente SHEIN",
+    customer_email: inputData.customer_email || "cliente@shein.com",
+    customer_phone: inputData.customer_phone || "",
+    created_at: now.toISOString(),
+    expires_at: expiresAt.toISOString(),
+    redirect_url: inputData.redirect_url || "/obrigado",
+  }
+}
+
 module.exports = {
-  generateExternalId,
   generateSecureToken,
-  generateExpirationTime,
-  isTokenExpired,
-  generateWebhookHash,
-  validateWebhookHash,
-  generateFaturaData,
+  generateExternalId,
   mapSuperpayStatus,
+  isTokenExpired,
   isPaymentSuccessful,
   isPaymentFailed,
   formatErrorResponse,
   formatSuccessResponse,
+  validateCheckoutData,
+  generateFaturaData,
 }

@@ -2,8 +2,10 @@ const express = require("express")
 const cors = require("cors")
 const helmet = require("helmet")
 const rateLimit = require("express-rate-limit")
-require("dotenv").config()
+const { testConnection } = require("./supabaseClient")
+const SuperPayService = require("./services/superpayService")
 
+// Importar rotas
 const checkoutRoutes = require("./routes/checkout")
 const webhookRoutes = require("./routes/webhook")
 const statusRoutes = require("./routes/status")
@@ -11,26 +13,20 @@ const statusRoutes = require("./routes/status")
 const app = express()
 const PORT = process.env.PORT || 3000
 
-// Middlewares de segurança
+// Middleware de segurança
 app.use(
   helmet({
-    contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'self'"],
-        styleSrc: ["'self'", "'unsafe-inline'"],
-        scriptSrc: ["'self'"],
-        imgSrc: ["'self'", "data:", "https:"],
-      },
-    },
+    contentSecurityPolicy: false, // Desabilitar CSP para desenvolvimento
   }),
 )
 
+// CORS configurado
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || "http://localhost:3000",
+    origin: process.env.ALLOWED_ORIGINS?.split(",") || ["http://localhost:3000"],
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+    allowedHeaders: ["Content-Type", "Authorization", "x-superpay-signature"],
   }),
 )
 
@@ -46,59 +42,59 @@ const limiter = rateLimit({
   legacyHeaders: false,
 })
 
-const webhookLimiter = rateLimit({
-  windowMs: 1 * 60 * 1000, // 1 minuto
-  max: 50, // máximo 50 webhooks por minuto
-  message: {
-    error: "Limite de webhooks excedido",
-    code: "WEBHOOK_RATE_LIMIT",
-  },
-})
-
-app.use("/api/", limiter)
-app.use("/api/webhook/", webhookLimiter)
+app.use(limiter)
 
 // Middleware para parsing JSON
 app.use(express.json({ limit: "10mb" }))
 app.use(express.urlencoded({ extended: true, limit: "10mb" }))
 
-// Middleware de logging
+// Middleware de log
 app.use((req, res, next) => {
-  const timestamp = new Date().toISOString()
-  console.log(`[${timestamp}] ${req.method} ${req.path} - IP: ${req.ip}`)
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`)
   next()
 })
 
 // Health check
-app.get("/health", (req, res) => {
-  res.json({
-    status: "OK",
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    environment: process.env.NODE_ENV || "development",
-    version: "1.0.0",
-  })
+app.get("/health", async (req, res) => {
+  try {
+    const supabaseOk = await testConnection()
+    const superPayService = new SuperPayService()
+    const superPayOk = await superPayService.testConnection()
+
+    const status = {
+      status: "ok",
+      timestamp: new Date().toISOString(),
+      services: {
+        supabase: supabaseOk ? "connected" : "disconnected",
+        superpay: superPayOk.success ? "connected" : "disconnected",
+      },
+      version: "1.0.0",
+    }
+
+    res.json(status)
+  } catch (error) {
+    console.error("❌ Health check error:", error)
+    res.status(500).json({
+      status: "error",
+      timestamp: new Date().toISOString(),
+      error: error.message,
+    })
+  }
 })
 
-// Rotas principais
+// Rotas da API
 app.use("/api/checkout", checkoutRoutes)
 app.use("/api/webhook", webhookRoutes)
 app.use("/api", statusRoutes)
 
-// Middleware de tratamento de erros
-app.use((err, req, res, next) => {
-  console.error("Erro não tratado:", err)
-
-  if (err.type === "entity.parse.failed") {
-    return res.status(400).json({
-      error: "JSON inválido",
-      code: "INVALID_JSON",
-    })
-  }
+// Middleware de erro global
+app.use((error, req, res, next) => {
+  console.error("❌ Erro não tratado:", error)
 
   res.status(500).json({
+    success: false,
     error: "Erro interno do servidor",
-    code: "INTERNAL_ERROR",
+    code: "INTERNAL_SERVER_ERROR",
     timestamp: new Date().toISOString(),
   })
 })
@@ -106,34 +102,55 @@ app.use((err, req, res, next) => {
 // Rota 404
 app.use("*", (req, res) => {
   res.status(404).json({
+    success: false,
     error: "Endpoint não encontrado",
     code: "NOT_FOUND",
     path: req.originalUrl,
   })
 })
 
+// Iniciar servidor
+async function startServer() {
+  try {
+    // Testar conexões
+    console.log("🔄 Testando conexões...")
+
+    const supabaseOk = await testConnection()
+    if (!supabaseOk) {
+      throw new Error("Falha na conexão com Supabase")
+    }
+
+    const superPayService = new SuperPayService()
+    const superPayTest = await superPayService.testConnection()
+    if (!superPayTest.success) {
+      console.warn("⚠️ SuperPay não conectado:", superPayTest.error)
+    }
+
+    // Iniciar servidor
+    app.listen(PORT, () => {
+      console.log(`🚀 Servidor rodando na porta ${PORT}`)
+      console.log(`📍 Health check: http://localhost:${PORT}/health`)
+      console.log(`🔔 Webhook URL: http://localhost:${PORT}/api/webhook/superpay`)
+      console.log(`💳 Checkout: http://localhost:${PORT}/api/checkout`)
+    })
+  } catch (error) {
+    console.error("❌ Erro ao iniciar servidor:", error.message)
+    process.exit(1)
+  }
+}
+
 // Graceful shutdown
 process.on("SIGTERM", () => {
-  console.log("SIGTERM recebido. Encerrando servidor graciosamente...")
-  server.close(() => {
-    console.log("Servidor encerrado.")
-    process.exit(0)
-  })
+  console.log("🛑 Recebido SIGTERM, encerrando servidor...")
+  process.exit(0)
 })
 
 process.on("SIGINT", () => {
-  console.log("SIGINT recebido. Encerrando servidor graciosamente...")
-  server.close(() => {
-    console.log("Servidor encerrado.")
-    process.exit(0)
-  })
+  console.log("🛑 Recebido SIGINT, encerrando servidor...")
+  process.exit(0)
 })
 
-const server = app.listen(PORT, () => {
-  console.log(`🚀 Servidor SuperPayBR v4 rodando na porta ${PORT}`)
-  console.log(`🌍 Environment: ${process.env.NODE_ENV || "development"}`)
-  console.log(`📊 Health check: http://localhost:${PORT}/health`)
-  console.log(`🔗 Frontend URL: ${process.env.FRONTEND_URL || "http://localhost:3000"}`)
-})
+// Iniciar
+startServer()
 
 module.exports = app
