@@ -5,38 +5,64 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const externalId = searchParams.get("externalId")
 
-    if (!externalId) {
-      return NextResponse.json({ error: "External ID é obrigatório" }, { status: 400 })
-    }
+    console.log("🔍 [SuperPayBR Webhook Data] Buscando dados do webhook:")
+    console.log("- External ID:", externalId)
 
-    console.log("🔍 Buscando dados do webhook para:", externalId)
+    if (!externalId) {
+      console.log("❌ [SuperPayBR Webhook Data] External ID não fornecido")
+      return NextResponse.json(
+        {
+          success: false,
+          error: "External ID é obrigatório",
+        },
+        { status: 400 },
+      )
+    }
 
     // Verificar localStorage simulado global
     const localStorageKey = `webhook_payment_${externalId}`
-    const globalStorage = global.webhookLocalStorage || new Map()
-    const webhookData = globalStorage.get(localStorageKey)
 
-    if (webhookData) {
-      const parsedData = JSON.parse(webhookData)
-      console.log("✅ Dados encontrados no localStorage simulado:", parsedData)
+    try {
+      // Verificar se existe localStorage simulado global
+      if (typeof global !== "undefined" && global.webhookLocalStorage) {
+        const webhookData = global.webhookLocalStorage.get(localStorageKey)
+
+        if (webhookData) {
+          const parsedData = JSON.parse(webhookData)
+          console.log("✅ [SuperPayBR Webhook Data] Dados encontrados:", parsedData)
+
+          return NextResponse.json({
+            success: true,
+            data: parsedData,
+            source: "webhook_localStorage",
+            timestamp: new Date().toISOString(),
+          })
+        }
+      }
+
+      console.log("⚠️ [SuperPayBR Webhook Data] Nenhum dado encontrado no localStorage simulado")
 
       return NextResponse.json({
-        success: true,
-        data: parsedData,
-        source: "webhook_localStorage",
+        success: false,
+        error: "Nenhum dado de webhook encontrado",
+        message: `Nenhum webhook processado para External ID: ${externalId}`,
+        source: "webhook_not_found",
+        timestamp: new Date().toISOString(),
+      })
+    } catch (storageError) {
+      console.log("❌ [SuperPayBR Webhook Data] Erro ao acessar localStorage:", storageError)
+
+      return NextResponse.json({
+        success: false,
+        error: "Erro ao acessar dados do webhook",
+        message: storageError instanceof Error ? storageError.message : "Erro desconhecido",
+        source: "storage_error",
         timestamp: new Date().toISOString(),
       })
     }
-
-    console.log("❌ Nenhum dado encontrado para:", externalId)
-    return NextResponse.json({
-      success: false,
-      message: "Nenhum dado de webhook encontrado",
-      external_id: externalId,
-      timestamp: new Date().toISOString(),
-    })
   } catch (error) {
-    console.error("❌ Erro ao buscar dados do webhook:", error)
+    console.error("❌ [SuperPayBR Webhook Data] Erro geral:", error)
+
     return NextResponse.json(
       {
         success: false,

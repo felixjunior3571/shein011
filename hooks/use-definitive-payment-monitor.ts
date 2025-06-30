@@ -6,7 +6,7 @@ interface PaymentData {
   externalId: string
   invoiceId?: string
   amount: number
-  status: string
+  status?: string
   paymentDate?: string
   isPaid: boolean
   isDenied: boolean
@@ -16,6 +16,7 @@ interface PaymentData {
   statusCode?: number
   statusName?: string
   source?: string
+  timestamp?: string
 }
 
 interface PaymentMonitorOptions {
@@ -41,7 +42,7 @@ export function useDefinitivePaymentMonitor({
   onPaymentRefunded,
   enableDebug = false,
   checkInterval = 3000,
-  maxRetries = 100,
+  maxRetries = 240,
 }: PaymentMonitorOptions) {
   const [status, setStatus] = useState<
     "idle" | "monitoring" | "confirmed" | "denied" | "expired" | "canceled" | "refunded" | "error"
@@ -94,7 +95,18 @@ export function useDefinitivePaymentMonitor({
     try {
       log("🔍 Verificando webhook via API...")
 
-      const response = await fetch(`/api/superpaybr/get-webhook-data?externalId=${externalId}`)
+      const response = await fetch(`/api/superpaybr/get-webhook-data?externalId=${externalId}`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      })
+
+      if (!response.ok) {
+        log(`⚠️ Webhook API retornou ${response.status}`)
+        return null
+      }
+
       const data = await response.json()
 
       if (data.success && data.data) {
@@ -125,7 +137,18 @@ export function useDefinitivePaymentMonitor({
       if (externalId) params.append("externalId", externalId)
       if (invoiceId) params.append("invoiceId", invoiceId)
 
-      const response = await fetch(`/api/superpaybr/payment-status?${params.toString()}`)
+      const response = await fetch(`/api/superpaybr/payment-status?${params.toString()}`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      })
+
+      if (!response.ok) {
+        log(`⚠️ Status API retornou ${response.status}`)
+        return null
+      }
+
       const data = await response.json()
 
       if (data.success && data.data) {
