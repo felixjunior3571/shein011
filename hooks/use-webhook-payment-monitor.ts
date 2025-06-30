@@ -3,234 +3,277 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 
 interface PaymentStatus {
-  external_id: string
-  status: string
-  payment_confirmed: boolean
-  redirect_url: string | null
-  redirect_type: string
+  isPaid: boolean
+  isDenied: boolean
+  isRefunded: boolean
+  isExpired: boolean
+  isCanceled: boolean
+  statusCode: number
+  statusName: string
   amount: number
-  paid_at: string | null
-  gateway?: string
-  pay_id?: string
-  last_update: string
-  source: "webhook" | "database" | "expired"
+  paymentDate: string | null
 }
 
-interface WebhookMonitorOptions {
-  externalId?: string
+interface UseWebhookPaymentMonitorOptions {
+  externalId: string | null
+  fallbackCheckInterval?: number // Only as fallback, not primary method
+  maxFallbackChecks?: number
   onPaymentConfirmed?: (data: PaymentStatus) => void
   onPaymentDenied?: (data: PaymentStatus) => void
   onPaymentExpired?: (data: PaymentStatus) => void
-  onError?: (error: string) => void
-  checkInterval?: number
-  maxChecks?: number
+  onPaymentCanceled?: (data: PaymentStatus) => void
+  onPaymentRefunded?: (data: PaymentStatus) => void
   enableDebug?: boolean
 }
 
 export function useWebhookPaymentMonitor({
   externalId,
+  fallbackCheckInterval = 30000, // 30 seconds as fallback only
+  maxFallbackChecks = 10, // Maximum 10 fallback checks (5 minutes total)
   onPaymentConfirmed,
   onPaymentDenied,
   onPaymentExpired,
-  onError,
-  checkInterval = 3000, // 3 segundos
-  maxChecks = 100, // máximo 100 verificações (5 minutos)
+  onPaymentCanceled,
+  onPaymentRefunded,
   enableDebug = false,
-}: WebhookMonitorOptions) {
-  const [paymentStatus, setPaymentStatus] = useState<PaymentStatus | null>(null)
-  const [isMonitoring, setIsMonitoring] = useState(false)
+}: UseWebhookPaymentMonitorOptions) {
+  const [status, setStatus] = useState<PaymentStatus | null>(null)
+  const [isWaitingForWebhook, setIsWaitingForWebhook] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [checkCount, setCheckCount] = useState(0)
+  const [lastWebhookCheck, setLastWebhookCheck] = useState<Date | null>(null)
+  const [fallbackCheckCount, setFallbackCheckCount] = useState(0)
 
-  const intervalRef = useRef<NodeJS.Timeout | null>(null)
-  const lastStatusRef = useRef<string>("")
+  const fallbackTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const webhookCheckIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const isActiveRef = useRef<boolean>(true)
+  const hasTriggeredCallbackRef = useRef<boolean>(false)
 
-  const log = useCallback(
-    (message: string, data?: any) => {
+  // Monitor tab visibility
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      isActiveRef.current = !document.hidden
+
       if (enableDebug) {
-        console.log(`[Webhook Monitor] ${message}`, data || "")
+        console.log(
+          `💳 Payment monitor ${document.hidden ? "paused" : "resumed"} - tab ${document.hidden ? "inactive" : "active"}`,
+        )
       }
-    },
-    [enableDebug],
-  )
+    }
 
-  const checkWebhookStatus = useCallback(async () => {
-    if (!externalId) {
-      log("❌ External ID não fornecido")
-      return
+    document.addEventListener("visibilitychange", handleVisibilityChange)
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange)
+  }, [enableDebug])
+
+  // Check if webhook data is available (primary method)
+  const checkWebhookData = useCallback(async (): Promise<boolean> => {
+    if (!externalId || !isActiveRef.current) {
+      return false
     }
 
     try {
-      log(`🔍 Verificando webhook status (${checkCount + 1}/${maxChecks}):`, externalId)
+      if (enableDebug) {
+        console.log("🔍 Checking webhook data for:", externalId)
+      }
 
-      const response = await fetch(`/api/superpaybr/check-webhook-status?external_id=${encodeURIComponent(externalId)}`)
+      const response = await fetch(`/api/tryplopay/payment-status?externalId=${externalId}`, {
+        headers: {
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+          Pragma: "no-cache",
+        },
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+      }
+
       const result = await response.json()
+      setLastWebhookCheck(new Date())
 
-      log("📊 Resposta recebida:", result)
+      if (result.success && result.found) {
+        const paymentData: PaymentStatus = result.data
+        setStatus(paymentData)
 
-      if (response.ok && result.success) {
-        const data = result.data
-        setPaymentStatus(data)
-        setError(null)
-        setCheckCount((prev) => prev + 1)
+        if (enableDebug) {
+          console.log("✅ Webhook data found:", paymentData)
+        }
 
-        // Verificar mudança de status
-        const currentStatusKey = `${data.payment_confirmed}-${data.status}`
-        if (currentStatusKey !== lastStatusRef.current) {
-          log(`🔄 Status alterado: ${lastStatusRef.current} → ${currentStatusKey}`)
-          lastStatusRef.current = currentStatusKey
-
-          // Pagamento confirmado
-          if (data.payment_confirmed && data.status === "pago") {
-            log("🎉 PAGAMENTO CONFIRMADO VIA WEBHOOK!", data)
-            setIsMonitoring(false)
-            if (intervalRef.current) {
-              clearInterval(intervalRef.current)
-            }
-            onPaymentConfirmed?.(data)
-            return
-          }
-
-          // Pagamento negado/cancelado/expirado
-          if (data.status === "recusado" || data.status === "cancelado") {
-            log("❌ PAGAMENTO NEGADO/CANCELADO!", data)
-            setIsMonitoring(false)
-            if (intervalRef.current) {
-              clearInterval(intervalRef.current)
-            }
-            onPaymentDenied?.(data)
-            return
-          }
-
-          if (data.status === "vencido") {
-            log("⏰ PAGAMENTO VENCIDO!", data)
-            setIsMonitoring(false)
-            if (intervalRef.current) {
-              clearInterval(intervalRef.current)
-            }
-            onPaymentExpired?.(data)
-            return
+        // Trigger callbacks only once
+        if (!hasTriggeredCallbackRef.current) {
+          if (paymentData.isPaid && onPaymentConfirmed) {
+            console.log("🎉 PAYMENT CONFIRMED VIA WEBHOOK!")
+            onPaymentConfirmed(paymentData)
+            hasTriggeredCallbackRef.current = true
+          } else if (paymentData.isDenied && onPaymentDenied) {
+            console.log("❌ PAYMENT DENIED VIA WEBHOOK!")
+            onPaymentDenied(paymentData)
+            hasTriggeredCallbackRef.current = true
+          } else if (paymentData.isExpired && onPaymentExpired) {
+            console.log("⏰ PAYMENT EXPIRED VIA WEBHOOK!")
+            onPaymentExpired(paymentData)
+            hasTriggeredCallbackRef.current = true
+          } else if (paymentData.isCanceled && onPaymentCanceled) {
+            console.log("🚫 PAYMENT CANCELED VIA WEBHOOK!")
+            onPaymentCanceled(paymentData)
+            hasTriggeredCallbackRef.current = true
+          } else if (paymentData.isRefunded && onPaymentRefunded) {
+            console.log("🔄 PAYMENT REFUNDED VIA WEBHOOK!")
+            onPaymentRefunded(paymentData)
+            hasTriggeredCallbackRef.current = true
           }
         }
 
-        // Verificar se atingiu o máximo de verificações
-        if (checkCount >= maxChecks) {
-          log("⏰ Máximo de verificações atingido")
-          setIsMonitoring(false)
-          if (intervalRef.current) {
-            clearInterval(intervalRef.current)
-          }
-          onError?.("Tempo limite de monitoramento atingido")
-          return
-        }
-
-        // Status de aguardando
-        if (data.status === "pendente" || data.status === "aguardando") {
-          log("⏳ Aguardando pagamento...", { status: data.status, source: data.source })
-        }
+        return true // Webhook data found
       } else {
-        log("⚠️ Erro na verificação:", result)
-        setError(result.error || "Erro na verificação")
-        setCheckCount((prev) => prev + 1)
-
-        if (checkCount >= maxChecks) {
-          log("❌ Máximo de verificações atingido após erro")
-          setIsMonitoring(false)
-          if (intervalRef.current) {
-            clearInterval(intervalRef.current)
-          }
-          onError?.(result.error || "Máximo de verificações atingido")
+        if (enableDebug) {
+          console.log("⏳ No webhook data yet for:", externalId)
         }
+        return false // No webhook data yet
       }
-    } catch (err) {
-      log("💥 Erro na requisição:", err)
-      const errorMessage = err instanceof Error ? err.message : "Erro desconhecido"
-      setError(errorMessage)
-      setCheckCount((prev) => prev + 1)
-
-      if (checkCount >= maxChecks) {
-        log("❌ Máximo de verificações atingido após erro de rede")
-        setIsMonitoring(false)
-        if (intervalRef.current) {
-          clearInterval(intervalRef.current)
-        }
-        onError?.(errorMessage)
-      }
+    } catch (error: any) {
+      console.error("❌ Error checking webhook data:", error)
+      setError(error.message || "Unknown error")
+      return false
     }
-  }, [externalId, checkCount, maxChecks, onPaymentConfirmed, onPaymentDenied, onPaymentExpired, onError, log])
+  }, [
+    externalId,
+    enableDebug,
+    onPaymentConfirmed,
+    onPaymentDenied,
+    onPaymentExpired,
+    onPaymentCanceled,
+    onPaymentRefunded,
+  ])
 
+  // Fallback check (only when webhook hasn't arrived)
+  const performFallbackCheck = useCallback(async () => {
+    if (!externalId || !isActiveRef.current || fallbackCheckCount >= maxFallbackChecks) {
+      return
+    }
+
+    if (enableDebug) {
+      console.log(`🔄 Performing fallback check ${fallbackCheckCount + 1}/${maxFallbackChecks} for:`, externalId)
+    }
+
+    const webhookDataFound = await checkWebhookData()
+    setFallbackCheckCount((prev) => prev + 1)
+
+    if (!webhookDataFound && fallbackCheckCount < maxFallbackChecks - 1) {
+      // Schedule next fallback check
+      fallbackTimeoutRef.current = setTimeout(() => {
+        performFallbackCheck()
+      }, fallbackCheckInterval)
+    } else if (fallbackCheckCount >= maxFallbackChecks - 1) {
+      console.log("⚠️ Maximum fallback checks reached. Relying on webhook only.")
+      setError("Payment status check limit reached. Please refresh if payment was completed.")
+    }
+  }, [externalId, fallbackCheckCount, maxFallbackChecks, fallbackCheckInterval, checkWebhookData, enableDebug])
+
+  // Start monitoring
   const startMonitoring = useCallback(() => {
-    if (!externalId) {
-      log("❌ Não é possível iniciar monitoramento sem external ID")
+    if (
+      !externalId ||
+      status?.isPaid ||
+      status?.isDenied ||
+      status?.isExpired ||
+      status?.isCanceled ||
+      status?.isRefunded
+    ) {
+      if (enableDebug) {
+        console.log("🚫 Not starting monitoring - payment already final or no externalId")
+      }
       return
     }
 
-    if (isMonitoring) {
-      log("⚠️ Monitoramento já está ativo")
-      return
-    }
-
-    log("🚀 Iniciando monitoramento webhook...", {
-      interval: checkInterval,
-      maxChecks,
-      externalId,
-    })
-
-    setIsMonitoring(true)
+    console.log("🚀 Starting webhook-based payment monitoring for:", externalId)
+    setIsWaitingForWebhook(true)
     setError(null)
-    setCheckCount(0)
-    lastStatusRef.current = ""
+    setFallbackCheckCount(0)
+    hasTriggeredCallbackRef.current = false
 
-    // Primeira verificação imediata
-    checkWebhookStatus()
+    // Primary method: Check for webhook data immediately
+    checkWebhookData().then((webhookDataFound) => {
+      if (!webhookDataFound) {
+        // If no webhook data yet, start periodic checks for webhook data (not API polling)
+        webhookCheckIntervalRef.current = setInterval(async () => {
+          if (isActiveRef.current) {
+            const found = await checkWebhookData()
+            if (found) {
+              // Stop checking once webhook data is found
+              if (webhookCheckIntervalRef.current) {
+                clearInterval(webhookCheckIntervalRef.current)
+                webhookCheckIntervalRef.current = null
+              }
+              setIsWaitingForWebhook(false)
+            }
+          }
+        }, 5000) // Check for webhook data every 5 seconds
 
-    // Configurar polling
-    intervalRef.current = setInterval(checkWebhookStatus, checkInterval)
-  }, [externalId, isMonitoring, checkInterval, maxChecks, checkWebhookStatus, log])
+        // Start fallback checks after 1 minute if no webhook received
+        setTimeout(() => {
+          if (isActiveRef.current && !status?.isPaid && !status?.isDenied) {
+            console.log("⚠️ No webhook received after 1 minute, starting fallback checks")
+            performFallbackCheck()
+          }
+        }, 60000) // 1 minute delay before fallback
+      } else {
+        setIsWaitingForWebhook(false)
+      }
+    })
+  }, [externalId, status, enableDebug, checkWebhookData, performFallbackCheck])
 
+  // Stop monitoring
   const stopMonitoring = useCallback(() => {
-    log("🛑 Parando monitoramento webhook...")
-    setIsMonitoring(false)
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current)
-      intervalRef.current = null
+    if (enableDebug) {
+      console.log("🛑 Stopping payment monitoring")
     }
-  }, [log])
 
-  // Auto-start monitoring quando externalId for fornecido
+    setIsWaitingForWebhook(false)
+
+    if (webhookCheckIntervalRef.current) {
+      clearInterval(webhookCheckIntervalRef.current)
+      webhookCheckIntervalRef.current = null
+    }
+
+    if (fallbackTimeoutRef.current) {
+      clearTimeout(fallbackTimeoutRef.current)
+      fallbackTimeoutRef.current = null
+    }
+  }, [enableDebug])
+
+  // Auto-start monitoring when externalId is available
   useEffect(() => {
-    if (externalId && !paymentStatus?.payment_confirmed) {
+    if (
+      externalId &&
+      !status?.isPaid &&
+      !status?.isDenied &&
+      !status?.isExpired &&
+      !status?.isCanceled &&
+      !status?.isRefunded
+    ) {
       startMonitoring()
     }
 
     return () => {
       stopMonitoring()
     }
-  }, [externalId, paymentStatus?.payment_confirmed, startMonitoring, stopMonitoring])
+  }, [externalId, status, startMonitoring, stopMonitoring])
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current)
-      }
+      stopMonitoring()
     }
-  }, [])
+  }, [stopMonitoring])
 
   return {
-    paymentStatus,
-    isMonitoring,
+    status,
+    isWaitingForWebhook,
     error,
-    checkCount,
-    maxChecks,
+    lastWebhookCheck,
+    fallbackCheckCount,
+    maxFallbackChecks,
+    checkNow: checkWebhookData,
     startMonitoring,
     stopMonitoring,
-    checkWebhookStatus,
-    // Computed properties
-    isPaid: paymentStatus?.payment_confirmed || false,
-    isDenied: paymentStatus?.status === "recusado" || paymentStatus?.status === "cancelado",
-    isExpired: paymentStatus?.status === "vencido",
-    redirectUrl: paymentStatus?.redirect_url,
-    lastUpdate: paymentStatus?.last_update,
   }
 }
