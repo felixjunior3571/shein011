@@ -1,74 +1,127 @@
 import { type NextRequest, NextResponse } from "next/server"
+import { createClient } from "@supabase/supabase-js"
+
+const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
+    const externalId = searchParams.get("externalId")
     const invoiceId = searchParams.get("invoiceId")
+    const token = searchParams.get("token")
 
-    if (!invoiceId) {
+    console.log("🔍 Consultando status SuperPayBR:", { externalId, invoiceId, token })
+
+    if (!externalId && !invoiceId && !token) {
       return NextResponse.json(
         {
           success: false,
-          error: "Invoice ID não fornecido",
+          error: "Parâmetro obrigatório ausente",
+          message: "Forneça pelo menos um: externalId, invoiceId ou token",
         },
         { status: 400 },
       )
     }
 
-    console.log("=== CONSULTANDO STATUS SUPERPAYBR ===")
-    console.log("Invoice ID:", invoiceId)
+    // Construir query baseada nos parâmetros fornecidos
+    let query = supabase.from("payment_webhooks").select("*").eq("gateway", "superpaybr")
 
-    // Obter access token
-    const authResponse = await fetch(`${request.nextUrl.origin}/api/superpaybr/auth`)
-    const authData = await authResponse.json()
-
-    if (!authData.success) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Falha na autenticação SuperPayBR",
-        },
-        { status: 401 },
-      )
+    if (externalId) {
+      query = query.eq("external_id", externalId)
+    } else if (invoiceId) {
+      query = query.eq("invoice_id", invoiceId)
+    } else if (token) {
+      query = query.eq("token", token)
     }
 
-    // Consultar fatura específica na SuperPayBR
-    const statusResponse = await fetch(`https://api.superpaybr.com/invoices?id=${invoiceId}`, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${authData.data.access_token}`,
-      },
+    // Ordenar por mais recente e pegar o primeiro
+    query = query.order("processed_at", { ascending: false }).limit(1)
+
+    const { data, error } = await query.single()
+
+    if (error) {
+      if (error.code === "PGRST116") {
+        // Nenhum registro encontrado
+        console.log("⚠️ Nenhum webhook SuperPayBR encontrado para:", { externalId, invoiceId, token })
+        return NextResponse.json({
+          success: true,
+          found: false,
+          message: "Nenhum webhook encontrado - aguardando pagamento",
+          webhook: null,
+          timestamp: new Date().toISOString(),
+        })
+      }
+
+      console.error("❌ Erro ao consultar SuperPayBR:", error)
+
+      // Se for erro de tabela não existir, retornar resposta amigável
+      if (error.code === "42P01") {
+        return NextResponse.json({
+          success: true,
+          found: false,
+          message: "Sistema inicializando - execute o script SQL primeiro",
+          webhook: null,
+          timestamp: new Date().toISOString(),
+        })
+      }
+
+      throw error
+    }
+
+    // Verificar se token expirou
+    const now = new Date()
+    const expiresAt = new Date(data.expires_at)
+    const tokenExpired = now > expiresAt
+
+    console.log("📊 Status SuperPayBR encontrado:", {
+      external_id: data.external_id,
+      status_code: data.status_code,
+      status_title: data.status_title,
+      is_paid: data.is_paid,
+      is_critical: data.is_critical,
+      token_expired: tokenExpired,
+      processed_at: data.processed_at,
     })
 
-    if (statusResponse.ok) {
-      const statusData = await statusResponse.json()
-      console.log("✅ Status SuperPayBR obtido:", statusData)
-
-      return NextResponse.json({
-        success: true,
-        data: statusData,
-      })
-    } else {
-      const errorText = await statusResponse.text()
-      console.log("❌ Erro ao consultar status SuperPayBR:", statusResponse.status, errorText)
-
-      return NextResponse.json(
-        {
-          success: false,
-          error: `Erro ao consultar status: ${statusResponse.status}`,
-        },
-        { status: statusResponse.status },
-      )
+    const response = {
+      success: true,
+      found: true,
+      message: "Webhook encontrado",
+      webhook: {
+        external_id: data.external_id,
+        invoice_id: data.invoice_id,
+        status_code: data.status_code,
+        status_name: data.status_name,
+        status_title: data.status_title,
+        amount: data.amount,
+        payment_date: data.payment_date,
+        processed_at: data.processed_at,
+        is_paid: data.is_paid,
+        is_denied: data.is_denied,
+        is_expired: data.is_expired,
+        is_canceled: data.is_canceled,
+        is_critical: data.is_critical,
+        token: data.token,
+        expires_at: data.expires_at,
+        token_expired: tokenExpired,
+        gateway: data.gateway,
+        webhook_data: data.webhook_data,
+      },
+      timestamp: new Date().toISOString(),
     }
+
+    return NextResponse.json(response)
   } catch (error) {
-    console.log("❌ Erro na consulta de status SuperPayBR:", error)
+    console.error("❌ Erro na consulta SuperPayBR:", error)
+
     return NextResponse.json(
       {
         success: false,
-        error: "Erro interno na consulta de status",
+        error: "Erro interno do servidor",
+        message: error instanceof Error ? error.message : "Erro desconhecido",
+        timestamp: new Date().toISOString(),
       },
-      { status: 500 },
+      { status: 200 },
     )
   }
 }

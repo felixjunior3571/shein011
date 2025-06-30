@@ -7,21 +7,22 @@ interface SuperPayWebhookData {
   invoice_id: string
   status_code: number
   status_name: string
+  status_title: string
   amount: number
   payment_date?: string
   is_paid: boolean
   is_denied: boolean
   is_expired: boolean
   is_canceled: boolean
-  is_refunded: boolean
   is_critical: boolean
   token: string
   expires_at: string
   processed_at: string
+  webhook_data?: any
 }
 
 interface UseSuperPayWebhookMonitorProps {
-  externalId: string
+  externalId: string | null
   enableRateLimiting?: boolean
   enableDebug?: boolean
   onPaymentConfirmed?: (data: SuperPayWebhookData) => void
@@ -40,7 +41,6 @@ interface UseSuperPayWebhookMonitorReturn {
   isDenied: boolean
   isExpired: boolean
   isCanceled: boolean
-  isRefunded: boolean
   isCritical: boolean
   rateLimitLevel: number
   currentInterval: number
@@ -51,18 +51,20 @@ interface UseSuperPayWebhookMonitorReturn {
   checkNow: () => Promise<void>
 }
 
-// Rate limiting conforme documentação SuperPay
+// Intervalos de rate limiting otimizados para checkout
 const RATE_LIMIT_INTERVALS = [
-  5 * 60 * 1000, // 5 minutos
-  30 * 60 * 1000, // 30 minutos
-  60 * 60 * 1000, // 1 hora
-  12 * 60 * 60 * 1000, // 12 horas
-  24 * 60 * 60 * 1000, // 24 horas
-  48 * 60 * 60 * 1000, // 48 horas
-  24 * 60 * 60 * 1000, // 24 horas (repetir até 100h)
+  2000, // 2 segundos (inicial - rápido)
+  3000, // 3 segundos
+  5000, // 5 segundos
+  10000, // 10 segundos
+  15000, // 15 segundos
+  30000, // 30 segundos
+  60000, // 1 minuto
+  120000, // 2 minutos
+  300000, // 5 minutos
 ]
 
-const MAX_MONITORING_TIME = 100 * 60 * 60 * 1000 // 100 horas
+const MAX_MONITORING_TIME = 30 * 60 * 1000 // 30 minutos para checkout
 
 export function useSuperPayWebhookMonitor({
   externalId,
@@ -85,176 +87,228 @@ export function useSuperPayWebhookMonitor({
   const intervalRef = useRef<NodeJS.Timeout | null>(null)
   const startTimeRef = useRef<Date | null>(null)
   const lastStatusRef = useRef<SuperPayWebhookData | null>(null)
+  const isMonitoringRef = useRef(false)
 
   const currentInterval = enableRateLimiting
     ? RATE_LIMIT_INTERVALS[Math.min(rateLimitLevel, RATE_LIMIT_INTERVALS.length - 1)]
-    : 5000 // 5 segundos se rate limiting desabilitado
+    : 2000
+
+  const log = useCallback(
+    (message: string, data?: any) => {
+      if (enableDebug) {
+        console.log(`[SuperPay Monitor] ${message}`, data || "")
+      }
+    },
+    [enableDebug],
+  )
 
   const checkPaymentStatus = useCallback(async () => {
-    if (!externalId) return
+    if (!externalId || !isMonitoringRef.current) {
+      log("❌ External ID não fornecido ou monitoramento parado")
+      return
+    }
 
     try {
       setIsLoading(true)
       setError(null)
 
-      if (enableDebug) {
-        console.log(`🔍 Verificando status SuperPay: ${externalId}`)
-      }
+      log(`🔍 Verificando status SuperPay: ${externalId}`)
 
-      const response = await fetch(`/api/superpay/payment-status?externalId=${encodeURIComponent(externalId)}`)
+      const response = await fetch(`/api/superpaybr/payment-status?externalId=${encodeURIComponent(externalId)}`, {
+        method: "GET",
+        headers: {
+          "Cache-Control": "no-cache",
+          Pragma: "no-cache",
+        },
+      })
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`)
       }
 
       const data = await response.json()
+      log("📥 Resposta da API SuperPay:", data)
 
       if (!data.success) {
         throw new Error(data.message || "Erro ao consultar status")
       }
 
       const webhookData = data.webhook as SuperPayWebhookData | null
+      const now = new Date()
+
+      setLastCheck(now)
+      setChecksCount((prev) => prev + 1)
 
       if (webhookData) {
         setStatus(webhookData)
-        setLastCheck(new Date())
-        setChecksCount((prev) => prev + 1)
+        setIsWaitingForWebhook(false)
 
         // Verificar se o status mudou
         const statusChanged = !lastStatusRef.current || lastStatusRef.current.status_code !== webhookData.status_code
 
         if (statusChanged) {
+          log(
+            `🔄 Status SuperPay alterado: ${lastStatusRef.current?.status_title || "N/A"} → ${webhookData.status_title}`,
+          )
           lastStatusRef.current = webhookData
 
-          if (enableDebug) {
-            console.log(`📊 Status SuperPay atualizado: ${webhookData.status_name}`)
-          }
-
-          // Chamar callbacks apropriados
+          // Chamar callback de mudança de status
           onStatusChange?.(webhookData)
 
+          // Chamar callbacks específicos baseados no status
           if (webhookData.is_paid) {
+            log("🎉 Pagamento confirmado via webhook SuperPay!")
             onPaymentConfirmed?.(webhookData)
-            setIsWaitingForWebhook(false)
-          } else if (webhookData.is_denied) {
-            onPaymentDenied?.(webhookData)
-            setIsWaitingForWebhook(false)
-          } else if (webhookData.is_expired) {
-            onPaymentExpired?.(webhookData)
-            setIsWaitingForWebhook(false)
-          } else if (webhookData.is_canceled) {
-            onPaymentCanceled?.(webhookData)
-            setIsWaitingForWebhook(false)
-          }
-
-          // Parar monitoramento se status for crítico
-          if (webhookData.is_critical) {
             stopMonitoring()
+            return
+          } else if (webhookData.is_denied) {
+            log("❌ Pagamento negado via webhook SuperPay!")
+            onPaymentDenied?.(webhookData)
+            stopMonitoring()
+            return
+          } else if (webhookData.is_expired) {
+            log("⏰ Pagamento vencido via webhook SuperPay!")
+            onPaymentExpired?.(webhookData)
+            stopMonitoring()
+            return
+          } else if (webhookData.is_canceled) {
+            log("🚫 Pagamento cancelado via webhook SuperPay!")
+            onPaymentCanceled?.(webhookData)
+            stopMonitoring()
+            return
           }
         }
 
-        // Verificar se token expirou
-        if (webhookData.expires_at && new Date(webhookData.expires_at) < new Date()) {
-          if (enableDebug) {
-            console.log("⏰ Token SuperPay expirado")
-          }
-          setRateLimitLevel((prev) => Math.min(prev + 1, RATE_LIMIT_INTERVALS.length - 1))
+        // Parar monitoramento se status for crítico
+        if (webhookData.is_critical) {
+          log(`🛑 Status crítico detectado: ${webhookData.status_title}`)
+          stopMonitoring()
+          return
         }
       } else {
-        if (enableDebug) {
-          console.log("⏳ Aguardando webhook SuperPay...")
-        }
+        log("⏳ Aguardando webhook SuperPay...")
         setIsWaitingForWebhook(true)
+        setStatus(null)
+
+        // Aumentar intervalo gradualmente se não encontrou webhook
+        if (enableRateLimiting && rateLimitLevel < RATE_LIMIT_INTERVALS.length - 1) {
+          setRateLimitLevel((prev) => prev + 1)
+        }
       }
+
+      setError(null)
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Erro desconhecido"
+      log("❌ Erro ao verificar status SuperPay:", errorMessage)
       setError(errorMessage)
 
-      if (enableDebug) {
-        console.error("❌ Erro ao verificar status SuperPay:", errorMessage)
-      }
-
-      // Aumentar rate limit em caso de erro
-      if (enableRateLimiting) {
-        setRateLimitLevel((prev) => Math.min(prev + 1, RATE_LIMIT_INTERVALS.length - 1))
-      }
+      // Não parar monitoramento por erro - continuar tentando
+      log("🔄 Continuando monitoramento apesar do erro...")
     } finally {
       setIsLoading(false)
     }
   }, [
     externalId,
-    enableDebug,
     enableRateLimiting,
+    rateLimitLevel,
     onPaymentConfirmed,
     onPaymentDenied,
     onPaymentExpired,
     onPaymentCanceled,
     onStatusChange,
+    log,
   ])
 
+  const scheduleNextCheck = useCallback(() => {
+    if (!isMonitoringRef.current) return
+
+    // Verificar se excedeu tempo máximo de monitoramento
+    if (startTimeRef.current && Date.now() - startTimeRef.current.getTime() > MAX_MONITORING_TIME) {
+      log("⏰ Tempo máximo de monitoramento SuperPay atingido (30min)")
+      stopMonitoring()
+      return
+    }
+
+    const interval = currentInterval
+    log(`⏱️ Próxima verificação SuperPay em ${interval / 1000}s`)
+
+    intervalRef.current = setTimeout(() => {
+      checkPaymentStatus().then(() => {
+        // Agendar próxima verificação se ainda estiver monitorando
+        if (isMonitoringRef.current) {
+          scheduleNextCheck()
+        }
+      })
+    }, interval)
+  }, [currentInterval, checkPaymentStatus, log])
+
   const startMonitoring = useCallback(() => {
-    if (!externalId) return
+    if (!externalId) {
+      log("❌ Não é possível iniciar monitoramento sem External ID")
+      return
+    }
 
-    stopMonitoring() // Limpar interval anterior
+    if (isMonitoringRef.current) {
+      log("⚠️ Monitoramento já está ativo")
+      return
+    }
 
+    log(`🚀 Iniciando monitoramento SuperPay: ${externalId}`)
+
+    isMonitoringRef.current = true
     startTimeRef.current = new Date()
     setIsWaitingForWebhook(true)
+    setError(null)
     setRateLimitLevel(0)
     setChecksCount(0)
-
-    if (enableDebug) {
-      console.log(`🚀 Iniciando monitoramento SuperPay: ${externalId}`)
-    }
+    lastStatusRef.current = null
 
     // Primeira verificação imediata
-    checkPaymentStatus()
-
-    // Configurar verificações periódicas
-    const scheduleNextCheck = () => {
-      // Verificar se excedeu tempo máximo de monitoramento
-      if (startTimeRef.current && Date.now() - startTimeRef.current.getTime() > MAX_MONITORING_TIME) {
-        if (enableDebug) {
-          console.log("⏰ Tempo máximo de monitoramento SuperPay atingido (100h)")
-        }
-        stopMonitoring()
-        return
+    checkPaymentStatus().then(() => {
+      // Agendar verificações periódicas
+      if (isMonitoringRef.current) {
+        scheduleNextCheck()
       }
-
-      intervalRef.current = setTimeout(() => {
-        checkPaymentStatus().then(() => {
-          // Agendar próxima verificação se ainda estiver monitorando
-          if (isWaitingForWebhook && intervalRef.current) {
-            scheduleNextCheck()
-          }
-        })
-      }, currentInterval)
-    }
-
-    scheduleNextCheck()
-  }, [externalId, enableDebug, checkPaymentStatus, currentInterval, isWaitingForWebhook])
+    })
+  }, [externalId, checkPaymentStatus, scheduleNextCheck, log])
 
   const stopMonitoring = useCallback(() => {
+    log("🛑 Parando monitoramento SuperPay")
+
+    isMonitoringRef.current = false
+    setIsWaitingForWebhook(false)
+
     if (intervalRef.current) {
       clearTimeout(intervalRef.current)
       intervalRef.current = null
     }
-    setIsWaitingForWebhook(false)
-
-    if (enableDebug) {
-      console.log("⏹️ Monitoramento SuperPay parado")
-    }
-  }, [enableDebug])
+  }, [log])
 
   const checkNow = useCallback(async () => {
+    log("🔄 Verificação manual SuperPay solicitada")
     await checkPaymentStatus()
-  }, [checkPaymentStatus])
+  }, [checkPaymentStatus, log])
+
+  // Auto-start monitoring when externalId is available
+  useEffect(() => {
+    if (externalId && !status?.is_critical) {
+      startMonitoring()
+    }
+
+    return () => {
+      stopMonitoring()
+    }
+  }, [externalId]) // Removido startMonitoring e stopMonitoring das dependências para evitar loops
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      stopMonitoring()
+      if (intervalRef.current) {
+        clearTimeout(intervalRef.current)
+      }
+      isMonitoringRef.current = false
     }
-  }, [stopMonitoring])
+  }, [])
 
   return {
     status,
@@ -265,7 +319,6 @@ export function useSuperPayWebhookMonitor({
     isDenied: status?.is_denied || false,
     isExpired: status?.is_expired || false,
     isCanceled: status?.is_canceled || false,
-    isRefunded: status?.is_refunded || false,
     isCritical: status?.is_critical || false,
     rateLimitLevel,
     currentInterval,
