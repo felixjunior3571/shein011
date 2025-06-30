@@ -1,115 +1,149 @@
 const express = require("express")
-const router = express.Router()
 const { getFaturaByToken } = require("../supabaseClient")
-const {
-  isTokenExpired,
-  isPaymentSuccessful,
-  isPaymentFailed,
-  formatErrorResponse,
-  formatSuccessResponse,
-} = require("../utils/generateToken")
+const { isPaymentSuccessful, isPaymentFailed } = require("../utils/generateToken")
 
-/**
- * GET /api/verifica-status?token=...
- * Verifica status do pagamento via token (NUNCA consulta SuperPay)
- */
+const router = express.Router()
+
+// Endpoint para verificar status do pagamento
 router.get("/verifica-status", async (req, res) => {
   try {
     const { token } = req.query
 
+    // Validação do token
     if (!token) {
-      return res.status(400).json(formatErrorResponse("Token é obrigatório", "MISSING_TOKEN"))
+      return res.status(400).json({
+        success: false,
+        error: "Token obrigatório",
+        code: "MISSING_TOKEN",
+      })
     }
 
-    console.log("🔍 Verificando status para token:", token.substring(0, 8) + "...")
+    if (token.length < 32) {
+      return res.status(400).json({
+        success: false,
+        error: "Token inválido",
+        code: "INVALID_TOKEN",
+      })
+    }
+
+    console.log(`🔍 Verificando status para token: ${token.substring(0, 8)}...`)
 
     // Buscar fatura no Supabase (NUNCA na SuperPay)
     const fatura = await getFaturaByToken(token)
 
     if (!fatura) {
-      return res.status(404).json(formatErrorResponse("Token não encontrado ou inválido", "INVALID_TOKEN"))
+      return res.status(404).json({
+        success: false,
+        error: "Token não encontrado ou expirado",
+        code: "TOKEN_NOT_FOUND",
+      })
     }
 
     // Verificar se token expirou
-    if (isTokenExpired(fatura.created_at)) {
-      return res.status(410).json(formatErrorResponse("Token expirado", "TOKEN_EXPIRED"))
+    const now = new Date()
+    const expiresAt = new Date(fatura.expires_at)
+
+    if (now > expiresAt) {
+      return res.status(410).json({
+        success: false,
+        error: "Token expirado",
+        code: "TOKEN_EXPIRED",
+        expired_at: fatura.expires_at,
+      })
     }
 
-    // Verificar status do pagamento
-    if (isPaymentSuccessful(fatura.status)) {
-      console.log("✅ Pagamento confirmado:", fatura.external_id)
+    console.log(`📊 Status atual: ${fatura.status} para ${fatura.external_id}`)
 
-      return res.json(
-        formatSuccessResponse(
-          {
-            paid: true,
-            external_id: fatura.external_id,
-            amount: fatura.amount,
-            paid_at: fatura.paid_at,
-            redirect_url: fatura.redirect_url || "/obrigado",
-          },
-          "Pagamento confirmado",
-        ),
-      )
+    // Resposta baseada no status
+    const response = {
+      success: true,
+      external_id: fatura.external_id,
+      status: fatura.status,
+      amount: fatura.amount,
+      created_at: fatura.created_at,
+      expires_at: fatura.expires_at,
     }
 
-    if (isPaymentFailed(fatura.status)) {
-      const statusMessages = {
-        recusado: "Pagamento recusado",
-        cancelado: "Pagamento cancelado",
-        estornado: "Pagamento estornado",
-        vencido: "Pagamento vencido",
-      }
+    // Se foi pago
+    if (fatura.status === "pago") {
+      response.paid = true
+      response.paid_at = fatura.paid_at
+      response.redirect = fatura.redirect_url || "/obrigado"
 
-      return res.json(
-        formatErrorResponse(statusMessages[fatura.status] || "Pagamento não realizado", "PAYMENT_FAILED", {
-          status: fatura.status,
-        }),
-      )
+      console.log(`💰 Pagamento confirmado: ${fatura.external_id}`)
+    }
+    // Se ainda está pendente
+    else if (fatura.status === "pendente" || fatura.status === "processando") {
+      response.paid = false
+      response.message = "Aguardando pagamento"
+    }
+    // Se falhou (recusado, cancelado, etc.)
+    else {
+      response.paid = false
+      response.failed = true
+      response.message = this.getStatusMessage(fatura.status)
     }
 
-    // Status pendente ou processando
-    console.log("⏳ Pagamento pendente:", fatura.external_id)
-
-    res.json(
-      formatSuccessResponse(
-        {
-          paid: false,
-          status: fatura.status,
-          external_id: fatura.external_id,
-          amount: fatura.amount,
-          expires_at: fatura.expires_at,
-          qr_code: fatura.qr_code,
-          pix_code: fatura.pix_code,
-        },
-        "Aguardando pagamento",
-      ),
-    )
+    res.json(response)
   } catch (error) {
-    console.error("❌ Erro na verificação de status:", error.message)
+    console.error("❌ Erro ao verificar status:", error)
 
-    res
-      .status(500)
-      .json(formatErrorResponse("Erro interno na verificação", "STATUS_CHECK_ERROR", { message: error.message }))
+    res.status(500).json({
+      success: false,
+      error: "Erro interno do servidor",
+      code: "INTERNAL_ERROR",
+    })
   }
 })
 
-/**
- * GET /api/status/health
- * Health check específico para verificação de status
- */
-router.get("/status/health", (req, res) => {
-  res.json(
-    formatSuccessResponse(
-      {
-        endpoint: "/api/verifica-status",
-        method: "GET",
-        parameters: ["token"],
-        status: "active",
-      },
-      "Endpoint de verificação ativo",
-    ),
-  )
+// Função para obter mensagem amigável do status
+function getStatusMessage(status) {
+  const messages = {
+    pendente: "Aguardando pagamento",
+    processando: "Processando pagamento",
+    pago: "Pagamento confirmado",
+    recusado: "Pagamento recusado",
+    cancelado: "Pagamento cancelado",
+    estornado: "Pagamento estornado",
+    vencido: "Pagamento vencido",
+    erro: "Erro no pagamento",
+  }
+
+  return messages[status] || "Status desconhecido"
+}
+
+// Endpoint para estatísticas (opcional)
+router.get("/stats", async (req, res) => {
+  try {
+    const { supabase } = require("../supabaseClient")
+
+    const { data, error } = await supabase
+      .from("faturas")
+      .select("status")
+      .gte("created_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()) // últimas 24h
+
+    if (error) {
+      throw error
+    }
+
+    // Contar por status
+    const stats = data.reduce((acc, fatura) => {
+      acc[fatura.status] = (acc[fatura.status] || 0) + 1
+      return acc
+    }, {})
+
+    res.json({
+      success: true,
+      period: "últimas 24 horas",
+      stats: stats,
+      total: data.length,
+    })
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    })
+  }
 })
 
 module.exports = router

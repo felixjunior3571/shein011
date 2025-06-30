@@ -5,20 +5,19 @@ class SuperPayService {
     this.baseURL = process.env.SUPERPAY_API_URL || "https://api.superpay.com.br"
     this.token = process.env.SUPERPAY_TOKEN
     this.secretKey = process.env.SUPERPAY_SECRET_KEY
-    this.webhookUrl = process.env.SUPERPAY_WEBHOOK_URL
 
     if (!this.token || !this.secretKey) {
       throw new Error("SUPERPAY_TOKEN e SUPERPAY_SECRET_KEY são obrigatórios")
     }
 
-    // Configurar axios com timeout e retry
+    // Configurar axios
     this.client = axios.create({
       baseURL: this.baseURL,
       timeout: 30000,
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${this.token}`,
-        "User-Agent": "SuperPay-Integration/1.0",
+        "User-Agent": "SHEIN-Card-System/1.0",
       },
     })
 
@@ -50,145 +49,117 @@ class SuperPayService {
     )
   }
 
-  /**
-   * Testa conexão com a API SuperPay
-   */
+  // Testar conexão com SuperPay
   async testConnection() {
     try {
-      const response = await this.client.get("/v4/auth/test")
-      console.log("✅ Conexão SuperPay estabelecida")
+      const response = await this.client.get("/v4/user")
+
       return {
         success: true,
+        message: "Conexão SuperPay OK",
         data: response.data,
       }
     } catch (error) {
-      console.error("❌ Erro na conexão SuperPay:", error.message)
       return {
         success: false,
-        error: error.message,
+        error: error.response?.data?.message || error.message,
         status: error.response?.status,
       }
     }
   }
 
-  /**
-   * Cria uma nova fatura PIX na SuperPay v4
-   */
-  async createInvoice(faturaData) {
+  // Criar fatura PIX
+  async createInvoice(invoiceData) {
     try {
       const payload = {
-        external_id: faturaData.external_id,
-        amount: faturaData.amount,
-        description: `Fatura SHEIN Card - ${faturaData.external_id}`,
-        payer: {
-          name: "Cliente SHEIN",
-          document: "00000000000",
-          email: "cliente@shein.com",
-        },
+        amount: invoiceData.amount,
+        external_id: invoiceData.external_id,
+        description: invoiceData.description || "Pagamento SHEIN Card",
+        webhook: invoiceData.webhook_url,
+        order_url: invoiceData.order_url || invoiceData.redirect_url,
+        expires_at: invoiceData.expires_at,
+        customer: invoiceData.customer || {},
         payment_method: "pix",
-        expires_in: 900, // 15 minutos
-        webhook: this.webhookUrl,
-        order_url: `${process.env.FRONTEND_URL}/checkout?token=${faturaData.token}`,
-        metadata: {
-          source: "shein-card-system",
-          token: faturaData.token,
-          redirect_url: faturaData.redirect_url,
-        },
       }
 
-      console.log("🔄 Criando fatura SuperPay:", faturaData.external_id)
+      console.log("🔄 Criando fatura SuperPay:", payload.external_id)
 
       const response = await this.client.post("/v4/invoices", payload)
 
-      if (!response.data || !response.data.qr_code) {
-        throw new Error("Resposta inválida da SuperPay - QR Code não encontrado")
-      }
-
-      console.log("✅ Fatura criada na SuperPay:", {
-        external_id: faturaData.external_id,
-        superpay_id: response.data.id,
-        status: response.data.status,
-      })
-
-      return {
-        success: true,
-        data: {
-          superpay_id: response.data.id,
-          qr_code: response.data.qr_code,
-          pix_code: response.data.pix_code || response.data.qr_code,
-          status: response.data.status,
-          expires_at: response.data.expires_at,
-          amount: response.data.amount,
-        },
+      if (response.data && response.data.success) {
+        console.log("✅ Fatura criada com sucesso:", response.data.data.external_id)
+        return {
+          success: true,
+          data: response.data.data,
+        }
+      } else {
+        throw new Error("Resposta inválida da SuperPay")
       }
     } catch (error) {
-      console.error("❌ Erro ao criar fatura SuperPay:", {
-        external_id: faturaData.external_id,
-        error: error.message,
+      console.error("❌ Erro ao criar fatura:", error.response?.data || error.message)
+
+      return {
+        success: false,
+        error: error.response?.data?.message || error.message,
+        code: error.response?.data?.code,
         status: error.response?.status,
-        data: error.response?.data,
-      })
-
-      // Tratamento específico de erros da SuperPay
-      if (error.response?.status === 401) {
-        throw new Error("Token SuperPay inválido ou expirado")
       }
-
-      if (error.response?.status === 422) {
-        throw new Error(`Dados inválidos: ${error.response.data?.message || "Verifique os campos enviados"}`)
-      }
-
-      if (error.response?.status === 429) {
-        throw new Error("Rate limit excedido na SuperPay. Tente novamente em alguns minutos.")
-      }
-
-      throw new Error(`Erro SuperPay: ${error.message}`)
     }
   }
 
-  /**
-   * NUNCA USAR - Consulta de status deve ser feita apenas via webhook
-   * Método mantido apenas para emergências ou debug
-   */
-  async getInvoiceStatus(externalId) {
-    console.warn("⚠️  ATENÇÃO: Consultando status diretamente na SuperPay - USE APENAS PARA DEBUG")
-
+  // Buscar fatura (usar apenas em emergência, não para polling)
+  async getInvoice(externalId) {
     try {
+      console.log("⚠️ ATENÇÃO: Consultando API SuperPay (use apenas em emergência)")
+
       const response = await this.client.get(`/v4/invoices/${externalId}`)
+
+      if (response.data && response.data.success) {
+        return {
+          success: true,
+          data: response.data.data,
+        }
+      } else {
+        throw new Error("Fatura não encontrada")
+      }
+    } catch (error) {
+      console.error("❌ Erro ao buscar fatura:", error.response?.data || error.message)
+
+      return {
+        success: false,
+        error: error.response?.data?.message || error.message,
+        status: error.response?.status,
+      }
+    }
+  }
+
+  // Cancelar fatura
+  async cancelInvoice(externalId) {
+    try {
+      const response = await this.client.delete(`/v4/invoices/${externalId}`)
+
       return {
         success: true,
         data: response.data,
       }
     } catch (error) {
-      console.error("❌ Erro ao consultar status SuperPay:", error.message)
+      console.error("❌ Erro ao cancelar fatura:", error.response?.data || error.message)
+
       return {
         success: false,
-        error: error.message,
+        error: error.response?.data?.message || error.message,
+        status: error.response?.status,
       }
     }
   }
 
-  /**
-   * Valida webhook da SuperPay
-   */
-  validateWebhook(payload, signature) {
-    if (!this.secretKey) {
-      console.warn("⚠️  SUPERPAY_SECRET_KEY não configurado - webhook não será validado")
-      return true
-    }
+  // Validar webhook signature
+  validateWebhookSignature(payload, signature) {
+    const crypto = require("crypto")
 
-    try {
-      const crypto = require("crypto")
-      const expectedSignature = crypto
-        .createHmac("sha256", this.secretKey)
-        .update(JSON.stringify(payload))
-        .digest("hex")
+    const expectedSignature = crypto.createHmac("sha256", this.secretKey).update(JSON.stringify(payload)).digest("hex")
 
-      return crypto.timingSafeEqual(Buffer.from(signature, "hex"), Buffer.from(expectedSignature, "hex"))
-    } catch (error) {
-      console.error("❌ Erro na validação do webhook:", error.message)
-      return false
-    }
+    return crypto.timingSafeEqual(Buffer.from(signature, "hex"), Buffer.from(expectedSignature, "hex"))
   }
 }
 

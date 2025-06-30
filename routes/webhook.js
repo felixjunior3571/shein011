@@ -1,106 +1,172 @@
 const express = require("express")
-const router = express.Router()
-const SuperPayService = require("../services/superpayService")
 const { updateFaturaStatus, getFaturaByExternalId } = require("../supabaseClient")
-const { mapSuperpayStatus, formatErrorResponse, formatSuccessResponse } = require("../utils/generateToken")
+const SuperPayService = require("../services/superpayService")
 
-const superPayService = new SuperPayService()
+const router = express.Router()
 
-/**
- * POST /api/webhook/superpay
- * Recebe notificações de status da SuperPayBR
- */
+// Mapeamento de códigos de status SuperPay
+const STATUS_MAP = {
+  1: "pendente", // Aguardando pagamento
+  2: "processando", // Processando
+  3: "processando", // Em análise
+  4: "processando", // Aprovado (processando)
+  5: "pago", // Pago/Confirmado
+  6: "recusado", // Recusado
+  7: "cancelado", // Cancelado
+  8: "estornado", // Estornado
+  9: "vencido", // Vencido
+  10: "erro", // Erro
+}
+
+// Webhook principal da SuperPay
 router.post("/superpay", async (req, res) => {
   try {
-    const payload = req.body
-    const signature = req.headers["x-superpay-signature"]
-
-    console.log("🔔 Webhook recebido:", {
-      external_id: payload.external_id,
-      status_code: payload.status?.code,
-      timestamp: new Date().toISOString(),
+    console.log("🔔 Webhook SuperPay recebido:", {
+      headers: req.headers,
+      body: req.body,
     })
 
-    // Validação básica do payload
-    if (!payload.external_id || !payload.status) {
-      console.error("❌ Webhook inválido - campos obrigatórios ausentes")
-      return res.status(400).json(formatErrorResponse("Payload inválido", "INVALID_WEBHOOK_PAYLOAD"))
+    const webhookData = req.body
+
+    // Validações básicas
+    if (!webhookData || !webhookData.external_id) {
+      console.error("❌ Webhook inválido: external_id não encontrado")
+      return res.status(400).json({
+        success: false,
+        error: "external_id obrigatório",
+      })
     }
 
-    // Validar assinatura (se configurada)
-    if (signature && !superPayService.validateWebhook(payload, signature)) {
-      console.error("❌ Webhook com assinatura inválida")
-      return res.status(401).json(formatErrorResponse("Assinatura inválida", "INVALID_SIGNATURE"))
+    if (!webhookData.status || !webhookData.status.code) {
+      console.error("❌ Webhook inválido: status.code não encontrado")
+      return res.status(400).json({
+        success: false,
+        error: "status.code obrigatório",
+      })
     }
 
-    // Buscar fatura no banco
-    const fatura = await getFaturaByExternalId(payload.external_id)
+    const { external_id, status } = webhookData
+    const statusCode = Number.parseInt(status.code)
 
+    console.log(`🔄 Processando webhook: ${external_id} - Status: ${statusCode}`)
+
+    // Validar assinatura (opcional mas recomendado)
+    const signature = req.headers["x-superpay-signature"]
+    if (signature && process.env.SUPERPAY_SECRET_KEY) {
+      const superPayService = new SuperPayService()
+      const isValidSignature = superPayService.validateWebhookSignature(webhookData, signature)
+
+      if (!isValidSignature) {
+        console.error("❌ Assinatura do webhook inválida")
+        return res.status(401).json({
+          success: false,
+          error: "Assinatura inválida",
+        })
+      }
+    }
+
+    // Verificar se a fatura existe
+    const fatura = await getFaturaByExternalId(external_id)
     if (!fatura) {
-      console.error("❌ Fatura não encontrada:", payload.external_id)
-      return res.status(404).json(formatErrorResponse("Fatura não encontrada", "INVOICE_NOT_FOUND"))
+      console.error(`❌ Fatura não encontrada: ${external_id}`)
+      return res.status(404).json({
+        success: false,
+        error: "Fatura não encontrada",
+      })
     }
 
-    // Mapear status da SuperPay
-    const newStatus = mapSuperpayStatus(payload.status.code)
+    // Mapear status
+    const newStatus = STATUS_MAP[statusCode] || "desconhecido"
 
-    // Preparar dados de atualização
-    const updateData = {
-      status: newStatus,
-      updated_at: new Date().toISOString(),
+    console.log(`🔄 Atualizando status: ${external_id} de "${fatura.status}" para "${newStatus}"`)
+
+    // Atualizar status no Supabase
+    const updatedFatura = await updateFaturaStatus(external_id, newStatus, webhookData)
+
+    // Log específico para pagamentos confirmados
+    if (newStatus === "pago") {
+      console.log(`💰 PAGAMENTO CONFIRMADO: ${external_id} - R$ ${fatura.amount}`)
     }
 
-    // Se pagamento confirmado, salvar timestamp
-    if (payload.status.code === 5) {
-      updateData.paid_at = new Date().toISOString()
-      console.log("💰 Pagamento confirmado:", payload.external_id)
-    }
-
-    // Atualizar no banco
-    const updatedFatura = await updateFaturaStatus(payload.external_id, updateData)
-
-    console.log("✅ Webhook processado:", {
-      external_id: payload.external_id,
+    // Resposta de sucesso (importante para SuperPay)
+    res.status(200).json({
+      success: true,
+      message: "Webhook processado com sucesso",
+      external_id: external_id,
       old_status: fatura.status,
       new_status: newStatus,
-      paid_at: updateData.paid_at,
     })
-
-    // Resposta para SuperPay
-    res.json(
-      formatSuccessResponse(
-        {
-          external_id: payload.external_id,
-          processed_at: new Date().toISOString(),
-          status: newStatus,
-        },
-        "Webhook processado com sucesso",
-      ),
-    )
   } catch (error) {
-    console.error("❌ Erro no webhook:", error.message)
+    console.error("❌ Erro ao processar webhook:", error)
 
-    // Sempre responder 200 para evitar reenvios desnecessários
-    res.status(200).json(formatErrorResponse("Erro interno no webhook", "WEBHOOK_ERROR", { message: error.message }))
+    // Sempre retornar 200 para evitar reenvios desnecessários
+    res.status(200).json({
+      success: false,
+      error: "Erro interno",
+      message: "Webhook recebido mas não processado",
+    })
   }
 })
 
-/**
- * GET /api/webhook/test
- * Testa o endpoint de webhook
- */
-router.get("/test", (req, res) => {
-  res.json(
-    formatSuccessResponse(
-      {
-        endpoint: "/api/webhook/superpay",
-        method: "POST",
-        status: "active",
-        timestamp: new Date().toISOString(),
+// Endpoint para testar webhook (desenvolvimento)
+router.post("/test", async (req, res) => {
+  try {
+    const testData = {
+      external_id: "FRETE_TEST_123456",
+      status: {
+        code: 5,
+        name: "Pago",
       },
-      "Endpoint de webhook ativo",
-    ),
-  )
+      amount: 29.9,
+      paid_at: new Date().toISOString(),
+    }
+
+    console.log("🧪 Testando webhook com dados:", testData)
+
+    // Simular processamento
+    const result = await updateFaturaStatus(testData.external_id, "pago", testData)
+
+    res.json({
+      success: true,
+      message: "Webhook de teste processado",
+      data: result,
+    })
+  } catch (error) {
+    console.error("❌ Erro no teste de webhook:", error)
+
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    })
+  }
+})
+
+// Endpoint para listar webhooks recebidos (debug)
+router.get("/debug", async (req, res) => {
+  try {
+    const { supabase } = require("../supabaseClient")
+
+    const { data, error } = await supabase
+      .from("faturas")
+      .select("external_id, status, webhook_data, created_at, updated_at")
+      .order("updated_at", { ascending: false })
+      .limit(20)
+
+    if (error) {
+      throw error
+    }
+
+    res.json({
+      success: true,
+      data: data,
+      total: data.length,
+    })
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    })
+  }
 })
 
 module.exports = router

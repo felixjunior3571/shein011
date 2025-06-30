@@ -1,143 +1,110 @@
 const crypto = require("crypto")
 
-/**
- * Gera um token seguro para verificação de status
- */
+// Gerar external_id único no formato FRETE_timestamp_random
+function generateExternalId() {
+  const timestamp = Date.now()
+  const random = Math.random().toString(36).substring(2, 8).toUpperCase()
+  return `FRETE_${timestamp}_${random}`
+}
+
+// Gerar token seguro para verificação
 function generateSecureToken() {
   return crypto.randomBytes(32).toString("hex")
 }
 
-/**
- * Gera external_id único no formato FRETE_timestamp_random
- */
-function generateExternalId() {
-  const timestamp = Date.now()
-  const random = crypto.randomBytes(4).toString("hex").toUpperCase()
-  return `FRETE_${timestamp}_${random}`
-}
-
-/**
- * Mapeia códigos de status da SuperPay para status internos
- */
-function mapSuperpayStatus(statusCode) {
-  const statusMap = {
-    1: "pendente", // Aguardando pagamento
-    2: "processando", // Processando
-    3: "pendente", // Aguardando
-    4: "processando", // Em análise
-    5: "pago", // Pago/Aprovado
-    6: "recusado", // Recusado
-    7: "cancelado", // Cancelado
-    8: "estornado", // Estornado
-    9: "vencido", // Vencido/Expirado
-    10: "cancelado", // Cancelado pelo usuário
+// Gerar token JWT-like (opcional, mais seguro)
+function generateJWTLikeToken(payload = {}) {
+  const header = {
+    typ: "JWT",
+    alg: "HS256",
   }
 
-  return statusMap[statusCode] || "desconhecido"
+  const data = {
+    ...payload,
+    iat: Math.floor(Date.now() / 1000),
+    exp: Math.floor(Date.now() / 1000) + 15 * 60, // 15 minutos
+  }
+
+  const headerEncoded = Buffer.from(JSON.stringify(header)).toString("base64url")
+  const payloadEncoded = Buffer.from(JSON.stringify(data)).toString("base64url")
+
+  const signature = crypto
+    .createHmac("sha256", process.env.JWT_SECRET || "superpay-secret-key")
+    .update(`${headerEncoded}.${payloadEncoded}`)
+    .digest("base64url")
+
+  return `${headerEncoded}.${payloadEncoded}.${signature}`
 }
 
-/**
- * Verifica se o token está expirado (15 minutos)
- */
-function isTokenExpired(createdAt) {
-  const now = new Date()
-  const created = new Date(createdAt)
-  const diffMinutes = (now - created) / (1000 * 60)
+// Verificar se token JWT-like é válido
+function verifyJWTLikeToken(token) {
+  try {
+    const [headerEncoded, payloadEncoded, signature] = token.split(".")
 
-  return diffMinutes > 15
-}
+    if (!headerEncoded || !payloadEncoded || !signature) {
+      return { valid: false, error: "Token malformado" }
+    }
 
-/**
- * Verifica se o pagamento foi bem-sucedido
- */
-function isPaymentSuccessful(status) {
-  return status === "pago"
-}
+    // Verificar assinatura
+    const expectedSignature = crypto
+      .createHmac("sha256", process.env.JWT_SECRET || "superpay-secret-key")
+      .update(`${headerEncoded}.${payloadEncoded}`)
+      .digest("base64url")
 
-/**
- * Verifica se o pagamento falhou
- */
-function isPaymentFailed(status) {
-  return ["recusado", "cancelado", "estornado", "vencido"].includes(status)
-}
+    if (signature !== expectedSignature) {
+      return { valid: false, error: "Assinatura inválida" }
+    }
 
-/**
- * Formata resposta de erro padronizada
- */
-function formatErrorResponse(message, code = "ERROR", details = null) {
-  return {
-    success: false,
-    error: message,
-    code: code,
-    details: details,
-    timestamp: new Date().toISOString(),
+    // Decodificar payload
+    const payload = JSON.parse(Buffer.from(payloadEncoded, "base64url").toString())
+
+    // Verificar expiração
+    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
+      return { valid: false, error: "Token expirado" }
+    }
+
+    return { valid: true, payload }
+  } catch (error) {
+    return { valid: false, error: "Erro ao verificar token" }
   }
 }
 
-/**
- * Formata resposta de sucesso padronizada
- */
-function formatSuccessResponse(data, message = "Sucesso") {
-  return {
-    success: true,
-    message: message,
-    data: data,
-    timestamp: new Date().toISOString(),
-  }
+// Validar formato do external_id
+function isValidExternalId(externalId) {
+  const pattern = /^FRETE_\d+_[A-Z0-9]+$/
+  return pattern.test(externalId)
 }
 
-/**
- * Valida dados obrigatórios do checkout
- */
-function validateCheckoutData(data) {
-  const required = ["amount"]
-  const missing = required.filter((field) => !data[field])
-
-  if (missing.length > 0) {
-    throw new Error(`Campos obrigatórios ausentes: ${missing.join(", ")}`)
-  }
-
-  if (data.amount <= 0) {
-    throw new Error("Valor deve ser maior que zero")
-  }
-
-  if (data.amount > 10000) {
-    throw new Error("Valor máximo excedido (R$ 10.000)")
-  }
-
-  return true
+// Gerar hash para webhook validation
+function generateWebhookHash(data, secret) {
+  return crypto.createHmac("sha256", secret).update(JSON.stringify(data)).digest("hex")
 }
 
-/**
- * Gera dados completos para nova fatura
- */
-function generateFaturaData(inputData) {
-  const now = new Date()
-  const expiresAt = new Date(now.getTime() + 15 * 60 * 1000) // 15 minutos
+// Verificar hash do webhook
+function verifyWebhookHash(data, receivedHash, secret) {
+  const expectedHash = generateWebhookHash(data, secret)
+  return crypto.timingSafeEqual(Buffer.from(receivedHash, "hex"), Buffer.from(expectedHash, "hex"))
+}
 
-  return {
-    external_id: generateExternalId(),
-    token: generateSecureToken(),
-    status: "pendente",
-    amount: Number.parseFloat(inputData.amount),
-    customer_name: inputData.customer_name || "Cliente SHEIN",
-    customer_email: inputData.customer_email || "cliente@shein.com",
-    customer_phone: inputData.customer_phone || "",
-    created_at: now.toISOString(),
-    expires_at: expiresAt.toISOString(),
-    redirect_url: inputData.redirect_url || "/obrigado",
-  }
+// Função para verificar se pagamento foi bem-sucedido
+function isPaymentSuccessful(statusCode) {
+  return statusCode === 5 || statusCode === "5"
+}
+
+// Função para verificar se pagamento falhou
+function isPaymentFailed(statusCode) {
+  const failedCodes = [6, 7, 8, 9, "6", "7", "8", "9"]
+  return failedCodes.includes(statusCode)
 }
 
 module.exports = {
-  generateSecureToken,
   generateExternalId,
-  mapSuperpayStatus,
-  isTokenExpired,
+  generateSecureToken,
+  generateJWTLikeToken,
+  verifyJWTLikeToken,
+  isValidExternalId,
+  generateWebhookHash,
+  verifyWebhookHash,
   isPaymentSuccessful,
   isPaymentFailed,
-  formatErrorResponse,
-  formatSuccessResponse,
-  validateCheckoutData,
-  generateFaturaData,
 }

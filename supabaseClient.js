@@ -1,29 +1,18 @@
 const { createClient } = require("@supabase/supabase-js")
 
-if (!process.env.SUPABASE_URL) {
-  throw new Error("SUPABASE_URL é obrigatória")
-}
-
-if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-  throw new Error("SUPABASE_SERVICE_ROLE_KEY é obrigatória")
-}
-
+// Configuração do Supabase
 const supabaseUrl = process.env.SUPABASE_URL
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 
-// Cliente Supabase com configurações otimizadas
-const supabase = createClient(supabaseUrl, supabaseKey, {
+if (!supabaseUrl || !supabaseServiceKey) {
+  throw new Error("Variáveis SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY são obrigatórias")
+}
+
+// Cliente Supabase com service role (para operações de servidor)
+const supabase = createClient(supabaseUrl, supabaseServiceKey, {
   auth: {
     autoRefreshToken: false,
     persistSession: false,
-  },
-  db: {
-    schema: "public",
-  },
-  global: {
-    headers: {
-      "x-application-name": "superpay-integration",
-    },
   },
 })
 
@@ -33,14 +22,14 @@ async function testConnection() {
     const { data, error } = await supabase.from("faturas").select("count(*)").limit(1)
 
     if (error) {
-      console.error("❌ Erro na conexão Supabase:", error.message)
+      console.error("❌ Erro ao conectar com Supabase:", error.message)
       return false
     }
 
-    console.log("✅ Conexão Supabase estabelecida com sucesso")
+    console.log("✅ Supabase conectado com sucesso")
     return true
-  } catch (err) {
-    console.error("❌ Erro ao testar conexão Supabase:", err.message)
+  } catch (error) {
+    console.error("❌ Erro de conexão Supabase:", error.message)
     return false
   }
 }
@@ -51,42 +40,15 @@ async function createFatura(faturaData) {
     const { data, error } = await supabase.from("faturas").insert([faturaData]).select().single()
 
     if (error) {
-      console.error("Erro ao criar fatura:", error)
-      throw new Error(`Erro no banco: ${error.message}`)
+      console.error("❌ Erro ao criar fatura:", error)
+      throw new Error(`Erro ao salvar fatura: ${error.message}`)
     }
 
     console.log("✅ Fatura criada:", data.external_id)
     return data
-  } catch (err) {
-    console.error("Erro ao criar fatura:", err)
-    throw err
-  }
-}
-
-// Função para atualizar status da fatura
-async function updateFaturaStatus(externalId, statusData) {
-  try {
-    const { data, error } = await supabase
-      .from("faturas")
-      .update(statusData)
-      .eq("external_id", externalId)
-      .select()
-      .single()
-
-    if (error) {
-      console.error("Erro ao atualizar fatura:", error)
-      throw new Error(`Erro no banco: ${error.message}`)
-    }
-
-    if (!data) {
-      throw new Error("Fatura não encontrada")
-    }
-
-    console.log("✅ Fatura atualizada:", externalId, statusData)
-    return data
-  } catch (err) {
-    console.error("Erro ao atualizar fatura:", err)
-    throw err
+  } catch (error) {
+    console.error("❌ Erro ao criar fatura:", error)
+    throw error
   }
 }
 
@@ -99,13 +61,13 @@ async function getFaturaByToken(token) {
       if (error.code === "PGRST116") {
         return null // Token não encontrado
       }
-      throw new Error(`Erro no banco: ${error.message}`)
+      throw new Error(`Erro ao buscar fatura: ${error.message}`)
     }
 
     return data
-  } catch (err) {
-    console.error("Erro ao buscar fatura por token:", err)
-    throw err
+  } catch (error) {
+    console.error("❌ Erro ao buscar fatura por token:", error)
+    throw error
   }
 }
 
@@ -118,31 +80,67 @@ async function getFaturaByExternalId(externalId) {
       if (error.code === "PGRST116") {
         return null // Fatura não encontrada
       }
-      throw new Error(`Erro no banco: ${error.message}`)
+      throw new Error(`Erro ao buscar fatura: ${error.message}`)
     }
 
     return data
-  } catch (err) {
-    console.error("Erro ao buscar fatura por external_id:", err)
-    throw err
+  } catch (error) {
+    console.error("❌ Erro ao buscar fatura por external_id:", error)
+    throw error
   }
 }
 
-// Função para limpeza de faturas expiradas
+// Função para atualizar status da fatura
+async function updateFaturaStatus(externalId, status, webhookData = null) {
+  try {
+    const updateData = {
+      status,
+      updated_at: new Date().toISOString(),
+    }
+
+    // Se foi pago, marcar paid_at
+    if (status === "pago") {
+      updateData.paid_at = new Date().toISOString()
+    }
+
+    // Salvar dados do webhook se fornecidos
+    if (webhookData) {
+      updateData.webhook_data = webhookData
+    }
+
+    const { data, error } = await supabase
+      .from("faturas")
+      .update(updateData)
+      .eq("external_id", externalId)
+      .select()
+      .single()
+
+    if (error) {
+      throw new Error(`Erro ao atualizar fatura: ${error.message}`)
+    }
+
+    console.log(`✅ Fatura ${externalId} atualizada para: ${status}`)
+    return data
+  } catch (error) {
+    console.error("❌ Erro ao atualizar status:", error)
+    throw error
+  }
+}
+
+// Função para limpar faturas expiradas
 async function cleanupExpiredFaturas() {
   try {
     const { data, error } = await supabase.rpc("cleanup_expired_faturas")
 
     if (error) {
-      console.error("Erro na limpeza:", error)
-      return false
+      throw new Error(`Erro ao limpar faturas: ${error.message}`)
     }
 
-    console.log("✅ Limpeza de faturas expiradas executada")
-    return true
-  } catch (err) {
-    console.error("Erro na limpeza:", err)
-    return false
+    console.log(`🧹 ${data} faturas expiradas removidas`)
+    return data
+  } catch (error) {
+    console.error("❌ Erro ao limpar faturas:", error)
+    throw error
   }
 }
 
@@ -150,8 +148,8 @@ module.exports = {
   supabase,
   testConnection,
   createFatura,
-  updateFaturaStatus,
   getFaturaByToken,
   getFaturaByExternalId,
+  updateFaturaStatus,
   cleanupExpiredFaturas,
 }

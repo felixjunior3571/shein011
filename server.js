@@ -1,3 +1,5 @@
+require("dotenv").config()
+
 const express = require("express")
 const cors = require("cors")
 const helmet = require("helmet")
@@ -5,22 +7,26 @@ const rateLimit = require("express-rate-limit")
 const { testConnection } = require("./supabaseClient")
 const SuperPayService = require("./services/superpayService")
 
-// Importar rotas
-const checkoutRoutes = require("./routes/checkout")
-const webhookRoutes = require("./routes/webhook")
-const statusRoutes = require("./routes/status")
-
 const app = express()
 const PORT = process.env.PORT || 3000
 
-// Middleware de segurança
+// Verificar variáveis de ambiente
+const requiredEnvVars = ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "SUPERPAY_TOKEN", "SUPERPAY_SECRET_KEY"]
+const missingVars = requiredEnvVars.filter((varName) => !process.env[varName])
+
+if (missingVars.length > 0) {
+  console.error("❌ Variáveis de ambiente obrigatórias não configuradas:")
+  missingVars.forEach((varName) => console.error(`   - ${varName}`))
+  process.exit(1)
+}
+
+// Middlewares de segurança
 app.use(
   helmet({
-    contentSecurityPolicy: false, // Desabilitar CSP para desenvolvimento
+    contentSecurityPolicy: false,
   }),
 )
 
-// CORS configurado
 app.use(
   cors({
     origin: process.env.ALLOWED_ORIGINS?.split(",") || ["http://localhost:3000"],
@@ -33,22 +39,17 @@ app.use(
 // Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 100, // máximo 100 requests por IP
-  message: {
-    error: "Muitas requisições. Tente novamente em 15 minutos.",
-    code: "RATE_LIMIT_EXCEEDED",
-  },
-  standardHeaders: true,
-  legacyHeaders: false,
+  max: 100,
+  message: { error: "Muitas requisições. Tente novamente em 15 minutos." },
 })
 
-app.use(limiter)
+app.use("/api/", limiter)
 
-// Middleware para parsing JSON
+// Parsing JSON
 app.use(express.json({ limit: "10mb" }))
 app.use(express.urlencoded({ extended: true, limit: "10mb" }))
 
-// Middleware de log
+// Logging
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`)
   next()
@@ -59,52 +60,44 @@ app.get("/health", async (req, res) => {
   try {
     const supabaseOk = await testConnection()
     const superPayService = new SuperPayService()
-    const superPayOk = await superPayService.testConnection()
+    const superPayTest = await superPayService.testConnection()
 
-    const status = {
+    res.json({
       status: "ok",
       timestamp: new Date().toISOString(),
       services: {
         supabase: supabaseOk ? "connected" : "disconnected",
-        superpay: superPayOk.success ? "connected" : "disconnected",
+        superpay: superPayTest.success ? "connected" : "disconnected",
       },
       version: "1.0.0",
-    }
-
-    res.json(status)
+    })
   } catch (error) {
-    console.error("❌ Health check error:", error)
     res.status(500).json({
       status: "error",
-      timestamp: new Date().toISOString(),
       error: error.message,
     })
   }
 })
 
-// Rotas da API
-app.use("/api/checkout", checkoutRoutes)
-app.use("/api/webhook", webhookRoutes)
-app.use("/api", statusRoutes)
+// Rotas
+app.use("/api/checkout", require("./routes/checkout"))
+app.use("/api/webhook", require("./routes/webhook"))
+app.use("/api", require("./routes/status"))
 
-// Middleware de erro global
+// Error handler
 app.use((error, req, res, next) => {
   console.error("❌ Erro não tratado:", error)
-
   res.status(500).json({
     success: false,
     error: "Erro interno do servidor",
-    code: "INTERNAL_SERVER_ERROR",
-    timestamp: new Date().toISOString(),
   })
 })
 
-// Rota 404
+// 404 handler
 app.use("*", (req, res) => {
   res.status(404).json({
     success: false,
     error: "Endpoint não encontrado",
-    code: "NOT_FOUND",
     path: req.originalUrl,
   })
 })
@@ -112,7 +105,6 @@ app.use("*", (req, res) => {
 // Iniciar servidor
 async function startServer() {
   try {
-    // Testar conexões
     console.log("🔄 Testando conexões...")
 
     const supabaseOk = await testConnection()
@@ -120,37 +112,18 @@ async function startServer() {
       throw new Error("Falha na conexão com Supabase")
     }
 
-    const superPayService = new SuperPayService()
-    const superPayTest = await superPayService.testConnection()
-    if (!superPayTest.success) {
-      console.warn("⚠️ SuperPay não conectado:", superPayTest.error)
-    }
-
-    // Iniciar servidor
     app.listen(PORT, () => {
-      console.log(`🚀 Servidor rodando na porta ${PORT}`)
-      console.log(`📍 Health check: http://localhost:${PORT}/health`)
-      console.log(`🔔 Webhook URL: http://localhost:${PORT}/api/webhook/superpay`)
+      console.log(`🚀 Servidor SuperPay rodando na porta ${PORT}`)
+      console.log(`📍 Health: http://localhost:${PORT}/health`)
+      console.log(`🔔 Webhook: http://localhost:${PORT}/api/webhook/superpay`)
       console.log(`💳 Checkout: http://localhost:${PORT}/api/checkout`)
     })
   } catch (error) {
-    console.error("❌ Erro ao iniciar servidor:", error.message)
+    console.error("❌ Erro ao iniciar:", error.message)
     process.exit(1)
   }
 }
 
-// Graceful shutdown
-process.on("SIGTERM", () => {
-  console.log("🛑 Recebido SIGTERM, encerrando servidor...")
-  process.exit(0)
-})
-
-process.on("SIGINT", () => {
-  console.log("🛑 Recebido SIGINT, encerrando servidor...")
-  process.exit(0)
-})
-
-// Iniciar
 startServer()
 
 module.exports = app
