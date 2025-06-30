@@ -1,22 +1,29 @@
 const { createClient } = require("@supabase/supabase-js")
 
-// Verificar se as variáveis de ambiente estão configuradas
 if (!process.env.SUPABASE_URL) {
-  throw new Error("❌ SUPABASE_URL não configurada")
+  throw new Error("SUPABASE_URL é obrigatória")
 }
 
 if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-  throw new Error("❌ SUPABASE_SERVICE_ROLE_KEY não configurada")
+  throw new Error("SUPABASE_SERVICE_ROLE_KEY é obrigatória")
 }
 
-// Criar cliente Supabase com service role key (acesso total)
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
+const supabaseUrl = process.env.SUPABASE_URL
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+
+// Cliente Supabase com configurações otimizadas
+const supabase = createClient(supabaseUrl, supabaseKey, {
   auth: {
     autoRefreshToken: false,
     persistSession: false,
   },
   db: {
     schema: "public",
+  },
+  global: {
+    headers: {
+      "x-application-name": "superpay-integration",
+    },
   },
 })
 
@@ -26,33 +33,60 @@ async function testConnection() {
     const { data, error } = await supabase.from("faturas").select("count(*)").limit(1)
 
     if (error) {
-      console.error("❌ Erro ao conectar com Supabase:", error.message)
+      console.error("❌ Erro na conexão Supabase:", error.message)
       return false
     }
 
-    console.log("✅ Conexão com Supabase estabelecida")
+    console.log("✅ Conexão Supabase estabelecida com sucesso")
     return true
-  } catch (error) {
-    console.error("❌ Erro de conexão Supabase:", error.message)
+  } catch (err) {
+    console.error("❌ Erro ao testar conexão Supabase:", err.message)
     return false
   }
 }
 
-// Função para inserir fatura
-async function insertFatura(faturaData) {
+// Função para criar fatura
+async function createFatura(faturaData) {
   try {
     const { data, error } = await supabase.from("faturas").insert([faturaData]).select().single()
 
     if (error) {
-      console.error("❌ Erro ao inserir fatura:", error)
-      throw error
+      console.error("Erro ao criar fatura:", error)
+      throw new Error(`Erro no banco: ${error.message}`)
     }
 
-    console.log("✅ Fatura inserida:", data.external_id)
+    console.log("✅ Fatura criada:", data.external_id)
     return data
-  } catch (error) {
-    console.error("❌ Erro na inserção:", error)
-    throw error
+  } catch (err) {
+    console.error("Erro ao criar fatura:", err)
+    throw err
+  }
+}
+
+// Função para atualizar status da fatura
+async function updateFaturaStatus(externalId, statusData) {
+  try {
+    const { data, error } = await supabase
+      .from("faturas")
+      .update(statusData)
+      .eq("external_id", externalId)
+      .select()
+      .single()
+
+    if (error) {
+      console.error("Erro ao atualizar fatura:", error)
+      throw new Error(`Erro no banco: ${error.message}`)
+    }
+
+    if (!data) {
+      throw new Error("Fatura não encontrada")
+    }
+
+    console.log("✅ Fatura atualizada:", externalId, statusData)
+    return data
+  } catch (err) {
+    console.error("Erro ao atualizar fatura:", err)
+    throw err
   }
 }
 
@@ -65,13 +99,13 @@ async function getFaturaByToken(token) {
       if (error.code === "PGRST116") {
         return null // Token não encontrado
       }
-      throw error
+      throw new Error(`Erro no banco: ${error.message}`)
     }
 
     return data
-  } catch (error) {
-    console.error("❌ Erro ao buscar fatura por token:", error)
-    throw error
+  } catch (err) {
+    console.error("Erro ao buscar fatura por token:", err)
+    throw err
   }
 }
 
@@ -82,80 +116,42 @@ async function getFaturaByExternalId(externalId) {
 
     if (error) {
       if (error.code === "PGRST116") {
-        return null // External ID não encontrado
+        return null // Fatura não encontrada
       }
-      throw error
+      throw new Error(`Erro no banco: ${error.message}`)
     }
 
     return data
-  } catch (error) {
-    console.error("❌ Erro ao buscar fatura por external_id:", error)
-    throw error
+  } catch (err) {
+    console.error("Erro ao buscar fatura por external_id:", err)
+    throw err
   }
 }
 
-// Função para atualizar status da fatura
-async function updateFaturaStatus(externalId, statusData) {
+// Função para limpeza de faturas expiradas
+async function cleanupExpiredFaturas() {
   try {
-    const updateData = {
-      status: statusData.status,
-      webhook_data: statusData.webhookData,
-      updated_at: new Date().toISOString(),
-    }
-
-    // Se foi pago, adicionar paid_at
-    if (statusData.status === "pago") {
-      updateData.paid_at = new Date().toISOString()
-    }
-
-    const { data, error } = await supabase
-      .from("faturas")
-      .update(updateData)
-      .eq("external_id", externalId)
-      .select()
-      .single()
+    const { data, error } = await supabase.rpc("cleanup_expired_faturas")
 
     if (error) {
-      console.error("❌ Erro ao atualizar fatura:", error)
-      throw error
+      console.error("Erro na limpeza:", error)
+      return false
     }
 
-    console.log(`✅ Fatura ${externalId} atualizada para: ${statusData.status}`)
-    return data
-  } catch (error) {
-    console.error("❌ Erro na atualização:", error)
-    throw error
-  }
-}
-
-// Função para limpar faturas expiradas (opcional)
-async function cleanExpiredFaturas() {
-  try {
-    const { data, error } = await supabase
-      .from("faturas")
-      .delete()
-      .lt("expires_at", new Date().toISOString())
-      .eq("status", "pendente")
-
-    if (error) {
-      console.error("❌ Erro ao limpar faturas expiradas:", error)
-      return
-    }
-
-    if (data && data.length > 0) {
-      console.log(`🧹 ${data.length} faturas expiradas removidas`)
-    }
-  } catch (error) {
-    console.error("❌ Erro na limpeza:", error)
+    console.log("✅ Limpeza de faturas expiradas executada")
+    return true
+  } catch (err) {
+    console.error("Erro na limpeza:", err)
+    return false
   }
 }
 
 module.exports = {
   supabase,
   testConnection,
-  insertFatura,
+  createFatura,
+  updateFaturaStatus,
   getFaturaByToken,
   getFaturaByExternalId,
-  updateFaturaStatus,
-  cleanExpiredFaturas,
+  cleanupExpiredFaturas,
 }

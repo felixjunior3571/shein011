@@ -12,11 +12,25 @@ const app = express()
 const PORT = process.env.PORT || 3000
 
 // Middlewares de segurança
-app.use(helmet())
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        scriptSrc: ["'self'"],
+        imgSrc: ["'self'", "data:", "https:"],
+      },
+    },
+  }),
+)
+
 app.use(
   cors({
-    origin: process.env.ALLOWED_ORIGINS?.split(",") || ["http://localhost:3000"],
+    origin: process.env.FRONTEND_URL || "http://localhost:3000",
     credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
   }),
 )
 
@@ -24,20 +38,25 @@ app.use(
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutos
   max: 100, // máximo 100 requests por IP
-  message: "Muitas requisições, tente novamente em 15 minutos.",
+  message: {
+    error: "Muitas requisições. Tente novamente em 15 minutos.",
+    code: "RATE_LIMIT_EXCEEDED",
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
 })
-app.use(limiter)
 
-// Rate limiting específico para webhook (mais permissivo)
 const webhookLimiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minuto
   max: 50, // máximo 50 webhooks por minuto
-  skip: (req) => {
-    // Verificar se é realmente da SuperPayBR (opcional)
-    const userAgent = req.get("User-Agent") || ""
-    return userAgent.includes("SuperPayBR") || userAgent.includes("superpay")
+  message: {
+    error: "Limite de webhooks excedido",
+    code: "WEBHOOK_RATE_LIMIT",
   },
 })
+
+app.use("/api/", limiter)
+app.use("/api/webhook/", webhookLimiter)
 
 // Middleware para parsing JSON
 app.use(express.json({ limit: "10mb" }))
@@ -55,73 +74,66 @@ app.get("/health", (req, res) => {
   res.json({
     status: "OK",
     timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    environment: process.env.NODE_ENV || "development",
     version: "1.0.0",
-    service: "SuperPayBR Integration",
   })
 })
 
 // Rotas principais
 app.use("/api/checkout", checkoutRoutes)
-app.use("/api/webhook", webhookLimiter, webhookRoutes)
-app.use("/api/verifica-status", statusRoutes)
+app.use("/api/webhook", webhookRoutes)
+app.use("/api", statusRoutes)
 
 // Middleware de tratamento de erros
 app.use((err, req, res, next) => {
-  console.error("❌ Erro não tratado:", err)
+  console.error("Erro não tratado:", err)
 
-  // Log detalhado do erro
-  console.error("Stack trace:", err.stack)
-  console.error("Request details:", {
-    method: req.method,
-    url: req.url,
-    headers: req.headers,
-    body: req.body,
-  })
+  if (err.type === "entity.parse.failed") {
+    return res.status(400).json({
+      error: "JSON inválido",
+      code: "INVALID_JSON",
+    })
+  }
 
-  res.status(err.status || 500).json({
-    success: false,
-    error: process.env.NODE_ENV === "production" ? "Erro interno do servidor" : err.message,
+  res.status(500).json({
+    error: "Erro interno do servidor",
+    code: "INTERNAL_ERROR",
     timestamp: new Date().toISOString(),
   })
 })
 
-// Middleware para rotas não encontradas
+// Rota 404
 app.use("*", (req, res) => {
   res.status(404).json({
-    success: false,
-    error: "Rota não encontrada",
+    error: "Endpoint não encontrado",
+    code: "NOT_FOUND",
     path: req.originalUrl,
-    timestamp: new Date().toISOString(),
   })
-})
-
-// Iniciar servidor
-app.listen(PORT, () => {
-  console.log(`🚀 Servidor SuperPayBR rodando na porta ${PORT}`)
-  console.log(`🌍 Ambiente: ${process.env.NODE_ENV || "development"}`)
-  console.log(`📊 Health check: http://localhost:${PORT}/health`)
-
-  // Verificar variáveis de ambiente essenciais
-  const requiredEnvVars = ["SUPERPAY_TOKEN", "SUPERPAY_SECRET_KEY", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"]
-
-  const missingVars = requiredEnvVars.filter((varName) => !process.env[varName])
-
-  if (missingVars.length > 0) {
-    console.warn("⚠️  Variáveis de ambiente faltando:", missingVars.join(", "))
-  } else {
-    console.log("✅ Todas as variáveis de ambiente configuradas")
-  }
 })
 
 // Graceful shutdown
 process.on("SIGTERM", () => {
-  console.log("🛑 Recebido SIGTERM, encerrando servidor...")
-  process.exit(0)
+  console.log("SIGTERM recebido. Encerrando servidor graciosamente...")
+  server.close(() => {
+    console.log("Servidor encerrado.")
+    process.exit(0)
+  })
 })
 
 process.on("SIGINT", () => {
-  console.log("🛑 Recebido SIGINT, encerrando servidor...")
-  process.exit(0)
+  console.log("SIGINT recebido. Encerrando servidor graciosamente...")
+  server.close(() => {
+    console.log("Servidor encerrado.")
+    process.exit(0)
+  })
+})
+
+const server = app.listen(PORT, () => {
+  console.log(`🚀 Servidor SuperPayBR v4 rodando na porta ${PORT}`)
+  console.log(`🌍 Environment: ${process.env.NODE_ENV || "development"}`)
+  console.log(`📊 Health check: http://localhost:${PORT}/health`)
+  console.log(`🔗 Frontend URL: ${process.env.FRONTEND_URL || "http://localhost:3000"}`)
 })
 
 module.exports = app
