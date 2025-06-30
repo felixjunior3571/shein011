@@ -1,178 +1,118 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { saveSuperPayBRPaymentConfirmation } from "@/lib/superpaybr-payment-storage"
-import { createClient } from "@supabase/supabase-js"
-
-// Supabase client
-const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("\n🧪 SIMULAÇÃO DE PAGAMENTO SUPERPAYBR INICIADA!")
-    console.log("⏰ Timestamp:", new Date().toISOString())
+    console.log("🧪 [SuperPayBR Simulate] Simulando pagamento...")
 
     const body = await request.json()
-    const { external_id, amount, redirect_type } = body
+    const { externalId, amount, status = "paid" } = body
 
-    if (!external_id) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "external_id é obrigatório",
-        },
-        { status: 400 },
-      )
+    if (!externalId) {
+      return NextResponse.json({ success: false, error: "External ID is required" }, { status: 400 })
     }
 
-    console.log("🎯 Dados da simulação SuperPayBR:", {
-      external_id,
-      amount: amount || 0,
-      redirect_type: redirect_type || "unknown",
-    })
+    console.log("📋 [SuperPayBR Simulate] Dados:", { externalId, amount, status })
 
-    // Simulate SuperPayBR webhook payload
-    const simulatedWebhookData = {
+    // Mapear status para códigos SuperPayBR
+    const statusMapping = {
+      paid: { code: 5, title: "Pagamento Confirmado!", name: "paid" },
+      denied: { code: 12, title: "Pagamento Negado", name: "denied" },
+      expired: { code: 15, title: "Pagamento Vencido", name: "expired" },
+      canceled: { code: 6, title: "Pagamento Cancelado", name: "canceled" },
+      refunded: { code: 9, title: "Pagamento Estornado", name: "refunded" },
+    }
+
+    const selectedStatus = statusMapping[status as keyof typeof statusMapping] || statusMapping.paid
+
+    // Simular webhook SuperPayBR
+    const simulatedWebhook = {
       event: {
-        type: "webhook.update",
+        type: "invoice.update",
         date: new Date().toISOString().replace("T", " ").substring(0, 19),
       },
       invoices: {
         id: `SIM_${Date.now()}`,
-        external_id: external_id,
-        token: null,
+        external_id: externalId,
+        token: `SIM_TOKEN_${Date.now()}`,
         date: new Date().toISOString().replace("T", " ").substring(0, 19),
         status: {
-          code: 5, // Pagamento Confirmado!
-          title: "Pagamento Confirmado!",
-          description: "Simulação de pagamento aprovado",
-          text: "approved",
+          code: selectedStatus.code,
+          title: selectedStatus.title,
+          description: `Simulação de ${selectedStatus.name}`,
         },
-        customer: 999999,
+        customer: 123456789,
         prices: {
-          total: amount || 0,
+          total: Math.round((amount || 34.9) * 100), // SuperPayBR usa centavos
           discount: 0,
           taxs: {
-            others: 0,
+            others: null,
           },
           refound: null,
         },
         type: "PIX",
         payment: {
-          gateway: "SuperPay",
-          date: new Date().toISOString().replace("T", " ").substring(0, 19),
+          gateway: "SuperPayBR",
+          date: null,
           due: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().replace("T", " ").substring(0, 19),
           card: null,
           payId: `SIM_PAY_${Date.now()}`,
           payDate: new Date().toISOString().replace("T", " ").substring(0, 19),
           details: {
             barcode: null,
-            pix_code: null,
-            qrcode: "SIMULATED_QR_CODE",
-            url: null,
+            pix_code: `00020101021226840014br.gov.bcb.pix2536simulated.superpaybr.com/qr/v2/SIM${Date.now()}`,
+            qrcode: `https://quickchart.io/qr?text=simulated_${externalId}`,
+            url: `https://faturas.superpaybr.com/simulated-${externalId}`,
           },
         },
       },
     }
 
-    console.log("📦 Payload simulado SuperPayBR:", JSON.stringify(simulatedWebhookData, null, 2))
+    console.log("📤 [SuperPayBR Simulate] Enviando webhook simulado...")
 
-    // Save to memory
-    const memoryData = {
-      statusCode: 5,
-      statusName: "Pagamento Confirmado!",
-      statusDescription: "Simulação de pagamento aprovado",
-      amount: amount || 0,
-      paymentDate: new Date().toISOString(),
-    }
-
-    const savedConfirmation = saveSuperPayBRPaymentConfirmation(
-      external_id,
-      simulatedWebhookData.invoices.id,
-      null,
-      memoryData,
-    )
-
-    console.log("💾 Confirmação salva na memória SuperPayBR:", {
-      external_id: savedConfirmation.externalId,
-      status: savedConfirmation.statusName,
-      is_paid: savedConfirmation.isPaid,
+    // Enviar para nosso próprio webhook
+    const webhookResponse = await fetch(`${request.nextUrl.origin}/api/superpaybr/webhook`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(simulatedWebhook),
     })
 
-    // Save to Supabase
-    try {
-      const webhookRecord = {
-        external_id: external_id,
-        invoice_id: simulatedWebhookData.invoices.id,
-        status_code: 5,
-        status_name: "Pagamento Confirmado!",
-        amount: amount || 0,
-        payment_date: new Date().toISOString(),
-        webhook_data: simulatedWebhookData,
-        processed_at: new Date().toISOString(),
-        is_paid: true,
-        is_denied: false,
-        is_expired: false,
-        is_canceled: false,
-        is_refunded: false,
-        gateway: "superpaybr",
-      }
+    if (webhookResponse.ok) {
+      const webhookResult = await webhookResponse.json()
+      console.log("✅ [SuperPayBR Simulate] Webhook simulado processado:", webhookResult)
 
-      const { data: supabaseResult, error: supabaseError } = await supabase
-        .from("payment_webhooks")
-        .insert(webhookRecord)
-        .select()
-        .single()
+      return NextResponse.json({
+        success: true,
+        message: "Payment simulated successfully",
+        externalId,
+        status: selectedStatus.name,
+        webhookResult,
+        simulatedData: simulatedWebhook,
+      })
+    } else {
+      const error = await webhookResponse.text()
+      console.log("❌ [SuperPayBR Simulate] Erro no webhook:", error)
 
-      if (supabaseError) {
-        console.error("❌ Erro ao salvar simulação no Supabase:", supabaseError)
-      } else {
-        console.log("✅ Simulação salva no Supabase SuperPayBR:", supabaseResult.id)
-      }
-    } catch (supabaseErr) {
-      console.error("❌ Erro crítico no Supabase:", supabaseErr)
-      // Continue even if Supabase fails
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Failed to process simulated webhook",
+          details: error,
+        },
+        { status: 500 },
+      )
     }
-
-    const response = {
-      success: true,
-      message: "Pagamento SuperPayBR simulado com sucesso",
-      data: {
-        external_id: external_id,
-        invoice_id: simulatedWebhookData.invoices.id,
-        status_code: 5,
-        status_name: "Pagamento Confirmado!",
-        amount: amount || 0,
-        payment_date: new Date().toISOString(),
-        simulated: true,
-        redirect_type: redirect_type || "unknown",
-        storage: "memory + supabase",
-      },
-    }
-
-    console.log("✅ Resposta da simulação SuperPayBR:", response)
-    console.log("🏁 Simulação SuperPayBR concluída!\n")
-
-    return NextResponse.json(response, { status: 200 })
   } catch (error) {
-    console.error("❌ ERRO NA SIMULAÇÃO SUPERPAYBR:", error)
+    console.error("❌ [SuperPayBR Simulate] Erro geral:", error)
 
     return NextResponse.json(
       {
         success: false,
-        error: "Erro interno do servidor",
-        message: error instanceof Error ? error.message : "Erro desconhecido",
-        timestamp: new Date().toISOString(),
+        error: "Internal server error",
+        message: error instanceof Error ? error.message : "Unknown error",
       },
       { status: 500 },
     )
   }
-}
-
-export async function GET() {
-  return NextResponse.json({
-    message: "SuperPayBR Payment Simulation Endpoint",
-    status: "active",
-    description: "Simula pagamentos aprovados para testes",
-    usage: "POST com { external_id, amount, redirect_type }",
-    timestamp: new Date().toISOString(),
-  })
 }
