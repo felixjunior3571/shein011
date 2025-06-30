@@ -15,17 +15,13 @@ const SUPERPAY_STATUS_MAP = {
 
 type SuperPayStatus = keyof typeof SUPERPAY_STATUS_MAP
 
-// Cache em memória para acesso rápido (evita consultas desnecessárias)
-const paymentCache = new Map<string, any>()
-
-// Função para salvar webhook no Supabase + Cache + Notificação
-async function savePaymentWebhook(webhookData: any) {
+// Save payment confirmation to Supabase ONLY
+async function savePaymentConfirmation(webhookData: any) {
   try {
     const externalId = webhookData.external_id || webhookData.id || `superpay_${Date.now()}`
     const invoiceId = webhookData.invoice_id || webhookData.id || externalId
     const statusCode = webhookData.status?.code || webhookData.status_code || 1
     const amount = webhookData.valores?.bruto ? webhookData.valores.bruto / 100 : 0
-    const payId = webhookData.pay_id || webhookData.payId || null
 
     const statusInfo = SUPERPAY_STATUS_MAP[statusCode as SuperPayStatus] || {
       name: "Desconhecido",
@@ -36,7 +32,7 @@ async function savePaymentWebhook(webhookData: any) {
       isRefunded: false,
     }
 
-    console.log(`🔄 Processando webhook SuperPay:`, {
+    console.log(`🔄 Salvando webhook SuperPay no Supabase:`, {
       external_id: externalId,
       invoice_id: invoiceId,
       status_code: statusCode,
@@ -45,7 +41,14 @@ async function savePaymentWebhook(webhookData: any) {
       is_paid: statusInfo.isPaid,
     })
 
-    // Dados padronizados para salvar
+    // Check if record exists
+    const { data: existingRecord } = await supabase
+      .from("payment_webhooks")
+      .select("id")
+      .eq("external_id", externalId)
+      .eq("gateway", "superpay")
+      .single()
+
     const webhookRecord = {
       external_id: externalId,
       invoice_id: invoiceId,
@@ -53,7 +56,6 @@ async function savePaymentWebhook(webhookData: any) {
       status_name: statusInfo.name,
       amount: amount,
       payment_date: webhookData.payment_date || (statusInfo.isPaid ? new Date().toISOString() : null),
-      pay_id: payId,
       webhook_data: webhookData,
       processed_at: new Date().toISOString(),
       is_paid: statusInfo.isPaid,
@@ -64,85 +66,32 @@ async function savePaymentWebhook(webhookData: any) {
       gateway: "superpay",
     }
 
-    // 1. SALVAR NO SUPABASE (Persistente)
-    const { data: savedRecord, error } = await supabase
-      .from("payment_webhooks")
-      .upsert(webhookRecord, {
-        onConflict: "external_id,gateway",
-        ignoreDuplicates: false,
-      })
-      .select()
-      .single()
+    let result
+    if (existingRecord) {
+      // Update existing record
+      result = await supabase
+        .from("payment_webhooks")
+        .update(webhookRecord)
+        .eq("id", existingRecord.id)
+        .select()
+        .single()
 
-    if (error) {
-      console.error("❌ Erro ao salvar webhook no Supabase:", error)
-      throw error
-    }
-
-    console.log(`✅ Webhook SuperPay SALVO NO SUPABASE:`, savedRecord?.id)
-
-    // 2. CRIAR NOTIFICAÇÃO PARA FRONTEND (Tempo Real)
-    const notificationData = {
-      external_id: externalId,
-      notification_type: "payment_status_change",
-      notification_data: {
-        externalId,
-        invoiceId,
-        statusCode,
-        statusName: statusInfo.name,
-        isPaid: statusInfo.isPaid,
-        isDenied: statusInfo.isDenied,
-        isExpired: statusInfo.isExpired,
-        isCanceled: statusInfo.isCanceled,
-        isRefunded: statusInfo.isRefunded,
-        amount,
-        paymentDate: webhookRecord.payment_date,
-        payId,
-        receivedAt: webhookRecord.processed_at,
-        source: "webhook_notification",
-      },
-    }
-
-    const { error: notificationError } = await supabase.from("webhook_notifications").insert(notificationData)
-
-    if (notificationError) {
-      console.error("⚠️ Erro ao criar notificação (não crítico):", notificationError)
+      console.log(`✅ Webhook SuperPay ATUALIZADO no Supabase:`, result.data?.id)
     } else {
-      console.log(`📡 Notificação criada para frontend: ${externalId}`)
+      // Insert new record
+      result = await supabase.from("payment_webhooks").insert(webhookRecord).select().single()
+
+      console.log(`✅ Webhook SuperPay INSERIDO no Supabase:`, result.data?.id)
     }
 
-    // 3. SALVAR NO CACHE (Acesso Rápido)
-    const cacheData = {
-      externalId,
-      invoiceId,
-      token: webhookData.token || null,
-      isPaid: statusInfo.isPaid,
-      isRefunded: statusInfo.isRefunded,
-      isDenied: statusInfo.isDenied,
-      isExpired: statusInfo.isExpired,
-      isCanceled: statusInfo.isCanceled,
-      amount,
-      paymentDate: webhookRecord.payment_date,
-      payId,
-      statusCode,
-      statusName: statusInfo.name,
-      receivedAt: webhookRecord.processed_at,
-      rawData: webhookData,
-      source: "webhook_cache",
+    if (result.error) {
+      console.error("❌ Erro ao salvar no Supabase:", result.error)
+      throw result.error
     }
 
-    // Salvar com múltiplas chaves para facilitar busca
-    paymentCache.set(externalId, cacheData)
-    paymentCache.set(invoiceId, cacheData)
-    if (webhookData.token) {
-      paymentCache.set(`token_${webhookData.token}`, cacheData)
-    }
-
-    console.log(`⚡ Webhook SuperPay SALVO NO CACHE: ${externalId}`)
-
-    return savedRecord || webhookRecord
+    return result.data
   } catch (error) {
-    console.error("❌ Erro crítico ao processar webhook SuperPay:", error)
+    console.error("❌ Erro crítico ao salvar webhook SuperPay:", error)
     throw error
   }
 }
@@ -152,29 +101,19 @@ export async function POST(request: NextRequest) {
     console.log("\n🔔 WEBHOOK SUPERPAY RECEBIDO!")
     console.log("⏰ Timestamp:", new Date().toISOString())
 
-    // Get headers para validação
+    // Get headers
     const headers = Object.fromEntries(request.headers.entries())
-    console.log("📋 Headers recebidos:", {
-      "user-agent": headers["user-agent"],
-      "content-type": headers["content-type"],
-      "x-forwarded-for": headers["x-forwarded-for"],
-    })
+    console.log("📋 Headers recebidos:", headers)
+
+    // Validate SuperPay webhook (basic validation)
+    const userAgent = headers["user-agent"] || ""
+    const gateway = headers["x-gateway"] || headers["gateway"] || "superpay"
+
+    console.log("🔍 Validação:", { userAgent, gateway })
 
     // Parse webhook data
     const webhookData = await request.json()
     console.log("📦 Dados do webhook SuperPay:", JSON.stringify(webhookData, null, 2))
-
-    // Validação básica dos dados
-    if (!webhookData.external_id && !webhookData.id) {
-      console.error("❌ Webhook inválido: external_id ou id não encontrado")
-      return NextResponse.json(
-        {
-          success: false,
-          error: "external_id ou id é obrigatório",
-        },
-        { status: 400 },
-      )
-    }
 
     // Extract key information
     const externalId = webhookData.external_id || webhookData.id
@@ -189,25 +128,24 @@ export async function POST(request: NextRequest) {
       amount: amount,
     })
 
-    // Verificar se é um status crítico que precisa ser processado
+    // Check if it's a critical status that needs processing
     const criticalStatuses = [5, 6, 9, 12, 15] // Pago, Cancelado, Estornado, Negado, Vencido
     const isCritical = criticalStatuses.includes(statusCode)
 
     console.log(`${isCritical ? "🚨" : "ℹ️"} Status ${statusCode} é ${isCritical ? "CRÍTICO" : "informativo"}`)
 
-    // Processar webhook (sempre salvar, mas log diferente para críticos)
-    const savedRecord = await savePaymentWebhook(webhookData)
-
-    console.log("💾 Webhook SuperPay processado:", {
-      id: savedRecord.id,
-      external_id: savedRecord.external_id || externalId,
-      status: savedRecord.status_name || statusName,
-      is_paid: savedRecord.is_paid,
-      is_critical: isCritical,
-    })
-
-    // Log específico para status críticos
     if (isCritical) {
+      // Save to Supabase ONLY
+      const savedRecord = await savePaymentConfirmation(webhookData)
+
+      console.log("💾 Webhook SuperPay salvo no Supabase:", {
+        id: savedRecord.id,
+        external_id: savedRecord.external_id,
+        status: savedRecord.status_name,
+        is_paid: savedRecord.is_paid,
+      })
+
+      // Log critical status
       if (statusCode === 5) {
         console.log("🎉 PAGAMENTO CONFIRMADO VIA WEBHOOK SUPERPAY!")
         console.log(`💰 Valor: R$ ${amount.toFixed(2)}`)
@@ -234,7 +172,7 @@ export async function POST(request: NextRequest) {
         amount: amount,
         is_critical: isCritical,
         processed_at: new Date().toISOString(),
-        storage: "supabase_cache_notification",
+        storage: "supabase_only",
       },
     }
 
@@ -261,11 +199,9 @@ export async function GET() {
   return NextResponse.json({
     message: "SuperPay Webhook Endpoint",
     status: "active",
-    storage: "supabase_cache_notification",
+    storage: "supabase_only",
     supported_methods: ["POST"],
     critical_statuses: [5, 6, 9, 12, 15],
-    cache_size: paymentCache.size,
-    rate_limit_info: "Webhook-based system - No polling to avoid rate limits",
     timestamp: new Date().toISOString(),
   })
 }
