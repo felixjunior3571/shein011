@@ -3,116 +3,139 @@
 
 BEGIN;
 
--- Limpar dados de teste anteriores
-DELETE FROM payment_webhooks WHERE external_id LIKE 'TEST_%' OR external_id LIKE 'SHEIN_TEST_%';
+-- Limpar dados de teste antigos
+DELETE FROM payment_webhooks WHERE external_id LIKE 'TEST_SUPERPAY_%';
 
 -- 1. TESTE DE INSERÇÃO DE WEBHOOKS
 INSERT INTO payment_webhooks (
-    external_id,
-    invoice_id,
-    status_code,
-    status_name,
-    amount,
+    external_id, 
+    invoice_id, 
+    status_code, 
+    status_name, 
+    amount, 
     is_paid,
     is_denied,
     is_expired,
     is_canceled,
     is_refunded,
-    is_critical,
-    gateway,
+    is_critical, 
+    gateway, 
+    token, 
+    expires_at,
     webhook_data,
-    token,
-    expires_at
+    payment_date
 ) VALUES 
--- Teste 1: Pagamento Pendente
+-- Status 1: Aguardando Pagamento (não crítico)
 (
-    'TEST_PENDING_001',
-    'INV_PENDING_001',
-    1,
-    'Aguardando Pagamento',
-    34.90,
-    FALSE,
-    FALSE,
-    FALSE,
-    FALSE,
-    FALSE,
-    FALSE,
-    'superpay',
-    '{"event": {"type": "payment_created", "date": "2024-01-01T10:00:00Z"}, "invoices": {"id": "INV_PENDING_001", "external_id": "TEST_PENDING_001", "status": {"code": 1, "title": "Aguardando Pagamento"}}}',
-    'SPY_TEST_PENDING_' || EXTRACT(EPOCH FROM NOW())::BIGINT,
-    NOW() + INTERVAL '15 minutes'
+    'TEST_SUPERPAY_001', 
+    'INV_TEST_001', 
+    1, 
+    'Aguardando Pagamento', 
+    34.90, 
+    FALSE, FALSE, FALSE, FALSE, FALSE, FALSE,
+    'superpay', 
+    'SPY_' || EXTRACT(EPOCH FROM NOW())::BIGINT || '_' || SUBSTRING(MD5(RANDOM()::TEXT), 1, 8),
+    NOW() + INTERVAL '15 minutes',
+    '{"test": true, "amount": 34.90, "status_code": 1}'::jsonb,
+    NULL
 ),
--- Teste 2: Pagamento Confirmado (CRÍTICO)
+-- Status 2: Em Processamento (não crítico)
 (
-    'TEST_PAID_002',
-    'INV_PAID_002',
-    5,
-    'Pago',
-    49.90,
-    TRUE,
-    FALSE,
-    FALSE,
-    FALSE,
-    FALSE,
-    TRUE,
-    'superpay',
-    '{"event": {"type": "payment_confirmed", "date": "2024-01-01T11:00:00Z"}, "invoices": {"id": "INV_PAID_002", "external_id": "TEST_PAID_002", "status": {"code": 5, "title": "Pago"}, "payment": {"payDate": "2024-01-01T11:00:00Z"}}}',
-    'SPY_TEST_PAID_' || EXTRACT(EPOCH FROM NOW())::BIGINT,
-    NOW() + INTERVAL '15 minutes'
+    'TEST_SUPERPAY_002', 
+    'INV_TEST_002', 
+    2, 
+    'Em Processamento', 
+    49.90, 
+    FALSE, FALSE, FALSE, FALSE, FALSE, FALSE,
+    'superpay', 
+    'SPY_' || EXTRACT(EPOCH FROM NOW())::BIGINT || '_' || SUBSTRING(MD5(RANDOM()::TEXT), 1, 8),
+    NOW() + INTERVAL '15 minutes',
+    '{"test": true, "amount": 49.90, "status_code": 2}'::jsonb,
+    NULL
 ),
--- Teste 3: Pagamento Negado (CRÍTICO)
+-- Status 5: Pago (CRÍTICO)
 (
-    'TEST_DENIED_003',
-    'INV_DENIED_003',
-    12,
-    'Negado',
-    29.90,
-    FALSE,
-    TRUE,
-    FALSE,
-    FALSE,
-    FALSE,
-    TRUE,
-    'superpay',
-    '{"event": {"type": "payment_denied", "date": "2024-01-01T12:00:00Z"}, "invoices": {"id": "INV_DENIED_003", "external_id": "TEST_DENIED_003", "status": {"code": 12, "title": "Negado"}}}',
-    'SPY_TEST_DENIED_' || EXTRACT(EPOCH FROM NOW())::BIGINT,
-    NOW() + INTERVAL '15 minutes'
+    'TEST_SUPERPAY_005', 
+    'INV_TEST_005', 
+    5, 
+    'Pago', 
+    29.90, 
+    TRUE, FALSE, FALSE, FALSE, FALSE, TRUE,
+    'superpay', 
+    'SPY_' || EXTRACT(EPOCH FROM NOW())::BIGINT || '_' || SUBSTRING(MD5(RANDOM()::TEXT), 1, 8),
+    NOW() + INTERVAL '15 minutes',
+    '{"test": true, "amount": 29.90, "status_code": 5}'::jsonb,
+    NOW()
 ),
--- Teste 4: Pagamento Vencido (CRÍTICO)
+-- Status 6: Cancelado (CRÍTICO)
 (
-    'TEST_EXPIRED_004',
-    'INV_EXPIRED_004',
-    15,
-    'Vencido',
-    39.90,
-    FALSE,
-    FALSE,
-    TRUE,
-    FALSE,
-    FALSE,
-    TRUE,
-    'superpay',
-    '{"event": {"type": "payment_expired", "date": "2024-01-01T13:00:00Z"}, "invoices": {"id": "INV_EXPIRED_004", "external_id": "TEST_EXPIRED_004", "status": {"code": 15, "title": "Vencido"}}}',
-    'SPY_TEST_EXPIRED_' || EXTRACT(EPOCH FROM NOW())::BIGINT,
-    NOW() + INTERVAL '15 minutes'
+    'TEST_SUPERPAY_006', 
+    'INV_TEST_006', 
+    6, 
+    'Cancelado', 
+    39.90, 
+    FALSE, FALSE, FALSE, TRUE, FALSE, TRUE,
+    'superpay', 
+    'SPY_' || EXTRACT(EPOCH FROM NOW())::BIGINT || '_' || SUBSTRING(MD5(RANDOM()::TEXT), 1, 8),
+    NOW() + INTERVAL '15 minutes',
+    '{"test": true, "amount": 39.90, "status_code": 6}'::jsonb,
+    NULL
 ),
--- Teste 5: Token Expirado
+-- Status 9: Estornado (CRÍTICO)
 (
-    'TEST_TOKEN_EXPIRED_005',
-    'INV_TOKEN_EXPIRED_005',
-    1,
-    'Aguardando Pagamento',
-    19.90,
-    FALSE,
-    FALSE,
-    FALSE,
-    FALSE,
-    FALSE,
-    FALSE,
-    'superpay',
-    '{"event": {"type": "payment_created", "date": "2024-01-01T09:00:00Z"}, "invoices": {"id": "INV_TOKEN_EXPIRED_005", "external_id": "TEST_TOKEN_EXPIRED_005", "status": {"code": 1, "title": "Aguardando Pagamento"}}}',
-    'SPY_TEST_EXPIRED_TOKEN_' || EXTRACT(EPOCH FROM NOW())::BIGINT,
-    NOW() - INTERVAL '1 hour' -- Token já expirado
+    'TEST_SUPERPAY_009', 
+    'INV_TEST_009', 
+    9, 
+    'Estornado', 
+    59.90, 
+    FALSE, FALSE, FALSE, FALSE, TRUE, TRUE,
+    'superpay', 
+    'SPY_' || EXTRACT(EPOCH FROM NOW())::BIGINT || '_' || SUBSTRING(MD5(RANDOM()::TEXT), 1, 8),
+    NOW() + INTERVAL '15 minutes',
+    '{"test": true, "amount": 59.90, "status_code": 9}'::jsonb,
+    NOW() - INTERVAL '1 hour'
+),
+-- Status 12: Negado (CRÍTICO)
+(
+    'TEST_SUPERPAY_012', 
+    'INV_TEST_012', 
+    12, 
+    'Negado', 
+    44.90, 
+    FALSE, TRUE, FALSE, FALSE, FALSE, TRUE,
+    'superpay', 
+    'SPY_' || EXTRACT(EPOCH FROM NOW())::BIGINT || '_' || SUBSTRING(MD5(RANDOM()::TEXT), 1, 8),
+    NOW() + INTERVAL '15 minutes',
+    '{"test": true, "amount": 44.90, "status_code": 12}'::jsonb,
+    NULL
+),
+-- Status 15: Vencido (CRÍTICO)
+(
+    'TEST_SUPERPAY_015', 
+    'INV_TEST_015', 
+    15, 
+    'Vencido', 
+    24.90, 
+    FALSE, FALSE, TRUE, FALSE, FALSE, TRUE,
+    'superpay', 
+    'SPY_' || EXTRACT(EPOCH FROM NOW())::BIGINT || '_' || SUBSTRING(MD5(RANDOM()::TEXT), 1, 8),
+    NOW() + INTERVAL '15 minutes',
+    '{"test": true, "amount": 24.90, "status_code": 15}'::jsonb,
+    NULL
+),
+-- Token expirado para teste
+(
+    'TEST_SUPERPAY_EXPIRED', 
+    'INV_TEST_EXPIRED', 
+    1, 
+    'Aguardando Pagamento', 
+    19.90, 
+    FALSE, FALSE, FALSE, FALSE, FALSE, FALSE,
+    'superpay', 
+    'SPY_EXPIRED_TOKEN_123',
+    NOW() - INTERVAL '1 hour', -- Token já expirado
+    '{"test": true, "amount": 19.90, "token_expired": true}'::jsonb,
+    NULL
 );
 
 -- 2. VERIFICAR INSERÇÕES
@@ -123,7 +146,7 @@ SELECT
     COUNT(CASE WHEN is_paid = TRUE THEN 1 END) as paid_count,
     COUNT(CASE WHEN expires_at < NOW() THEN 1 END) as expired_tokens
 FROM payment_webhooks 
-WHERE external_id LIKE 'TEST_%';
+WHERE external_id LIKE 'TEST_SUPERPAY_%';
 
 -- 3. TESTE DE CONSULTAS POR EXTERNAL_ID
 SELECT 
@@ -137,14 +160,14 @@ SELECT
         ELSE 'VÁLIDO'
     END as token_status
 FROM payment_webhooks 
-WHERE external_id IN ('TEST_PAID_002', 'TEST_DENIED_003', 'TEST_TOKEN_EXPIRED_005')
+WHERE external_id IN ('TEST_SUPERPAY_005', 'TEST_SUPERPAY_012', 'TEST_SUPERPAY_EXPIRED')
 ORDER BY external_id;
 
 -- 4. TESTE DE PERFORMANCE COM ÍNDICES
 EXPLAIN (ANALYZE, BUFFERS) 
 SELECT * FROM payment_webhooks 
 WHERE gateway = 'superpay' 
-AND external_id = 'TEST_PAID_002';
+AND external_id = 'TEST_SUPERPAY_005';
 
 -- 5. TESTE DE ESTATÍSTICAS POR STATUS
 SELECT 
@@ -155,7 +178,7 @@ SELECT
     SUM(amount) as total_amount,
     COUNT(CASE WHEN is_critical = TRUE THEN 1 END) as critical_count
 FROM payment_webhooks 
-WHERE external_id LIKE 'TEST_%'
+WHERE external_id LIKE 'TEST_SUPERPAY_%'
 GROUP BY status_code, status_name
 ORDER BY status_code;
 
@@ -171,7 +194,7 @@ SELECT
     END as status,
     EXTRACT(EPOCH FROM (NOW() - expires_at))/60 as minutes_expired
 FROM payment_webhooks 
-WHERE external_id LIKE 'TEST_%'
+WHERE external_id LIKE 'TEST_SUPERPAY_%'
 ORDER BY expires_at;
 
 -- 7. TESTE DE RATE LIMITING (Simulação)
@@ -217,7 +240,7 @@ WITH expired_tokens AS (
     SELECT id, external_id, token, expires_at
     FROM payment_webhooks 
     WHERE expires_at < NOW() 
-    AND external_id LIKE 'TEST_%'
+    AND external_id LIKE 'TEST_SUPERPAY_%'
 )
 SELECT 
     '=== TESTE 6: TOKENS PARA LIMPEZA ===' as test_section,
@@ -236,7 +259,7 @@ SELECT
     COUNT(CASE WHEN amount >= 0 THEN 1 END) as valid_amounts,
     COUNT(CASE WHEN gateway = 'superpay' THEN 1 END) as valid_gateways
 FROM payment_webhooks 
-WHERE external_id LIKE 'TEST_%';
+WHERE external_id LIKE 'TEST_SUPERPAY_%';
 
 -- 11. TESTE DE CONSULTA EM LOTE (Batch Query)
 SELECT 
@@ -253,11 +276,11 @@ SELECT
     END as token_status
 FROM payment_webhooks 
 WHERE external_id IN (
-    'TEST_PENDING_001',
-    'TEST_PAID_002', 
-    'TEST_DENIED_003',
-    'TEST_EXPIRED_004',
-    'TEST_TOKEN_EXPIRED_005'
+    'TEST_SUPERPAY_001',
+    'TEST_SUPERPAY_005', 
+    'TEST_SUPERPAY_012',
+    'TEST_SUPERPAY_015',
+    'TEST_SUPERPAY_EXPIRED'
 )
 ORDER BY 
     CASE status_code
@@ -284,7 +307,7 @@ SELECT
     MIN(processed_at) as first_webhook,
     MAX(processed_at) as last_webhook
 FROM payment_webhooks 
-WHERE external_id LIKE 'TEST_%';
+WHERE external_id LIKE 'TEST_SUPERPAY_%';
 
 -- 13. VERIFICAR ÍNDICES E PERFORMANCE
 SELECT 

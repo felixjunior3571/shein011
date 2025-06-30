@@ -12,6 +12,40 @@ export async function GET(request: NextRequest) {
 
     console.log("🔍 Carregando webhooks SuperPay para debug:", { limit, offset })
 
+    // Verificar se a tabela existe primeiro
+    const { data: tableCheck, error: tableError } = await supabase
+      .from("payment_webhooks")
+      .select("count", { count: "exact", head: true })
+      .eq("gateway", "superpay")
+      .limit(1)
+
+    if (tableError) {
+      console.error("❌ Erro ao verificar tabela payment_webhooks:", tableError)
+
+      // Retornar dados vazios se a tabela não existir
+      return NextResponse.json({
+        success: true,
+        webhooks: [],
+        stats: {
+          total: 0,
+          paid: 0,
+          denied: 0,
+          expired: 0,
+          canceled: 0,
+          refunded: 0,
+          critical: 0,
+          expiredTokens: 0,
+          totalAmount: 0,
+        },
+        pagination: {
+          limit,
+          offset,
+          total: 0,
+        },
+        message: "Tabela payment_webhooks não encontrada. Execute os scripts SQL primeiro.",
+      })
+    }
+
     // Buscar webhooks SuperPay
     const { data: webhooks, error: webhooksError } = await supabase
       .from("payment_webhooks")
@@ -22,7 +56,29 @@ export async function GET(request: NextRequest) {
 
     if (webhooksError) {
       console.error("❌ Erro ao buscar webhooks SuperPay:", webhooksError)
-      throw webhooksError
+
+      // Retornar dados vazios em caso de erro
+      return NextResponse.json({
+        success: true,
+        webhooks: [],
+        stats: {
+          total: 0,
+          paid: 0,
+          denied: 0,
+          expired: 0,
+          canceled: 0,
+          refunded: 0,
+          critical: 0,
+          expiredTokens: 0,
+          totalAmount: 0,
+        },
+        pagination: {
+          limit,
+          offset,
+          total: 0,
+        },
+        error: webhooksError.message,
+      })
     }
 
     // Calcular estatísticas
@@ -31,21 +87,30 @@ export async function GET(request: NextRequest) {
       .select("*")
       .eq("gateway", "superpay")
 
-    if (statsError) {
-      console.error("❌ Erro ao calcular estatísticas SuperPay:", statsError)
-      throw statsError
+    let stats = {
+      total: 0,
+      paid: 0,
+      denied: 0,
+      expired: 0,
+      canceled: 0,
+      refunded: 0,
+      critical: 0,
+      expiredTokens: 0,
+      totalAmount: 0,
     }
 
-    const stats = {
-      total: statsData?.length || 0,
-      paid: statsData?.filter((w) => w.is_paid).length || 0,
-      denied: statsData?.filter((w) => w.is_denied).length || 0,
-      expired: statsData?.filter((w) => w.is_expired).length || 0,
-      canceled: statsData?.filter((w) => w.is_canceled).length || 0,
-      refunded: statsData?.filter((w) => w.is_refunded).length || 0,
-      critical: statsData?.filter((w) => w.is_critical).length || 0,
-      expiredTokens: statsData?.filter((w) => w.expires_at && new Date(w.expires_at) < new Date()).length || 0,
-      totalAmount: statsData?.reduce((sum, w) => sum + (w.amount || 0), 0) || 0,
+    if (!statsError && statsData) {
+      stats = {
+        total: statsData.length,
+        paid: statsData.filter((w) => w.is_paid).length,
+        denied: statsData.filter((w) => w.is_denied).length,
+        expired: statsData.filter((w) => w.is_expired).length,
+        canceled: statsData.filter((w) => w.is_canceled).length,
+        refunded: statsData.filter((w) => w.is_refunded).length,
+        critical: statsData.filter((w) => w.is_critical).length,
+        expiredTokens: statsData.filter((w) => w.expires_at && new Date(w.expires_at) < new Date()).length,
+        totalAmount: statsData.reduce((sum, w) => sum + (w.amount || 0), 0),
+      }
     }
 
     console.log("✅ Webhooks SuperPay carregados:", {
@@ -72,6 +137,18 @@ export async function GET(request: NextRequest) {
         error: "Erro interno do servidor",
         message: error instanceof Error ? error.message : "Erro desconhecido",
         timestamp: new Date().toISOString(),
+        webhooks: [],
+        stats: {
+          total: 0,
+          paid: 0,
+          denied: 0,
+          expired: 0,
+          canceled: 0,
+          refunded: 0,
+          critical: 0,
+          expiredTokens: 0,
+          totalAmount: 0,
+        },
       },
       { status: 500 },
     )

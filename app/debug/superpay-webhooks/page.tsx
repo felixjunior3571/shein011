@@ -62,15 +62,27 @@ interface PaymentStatus {
   error?: string
 }
 
+interface Stats {
+  total: number
+  paid: number
+  denied: number
+  expired: number
+  canceled: number
+  refunded: number
+  critical: number
+  expiredTokens: number
+  totalAmount: number
+}
+
 export default function SuperPayWebhooksDebugPage() {
   const [webhooks, setWebhooks] = useState<WebhookRecord[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState("")
-  const [testExternalId, setTestExternalId] = useState("")
+  const [testExternalId, setTestExternalId] = useState("TEST_SUPERPAY_001")
   const [testResult, setTestResult] = useState<PaymentStatus | null>(null)
   const [simulationResult, setSimulationResult] = useState<any>(null)
-  const [stats, setStats] = useState({
+  const [stats, setStats] = useState<Stats>({
     total: 0,
     paid: 0,
     denied: 0,
@@ -88,22 +100,62 @@ export default function SuperPayWebhooksDebugPage() {
     setError(null)
 
     try {
-      const response = await fetch("/api/debug/superpay-webhooks")
+      console.log("🔍 Carregando webhooks SuperPay...")
+
+      const response = await fetch("/api/debug/superpay-webhooks", {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      })
+
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`)
       }
 
       const data = await response.json()
+      console.log("📥 Resposta da API:", data)
+
       if (data.success) {
         setWebhooks(data.webhooks || [])
-        setStats(data.stats || {})
+        setStats(
+          data.stats || {
+            total: 0,
+            paid: 0,
+            denied: 0,
+            expired: 0,
+            canceled: 0,
+            refunded: 0,
+            critical: 0,
+            expiredTokens: 0,
+            totalAmount: 0,
+          },
+        )
+
+        if (data.message) {
+          setError(data.message)
+        }
       } else {
         throw new Error(data.error || "Erro ao carregar webhooks")
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Erro desconhecido"
+      console.error("❌ Erro ao carregar webhooks SuperPay:", err)
       setError(errorMessage)
-      console.error("Erro ao carregar webhooks SuperPay:", err)
+
+      // Definir dados vazios em caso de erro
+      setWebhooks([])
+      setStats({
+        total: 0,
+        paid: 0,
+        denied: 0,
+        expired: 0,
+        canceled: 0,
+        refunded: 0,
+        critical: 0,
+        expiredTokens: 0,
+        totalAmount: 0,
+      })
     } finally {
       setLoading(false)
     }
@@ -115,14 +167,25 @@ export default function SuperPayWebhooksDebugPage() {
 
     setLoading(true)
     setTestResult(null)
+    setError(null)
 
     try {
-      const response = await fetch(`/api/superpay/payment-status?externalId=${encodeURIComponent(testExternalId)}`)
+      console.log("🔍 Testando consulta de status:", testExternalId)
+
+      const response = await fetch(`/api/superpay/payment-status?externalId=${encodeURIComponent(testExternalId)}`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      })
+
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`)
       }
 
       const data = await response.json()
+      console.log("📥 Resultado do teste:", data)
+
       if (data.success) {
         setTestResult(data.data)
       } else {
@@ -130,6 +193,7 @@ export default function SuperPayWebhooksDebugPage() {
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Erro desconhecido"
+      console.error("❌ Erro no teste de status:", err)
       setError(errorMessage)
     } finally {
       setLoading(false)
@@ -142,8 +206,11 @@ export default function SuperPayWebhooksDebugPage() {
 
     setLoading(true)
     setSimulationResult(null)
+    setError(null)
 
     try {
+      console.log("🧪 Simulando pagamento:", { testExternalId, statusCode })
+
       const response = await fetch("/api/superpay/simulate-payment", {
         method: "POST",
         headers: {
@@ -161,6 +228,8 @@ export default function SuperPayWebhooksDebugPage() {
       }
 
       const data = await response.json()
+      console.log("📥 Resultado da simulação:", data)
+
       if (data.success) {
         setSimulationResult(data.data)
         // Recarregar webhooks após simulação
@@ -170,6 +239,7 @@ export default function SuperPayWebhooksDebugPage() {
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Erro desconhecido"
+      console.error("❌ Erro na simulação:", err)
       setError(errorMessage)
     } finally {
       setLoading(false)
@@ -221,7 +291,7 @@ export default function SuperPayWebhooksDebugPage() {
 
         {/* Error Alert */}
         {error && (
-          <Alert variant="destructive">
+          <Alert variant={error.includes("não encontrada") ? "default" : "destructive"}>
             <AlertTriangle className="h-4 w-4" />
             <AlertDescription>{error}</AlertDescription>
           </Alert>
@@ -372,7 +442,7 @@ export default function SuperPayWebhooksDebugPage() {
                           <div className="flex items-center gap-2">
                             <Badge className={getStatusColor(webhook)}>{webhook.status_name}</Badge>
                             {webhook.is_critical && <Badge variant="destructive">CRÍTICO</Badge>}
-                            {isTokenExpired(webhook.expires_at) && (
+                            {webhook.expires_at && isTokenExpired(webhook.expires_at) && (
                               <Badge variant="outline" className="text-orange-600">
                                 TOKEN EXPIRADO
                               </Badge>
@@ -396,14 +466,18 @@ export default function SuperPayWebhooksDebugPage() {
                               <p className="font-medium">Status Code:</p>
                               <p className="text-gray-600">{webhook.status_code}</p>
                             </div>
-                            <div>
-                              <p className="font-medium">Token:</p>
-                              <p className="text-gray-600 font-mono text-xs">{webhook.token}</p>
-                            </div>
-                            <div>
-                              <p className="font-medium">Expira em:</p>
-                              <p className="text-gray-600 text-xs">{new Date(webhook.expires_at).toLocaleString()}</p>
-                            </div>
+                            {webhook.token && (
+                              <div>
+                                <p className="font-medium">Token:</p>
+                                <p className="text-gray-600 font-mono text-xs">{webhook.token}</p>
+                              </div>
+                            )}
+                            {webhook.expires_at && (
+                              <div>
+                                <p className="font-medium">Expira em:</p>
+                                <p className="text-gray-600 text-xs">{new Date(webhook.expires_at).toLocaleString()}</p>
+                              </div>
+                            )}
                           </div>
 
                           <div className="text-xs text-gray-500">
@@ -429,7 +503,11 @@ export default function SuperPayWebhooksDebugPage() {
                     <div className="text-center py-8 text-gray-500">
                       <Database className="h-12 w-12 mx-auto mb-4 opacity-50" />
                       <p>Nenhum webhook encontrado</p>
-                      <p className="text-sm">Tente ajustar os filtros ou aguarde novos webhooks</p>
+                      <p className="text-sm">
+                        {stats.total === 0
+                          ? "Execute os scripts SQL primeiro para criar a tabela"
+                          : "Tente ajustar os filtros ou aguarde novos webhooks"}
+                      </p>
                     </div>
                   )}
                 </div>
@@ -453,7 +531,7 @@ export default function SuperPayWebhooksDebugPage() {
                   <div className="flex gap-2">
                     <Input
                       id="testExternalId"
-                      placeholder="SHEIN_1234567890_abc123"
+                      placeholder="TEST_SUPERPAY_001"
                       value={testExternalId}
                       onChange={(e) => setTestExternalId(e.target.value)}
                     />
@@ -524,7 +602,7 @@ export default function SuperPayWebhooksDebugPage() {
                   <Label htmlFor="simulateExternalId">External ID</Label>
                   <Input
                     id="simulateExternalId"
-                    placeholder="SHEIN_1234567890_abc123"
+                    placeholder="TEST_SUPERPAY_001"
                     value={testExternalId}
                     onChange={(e) => setTestExternalId(e.target.value)}
                   />
@@ -595,6 +673,47 @@ export default function SuperPayWebhooksDebugPage() {
             </Card>
           </TabsContent>
         </Tabs>
+
+        {/* Instructions */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Instruções de Uso</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+              <div>
+                <h4 className="font-medium mb-2">Para começar:</h4>
+                <ol className="space-y-1 text-gray-600 list-decimal list-inside">
+                  <li>
+                    Execute o script <code>scripts/create-superpay-webhooks-table.sql</code>
+                  </li>
+                  <li>
+                    Execute o script <code>scripts/test-superpay-system.sql</code>
+                  </li>
+                  <li>Use a aba "Simulação" para criar dados de teste</li>
+                  <li>Monitore os webhooks na aba "Webhooks"</li>
+                </ol>
+              </div>
+              <div>
+                <h4 className="font-medium mb-2">Endpoints disponíveis:</h4>
+                <ul className="space-y-1 text-gray-600">
+                  <li>
+                    • <code>/api/superpay/webhook</code> - Recebe webhooks
+                  </li>
+                  <li>
+                    • <code>/api/superpay/payment-status</code> - Consulta status
+                  </li>
+                  <li>
+                    • <code>/api/superpay/simulate-payment</code> - Simula pagamentos
+                  </li>
+                  <li>
+                    • <code>/debug/superpay-webhooks</code> - Esta página
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
   )
