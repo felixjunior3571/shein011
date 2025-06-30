@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import Image from "next/image"
 import { Copy, CheckCircle, Clock, AlertCircle } from "lucide-react"
-import { usePureWebhookMonitor } from "@/hooks/use-pure-webhook-monitor"
+import { useSuperPayWebhookMonitor } from "@/hooks/use-superpay-webhook-monitor"
 import { useOptimizedTracking } from "@/hooks/use-optimized-tracking"
 import { SmartQRCode } from "@/components/smart-qr-code"
 
@@ -39,6 +39,7 @@ export default function SuperPayBRCheckoutPage() {
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [externalId, setExternalId] = useState<string | null>(null)
+  const [paymentDetected, setPaymentDetected] = useState(false)
 
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -54,39 +55,69 @@ export default function SuperPayBRCheckoutPage() {
     enableDebug: process.env.NODE_ENV === "development",
   })
 
-  // PURE webhook monitoring (NO API CALLS!)
+  // SuperPay webhook monitoring com logs detalhados
   const {
     status: paymentStatus,
     isWaitingForWebhook,
     error: webhookError,
     lastCheck: lastWebhookCheck,
-  } = usePureWebhookMonitor({
+    checkCount,
+    tokenExpired,
+  } = useSuperPayWebhookMonitor({
     externalId,
-    enableDebug: process.env.NODE_ENV === "development",
+    checkInterval: 2000, // Verificar a cada 2 segundos
+    maxChecks: 450, // 15 minutos (450 * 2s = 900s = 15min)
+    enableDebug: true, // Sempre ativar debug para checkout
     onPaymentConfirmed: (data) => {
-      console.log("🎉 PAGAMENTO CONFIRMADO VIA WEBHOOK SUPERPAYBR!")
+      console.log("🎉 PAGAMENTO CONFIRMADO VIA WEBHOOK SUPERPAY!")
+      console.log("💰 Dados do pagamento:", data)
+
+      setPaymentDetected(true)
 
       // Track conversion
       trackConversion("payment_confirmed", data.amount)
 
-      // Salvar confirmação
+      // Salvar confirmação no localStorage
       localStorage.setItem("paymentConfirmed", "true")
       localStorage.setItem("paymentAmount", data.amount.toFixed(2))
       localStorage.setItem("paymentDate", data.paymentDate || new Date().toISOString())
+      localStorage.setItem("paymentMethod", "superpay_pix")
+      localStorage.setItem("paymentExternalId", data.externalId || "")
 
-      // Redirecionar após 2 segundos
+      console.log("💾 Dados salvos no localStorage")
+
+      // Redirecionar após 3 segundos para dar tempo de mostrar a confirmação
       setTimeout(() => {
         console.log("🚀 Redirecionando para página de ativação...")
         window.location.href = "/upp/001"
-      }, 2000)
+      }, 3000)
     },
     onPaymentDenied: (data) => {
-      console.log("❌ PAGAMENTO NEGADO VIA WEBHOOK SUPERPAYBR!")
+      console.log("❌ PAGAMENTO NEGADO VIA WEBHOOK SUPERPAY!")
+      console.log("📋 Dados:", data)
       track("payment_denied", { amount: data.amount, reason: data.statusName })
+      setError(`Pagamento negado: ${data.statusName}`)
     },
     onPaymentExpired: (data) => {
-      console.log("⏰ PAGAMENTO VENCIDO VIA WEBHOOK SUPERPAYBR!")
+      console.log("⏰ PAGAMENTO VENCIDO VIA WEBHOOK SUPERPAY!")
+      console.log("📋 Dados:", data)
       track("payment_expired", { amount: data.amount })
+      setError(`Pagamento vencido: ${data.statusName}`)
+    },
+    onPaymentCanceled: (data) => {
+      console.log("🚫 PAGAMENTO CANCELADO VIA WEBHOOK SUPERPAY!")
+      console.log("📋 Dados:", data)
+      track("payment_canceled", { amount: data.amount })
+      setError(`Pagamento cancelado: ${data.statusName}`)
+    },
+    onTokenExpired: (data) => {
+      console.log("⏰ TOKEN SUPERPAY EXPIRADO!")
+      console.log("📋 Dados:", data)
+      setError("Sessão de pagamento expirada. Gere um novo PIX.")
+    },
+    onError: (errorMsg) => {
+      console.log("❌ ERRO NO MONITORAMENTO SUPERPAY:", errorMsg)
+      setError(`Erro no monitoramento: ${errorMsg}`)
     },
   })
 
@@ -101,7 +132,7 @@ export default function SuperPayBRCheckoutPage() {
 
   // Timer countdown
   useEffect(() => {
-    if (timeLeft > 0 && invoice && !paymentStatus?.isPaid) {
+    if (timeLeft > 0 && invoice && !paymentDetected) {
       timerRef.current = setTimeout(() => {
         setTimeLeft(timeLeft - 1)
       }, 1000)
@@ -113,7 +144,7 @@ export default function SuperPayBRCheckoutPage() {
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current)
     }
-  }, [timeLeft, invoice, paymentStatus?.isPaid, track, amount])
+  }, [timeLeft, invoice, paymentDetected, track, amount])
 
   // Carregar dados do usuário e criar fatura
   useEffect(() => {
@@ -123,13 +154,13 @@ export default function SuperPayBRCheckoutPage() {
   // Carregar external_id quando a fatura for criada
   useEffect(() => {
     if (invoice) {
-      console.log("🔍 Dados da fatura SuperPayBR recebida:", invoice)
+      console.log("🔍 Dados da fatura SuperPay recebida:", invoice)
 
       let capturedExternalId = null
 
       if (invoice.external_id) {
         capturedExternalId = invoice.external_id
-        console.log("✅ External ID encontrado na fatura SuperPayBR:", capturedExternalId)
+        console.log("✅ External ID encontrado na fatura SuperPay:", capturedExternalId)
       } else {
         capturedExternalId = invoice.id
         console.log("⚠️ External ID não encontrado, usando invoice.id:", capturedExternalId)
@@ -138,7 +169,7 @@ export default function SuperPayBRCheckoutPage() {
       if (capturedExternalId) {
         localStorage.setItem("currentExternalId", capturedExternalId)
         setExternalId(capturedExternalId)
-        console.log("💾 External ID SuperPayBR salvo:", capturedExternalId)
+        console.log("💾 External ID SuperPay salvo:", capturedExternalId)
 
         // Track PIX generation
         track("pix_generated", {
@@ -147,7 +178,7 @@ export default function SuperPayBRCheckoutPage() {
           type: invoice.type,
         })
       } else {
-        console.error("❌ Não foi possível obter external_id SuperPayBR!")
+        console.error("❌ Não foi possível obter external_id SuperPay!")
       }
     }
   }, [invoice, track, amount])
@@ -157,7 +188,7 @@ export default function SuperPayBRCheckoutPage() {
       setLoading(true)
       setError(null)
 
-      console.log("🔄 Criando fatura PIX SuperPayBR...")
+      console.log("🔄 Criando fatura PIX SuperPay...")
       console.log("Parâmetros:", { amount: Number.parseFloat(amount), shipping, method })
 
       // Track invoice creation start
@@ -172,7 +203,7 @@ export default function SuperPayBRCheckoutPage() {
       const userWhatsApp = localStorage.getItem("userWhatsApp") || ""
       const deliveryAddress = JSON.parse(localStorage.getItem("deliveryAddress") || "{}")
 
-      console.log("📋 Dados do usuário SuperPayBR:", {
+      console.log("📋 Dados do usuário SuperPay:", {
         nome: cpfData.nome,
         email: userEmail,
         whatsapp: userWhatsApp,
@@ -203,7 +234,7 @@ export default function SuperPayBRCheckoutPage() {
         localStorage.setItem("currentExternalId", data.data.external_id)
 
         console.log(
-          `✅ Fatura SuperPayBR criada: ${data.data.type} - Valor: R$ ${(data.data.valores.bruto / 100).toFixed(2)}`,
+          `✅ Fatura SuperPay criada: ${data.data.type} - Valor: R$ ${(data.data.valores.bruto / 100).toFixed(2)}`,
         )
         console.log(`👤 Cliente: ${cpfData.nome || "N/A"}`)
 
@@ -215,11 +246,11 @@ export default function SuperPayBRCheckoutPage() {
           customer_name: cpfData.nome,
         })
       } else {
-        throw new Error(data.error || "Erro ao criar fatura SuperPayBR")
+        throw new Error(data.error || "Erro ao criar fatura SuperPay")
       }
     } catch (error) {
-      console.log("❌ Erro ao criar fatura SuperPayBR:", error)
-      setError("Erro ao gerar PIX SuperPayBR. Tente novamente.")
+      console.log("❌ Erro ao criar fatura SuperPay:", error)
+      setError("Erro ao gerar PIX SuperPay. Tente novamente.")
 
       // Track error
       track("invoice_creation_error", {
@@ -234,7 +265,7 @@ export default function SuperPayBRCheckoutPage() {
   }
 
   const createEmergencyPix = () => {
-    console.log("🚨 Criando PIX de emergência SuperPayBR...")
+    console.log("🚨 Criando PIX de emergência SuperPay...")
 
     const totalAmount = Number.parseFloat(amount)
     const emergencyPix = `00020101021226580014br.gov.bcb.pix2536emergency.quickchart.io/qr/v2/EMERGENCY${Date.now()}520400005303986540${totalAmount.toFixed(2)}5802BR5909SHEIN5011SAO PAULO62070503***6304EMRG`
@@ -264,7 +295,7 @@ export default function SuperPayBRCheckoutPage() {
 
     setInvoice(emergencyInvoice)
     setError(null)
-    console.log(`✅ PIX de emergência SuperPayBR criado - Valor: R$ ${totalAmount.toFixed(2)}`)
+    console.log(`✅ PIX de emergência SuperPay criado - Valor: R$ ${totalAmount.toFixed(2)}`)
 
     // Track emergency PIX creation
     track("emergency_pix_created", {
@@ -305,26 +336,30 @@ export default function SuperPayBRCheckoutPage() {
     }
 
     try {
-      console.log("🧪 Simulando pagamento SuperPayBR para:", externalId)
+      console.log("🧪 Simulando pagamento SuperPay para:", externalId)
 
-      // Simular webhook data diretamente no localStorage
-      const simulatedWebhookData = {
-        isPaid: true,
-        isDenied: false,
-        isRefunded: false,
-        isExpired: false,
-        isCanceled: false,
-        statusCode: 5, // SuperPayBR: 5 = Pago
-        statusName: "Pagamento Confirmado!",
-        amount: Number.parseFloat(amount),
-        paymentDate: new Date().toISOString(),
+      const response = await fetch("/api/superpay/simulate-payment", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          externalId,
+          amount: Number.parseFloat(amount),
+          statusCode: 5, // SuperPay: 5 = Pago
+        }),
+      })
+
+      const result = await response.json()
+
+      if (result.success) {
+        console.log("✅ Pagamento SuperPay simulado com sucesso!")
+        track("payment_simulated", { external_id: externalId, amount: Number.parseFloat(amount) })
+      } else {
+        console.error("❌ Erro na simulação SuperPay:", result.error)
       }
-
-      localStorage.setItem(`webhook_payment_${externalId}`, JSON.stringify(simulatedWebhookData))
-      console.log("✅ Pagamento SuperPayBR simulado com sucesso!")
-      track("payment_simulated", { external_id: externalId, amount: Number.parseFloat(amount) })
     } catch (error) {
-      console.error("❌ Erro na simulação SuperPayBR:", error)
+      console.error("❌ Erro na simulação SuperPay:", error)
     }
   }
 
@@ -334,7 +369,7 @@ export default function SuperPayBRCheckoutPage() {
         <div className="bg-white rounded-lg shadow-md p-8 max-w-md w-full mx-4">
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-black mx-auto mb-4"></div>
-            <h2 className="text-xl font-bold mb-2">Gerando PIX SuperPayBR...</h2>
+            <h2 className="text-xl font-bold mb-2">Gerando PIX SuperPay...</h2>
             <p className="text-gray-600 mb-2">Aguarde enquanto processamos seu pagamento</p>
             <div className="text-sm text-gray-500">
               <p>Valor: R$ {Number.parseFloat(amount).toFixed(2)}</p>
@@ -408,13 +443,41 @@ export default function SuperPayBRCheckoutPage() {
           </div>
 
           {/* Success Message - Only show when paid */}
-          {paymentStatus?.isPaid && (
+          {paymentDetected && (
             <div className="bg-green-100 border border-green-300 rounded-lg p-4 mb-6">
               <div className="flex items-center justify-center space-x-2">
                 <CheckCircle className="w-5 h-5 text-green-600" />
                 <span className="font-bold text-green-800">✅ Pagamento Confirmado!</span>
               </div>
               <p className="text-green-700 text-sm mt-2 text-center">Redirecionando para ativação do cartão...</p>
+            </div>
+          )}
+
+          {/* Status de Monitoramento */}
+          {isWaitingForWebhook && !paymentDetected && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+              <div className="flex items-center justify-center space-x-2">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                <span className="text-blue-800 text-sm">Aguardando confirmação do pagamento... ({checkCount}/450)</span>
+              </div>
+              {lastWebhookCheck && (
+                <p className="text-blue-600 text-xs mt-1 text-center">
+                  Última verificação: {new Date(lastWebhookCheck).toLocaleTimeString()}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Token Expired Warning */}
+          {tokenExpired && (
+            <div className="bg-orange-100 border border-orange-300 rounded-lg p-4 mb-6">
+              <div className="flex items-center justify-center space-x-2">
+                <AlertCircle className="w-5 h-5 text-orange-600" />
+                <span className="font-bold text-orange-800">⏰ Sessão Expirada</span>
+              </div>
+              <p className="text-orange-700 text-sm mt-2 text-center">
+                A sessão de pagamento expirou. Gere um novo PIX.
+              </p>
             </div>
           )}
 
@@ -479,9 +542,24 @@ export default function SuperPayBRCheckoutPage() {
               <span className="bg-black text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold mt-0.5">
                 4
               </span>
-              <span>Receba confirmação automática via webhook SuperPayBR</span>
+              <span>Aguarde a confirmação automática (até 2 minutos)</span>
             </div>
           </div>
+
+          {/* Debug Info (apenas em desenvolvimento) */}
+          {process.env.NODE_ENV === "development" && (
+            <div className="mt-6 p-4 bg-gray-100 rounded-lg text-xs">
+              <h4 className="font-bold mb-2">🔧 Debug Info:</h4>
+              <div className="space-y-1">
+                <p>External ID: {externalId || "N/A"}</p>
+                <p>Status: {paymentStatus?.statusName || "N/A"}</p>
+                <p>Monitorando: {isWaitingForWebhook ? "Sim" : "Não"}</p>
+                <p>Verificações: {checkCount}/450</p>
+                <p>Token Expirado: {tokenExpired ? "Sim" : "Não"}</p>
+                <p>Erro: {webhookError || "Nenhum"}</p>
+              </div>
+            </div>
+          )}
 
           {/* Botão de Teste (apenas em desenvolvimento) */}
           {process.env.NODE_ENV === "development" && externalId && (
