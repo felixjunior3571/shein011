@@ -1,100 +1,79 @@
 import { NextResponse } from "next/server"
 
-const SUPERPAYBR_API_URL = process.env.SUPERPAYBR_API_URL || "https://api.superpaybr.com"
-const SUPERPAYBR_TOKEN = process.env.SUPERPAYBR_TOKEN
-const SUPERPAYBR_SECRET_KEY = process.env.SUPERPAYBR_SECRET_KEY
-
 export async function GET() {
   try {
-    console.log("🔐 [SuperPayBR Auth] Iniciando autenticação...")
+    console.log("=== AUTENTICAÇÃO SUPERPAYBR ===")
 
-    if (!SUPERPAYBR_TOKEN || !SUPERPAYBR_SECRET_KEY) {
-      console.log("❌ [SuperPayBR Auth] Credenciais não configuradas")
+    const token = process.env.SUPERPAYBR_TOKEN
+    const secretKey = process.env.SUPERPAYBR_SECRET_KEY
+
+    if (!token || !secretKey) {
+      console.log("❌ Credenciais SuperPayBR não encontradas")
       return NextResponse.json(
         {
           success: false,
           error: "Credenciais SuperPayBR não configuradas",
         },
-        { status: 401 },
+        { status: 500 },
       )
     }
 
-    console.log("🔧 [SuperPayBR Auth] Configurações:")
-    console.log("- API URL:", SUPERPAYBR_API_URL)
-    console.log("- Token configurado:", !!SUPERPAYBR_TOKEN)
-    console.log("- Secret Key configurado:", !!SUPERPAYBR_SECRET_KEY)
+    console.log("🔑 Fazendo autenticação SuperPayBR...")
+    console.log("Token:", token.substring(0, 10) + "...")
+    console.log("Secret:", secretKey.substring(0, 20) + "...")
 
-    // Tentar autenticação na API SuperPayBR
-    const authUrl = `${SUPERPAYBR_API_URL}/v1/auth/token`
-    console.log("📡 [SuperPayBR Auth] URL de autenticação:", authUrl)
+    // Fazer autenticação na SuperPayBR
+    const authResponse = await fetch("https://api.superpaybr.com/auth", {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Basic ${Buffer.from(`${token}:${secretKey}`).toString("base64")}`,
+        scope: "invoice.write, customer.write, webhook.write",
+      },
+    })
 
-    try {
-      const response = await fetch(authUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "User-Agent": "SHEIN-Card-System/1.0",
-        },
-        body: JSON.stringify({
-          token: SUPERPAYBR_TOKEN,
-          secret_key: SUPERPAYBR_SECRET_KEY,
-        }),
-      })
+    console.log("📥 Resposta auth SuperPayBR:", {
+      status: authResponse.status,
+      statusText: authResponse.statusText,
+      ok: authResponse.ok,
+    })
 
-      console.log("📡 [SuperPayBR Auth] Resposta da autenticação:")
-      console.log("- Status:", response.status)
-      console.log("- Status Text:", response.statusText)
+    if (authResponse.ok) {
+      const authData = await authResponse.json()
+      console.log("✅ Autenticação SuperPayBR bem-sucedida!")
+      console.log("Account:", authData.account)
+      console.log("Working:", authData.working)
+      console.log("Expires:", new Date(authData.expires_in * 1000).toISOString())
 
-      if (response.ok) {
-        const authData = await response.json()
-        console.log("✅ [SuperPayBR Auth] Autenticação bem-sucedida")
-
-        return NextResponse.json({
-          success: true,
-          data: authData,
-          timestamp: new Date().toISOString(),
-        })
-      } else {
-        const errorText = await response.text()
-        console.log("❌ [SuperPayBR Auth] Erro na autenticação:", response.status, errorText)
-
-        // Retornar token direto como fallback
-        return NextResponse.json({
-          success: true,
-          data: {
-            access_token: SUPERPAYBR_TOKEN,
-            token_type: "Bearer",
-            expires_in: 3600,
-            fallback: true,
-          },
-          message: "Usando token direto como fallback",
-          timestamp: new Date().toISOString(),
-        })
-      }
-    } catch (fetchError) {
-      console.log("❌ [SuperPayBR Auth] Erro na requisição de autenticação:", fetchError)
-
-      // Retornar token direto como fallback
       return NextResponse.json({
         success: true,
         data: {
-          access_token: SUPERPAYBR_TOKEN,
-          token_type: "Bearer",
-          expires_in: 3600,
-          fallback: true,
+          access_token: authData.access_token,
+          token_type: authData.token_type,
+          expires_in: authData.expires_in,
+          account: authData.account,
+          working: authData.working,
+          scope: authData.scope,
         },
-        message: "Usando token direto devido a erro de conexão",
-        timestamp: new Date().toISOString(),
       })
+    } else {
+      const errorText = await authResponse.text()
+      console.log("❌ Erro na autenticação SuperPayBR:", authResponse.status, errorText)
+
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Erro na autenticação SuperPayBR: ${authResponse.status} - ${errorText}`,
+        },
+        { status: authResponse.status },
+      )
     }
   } catch (error) {
-    console.error("❌ [SuperPayBR Auth] Erro geral:", error)
-
+    console.log("❌ Erro na autenticação SuperPayBR:", error)
     return NextResponse.json(
       {
         success: false,
-        error: "Erro interno na autenticação",
-        message: error instanceof Error ? error.message : "Erro desconhecido",
+        error: "Erro interno na autenticação SuperPayBR",
       },
       { status: 500 },
     )
