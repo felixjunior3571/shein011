@@ -3,10 +3,11 @@
 import { useState, useEffect, useRef } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import Image from "next/image"
-import { Copy, CheckCircle, Clock, AlertCircle } from "lucide-react"
+import { CheckCircle, Clock, AlertCircle } from "lucide-react"
 import { usePureWebhookMonitor } from "@/hooks/use-pure-webhook-monitor"
 import { useOptimizedTracking } from "@/hooks/use-optimized-tracking"
-import { SmartQRCode } from "@/components/smart-qr-code"
+import { CheckoutForm } from "@/components/checkout-form"
+import { PaymentDisplay } from "@/components/payment-display"
 
 interface InvoiceData {
   id: string
@@ -32,6 +33,16 @@ interface InvoiceData {
   external_id?: string
 }
 
+interface CheckoutData {
+  token: string
+  external_id: string
+  qr_code: string
+  pix_code: string
+  amount: number
+  expires_at: string
+  invoice_id: string
+}
+
 export default function SuperPayBRCheckoutPage() {
   const [loading, setLoading] = useState(true)
   const [invoice, setInvoice] = useState<InvoiceData | null>(null)
@@ -39,6 +50,7 @@ export default function SuperPayBRCheckoutPage() {
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [externalId, setExternalId] = useState<string | null>(null)
+  const [checkoutData, setCheckoutData] = useState<CheckoutData | null>(null)
 
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -328,6 +340,28 @@ export default function SuperPayBRCheckoutPage() {
     }
   }
 
+  const handleCheckoutSuccess = (data: CheckoutData) => {
+    console.log("✅ Checkout realizado:", data.external_id)
+    setCheckoutData(data)
+  }
+
+  const handlePaymentSuccess = () => {
+    console.log("🎉 Pagamento confirmado! Redirecionando...")
+    router.push("/obrigado")
+  }
+
+  const handlePaymentError = (status: string) => {
+    console.log("⚠️ Erro no pagamento:", status)
+    alert(`Erro no pagamento: ${status}. Tente novamente.`)
+    setCheckoutData(null) // Voltar ao formulário
+  }
+
+  const handleExpired = () => {
+    console.log("⏰ PIX expirado")
+    alert("PIX expirado. Gere um novo código.")
+    setCheckoutData(null) // Voltar ao formulário
+  }
+
   if (loading) {
     return (
       <main className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -418,70 +452,22 @@ export default function SuperPayBRCheckoutPage() {
             </div>
           )}
 
-          {/* Valor */}
-          <div className="text-center mb-6">
-            <p className="text-gray-600 mb-1">Valor a pagar</p>
-            <p className="text-3xl font-bold text-green-600">R$ {Number.parseFloat(amount).toFixed(2)}</p>
-            <p className="text-sm text-gray-500">Frete {method} - Cartão SHEIN</p>
-          </div>
-
-          {/* QR Code Limpo */}
-          <div className="text-center mb-6">
-            <div className="bg-white p-4 rounded-lg border-2 border-gray-200 inline-block">
-              {invoice && <SmartQRCode invoice={invoice} width={200} height={200} className="mx-auto" />}
-            </div>
-            <p className="text-sm text-gray-600 mt-2">Escaneie o QR Code com seu app do banco</p>
-          </div>
-
-          {/* Código PIX */}
-          <div className="mb-6">
-            <label className="block text-sm font-medium text-gray-700 mb-2">Ou copie o código PIX:</label>
-            <div className="flex space-x-2">
-              <input
-                type="text"
-                value={invoice?.pix.payload || ""}
-                readOnly
-                className="flex-1 p-3 border border-gray-300 rounded-lg bg-gray-50 text-sm font-mono"
-              />
-              <button
-                onClick={copyPixCode}
-                className={`px-4 py-3 rounded-lg font-medium transition-colors ${
-                  copied ? "bg-green-500 text-white" : "bg-black text-white hover:bg-black/90"
-                }`}
-              >
-                {copied ? <CheckCircle className="w-5 h-5" /> : <Copy className="w-5 h-5" />}
-              </button>
-            </div>
-            {copied && <p className="text-green-600 text-sm mt-2">✅ Código copiado!</p>}
-          </div>
-
-          {/* Instruções */}
-          <div className="space-y-3 text-sm text-gray-600">
-            <div className="flex items-start space-x-2">
-              <span className="bg-black text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold mt-0.5">
-                1
-              </span>
-              <span>Abra o app do seu banco</span>
-            </div>
-            <div className="flex items-start space-x-2">
-              <span className="bg-black text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold mt-0.5">
-                2
-              </span>
-              <span>Escaneie o QR Code ou cole o código PIX</span>
-            </div>
-            <div className="flex items-start space-x-2">
-              <span className="bg-black text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold mt-0.5">
-                3
-              </span>
-              <span>Confirme o pagamento</span>
-            </div>
-            <div className="flex items-start space-x-2">
-              <span className="bg-black text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold mt-0.5">
-                4
-              </span>
-              <span>Receba confirmação automática via webhook SuperPayBR</span>
-            </div>
-          </div>
+          {!checkoutData ? (
+            <CheckoutForm onCheckoutSuccess={handleCheckoutSuccess} />
+          ) : (
+            <PaymentDisplay
+              token={checkoutData.token}
+              external_id={checkoutData.external_id}
+              qr_code={checkoutData.qr_code}
+              pix_code={checkoutData.pix_code}
+              amount={checkoutData.amount}
+              expires_at={checkoutData.expires_at}
+              invoice_id={checkoutData.invoice_id}
+              onPaymentSuccess={handlePaymentSuccess}
+              onPaymentError={handlePaymentError}
+              onExpired={handleExpired}
+            />
+          )}
 
           {/* Botão de Teste (apenas em desenvolvimento) */}
           {process.env.NODE_ENV === "development" && externalId && (
