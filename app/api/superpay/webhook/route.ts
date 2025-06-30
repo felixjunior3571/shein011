@@ -15,11 +15,11 @@ const SUPERPAY_STATUS_MAP = {
 
 type SuperPayStatus = keyof typeof SUPERPAY_STATUS_MAP
 
-// Cache em memória para acesso rápido
+// Cache em memória para acesso rápido (evita consultas desnecessárias)
 const paymentCache = new Map<string, any>()
 
-// Função híbrida: salva em Supabase + Cache
-async function savePaymentConfirmation(webhookData: any) {
+// Função para salvar webhook no Supabase + Cache + Notificação
+async function savePaymentWebhook(webhookData: any) {
   try {
     const externalId = webhookData.external_id || webhookData.id || `superpay_${Date.now()}`
     const invoiceId = webhookData.invoice_id || webhookData.id || externalId
@@ -36,7 +36,7 @@ async function savePaymentConfirmation(webhookData: any) {
       isRefunded: false,
     }
 
-    console.log(`🔄 Salvando webhook SuperPay (HÍBRIDO):`, {
+    console.log(`🔄 Processando webhook SuperPay:`, {
       external_id: externalId,
       invoice_id: invoiceId,
       status_code: statusCode,
@@ -45,8 +45,8 @@ async function savePaymentConfirmation(webhookData: any) {
       is_paid: statusInfo.isPaid,
     })
 
-    // Dados padronizados
-    const paymentData = {
+    // Dados padronizados para salvar
+    const webhookRecord = {
       external_id: externalId,
       invoice_id: invoiceId,
       status_code: statusCode,
@@ -67,7 +67,7 @@ async function savePaymentConfirmation(webhookData: any) {
     // 1. SALVAR NO SUPABASE (Persistente)
     const { data: savedRecord, error } = await supabase
       .from("payment_webhooks")
-      .upsert(paymentData, {
+      .upsert(webhookRecord, {
         onConflict: "external_id,gateway",
         ignoreDuplicates: false,
       })
@@ -75,13 +75,43 @@ async function savePaymentConfirmation(webhookData: any) {
       .single()
 
     if (error) {
-      console.error("❌ Erro ao salvar no Supabase:", error)
+      console.error("❌ Erro ao salvar webhook no Supabase:", error)
       throw error
     }
 
     console.log(`✅ Webhook SuperPay SALVO NO SUPABASE:`, savedRecord?.id)
 
-    // 2. SALVAR NO CACHE (Rápido)
+    // 2. CRIAR NOTIFICAÇÃO PARA FRONTEND (Tempo Real)
+    const notificationData = {
+      external_id: externalId,
+      notification_type: "payment_status_change",
+      notification_data: {
+        externalId,
+        invoiceId,
+        statusCode,
+        statusName: statusInfo.name,
+        isPaid: statusInfo.isPaid,
+        isDenied: statusInfo.isDenied,
+        isExpired: statusInfo.isExpired,
+        isCanceled: statusInfo.isCanceled,
+        isRefunded: statusInfo.isRefunded,
+        amount,
+        paymentDate: webhookRecord.payment_date,
+        payId,
+        receivedAt: webhookRecord.processed_at,
+        source: "webhook_notification",
+      },
+    }
+
+    const { error: notificationError } = await supabase.from("webhook_notifications").insert(notificationData)
+
+    if (notificationError) {
+      console.error("⚠️ Erro ao criar notificação (não crítico):", notificationError)
+    } else {
+      console.log(`📡 Notificação criada para frontend: ${externalId}`)
+    }
+
+    // 3. SALVAR NO CACHE (Acesso Rápido)
     const cacheData = {
       externalId,
       invoiceId,
@@ -92,14 +122,13 @@ async function savePaymentConfirmation(webhookData: any) {
       isExpired: statusInfo.isExpired,
       isCanceled: statusInfo.isCanceled,
       amount,
-      paymentDate: paymentData.payment_date,
+      paymentDate: webhookRecord.payment_date,
       payId,
       statusCode,
       statusName: statusInfo.name,
-      statusDescription: webhookData.status?.description || "",
-      receivedAt: paymentData.processed_at,
+      receivedAt: webhookRecord.processed_at,
       rawData: webhookData,
-      source: "webhook_hybrid",
+      source: "webhook_cache",
     }
 
     // Salvar com múltiplas chaves para facilitar busca
@@ -109,11 +138,11 @@ async function savePaymentConfirmation(webhookData: any) {
       paymentCache.set(`token_${webhookData.token}`, cacheData)
     }
 
-    console.log(`✅ Webhook SuperPay SALVO NO CACHE: ${externalId}`)
+    console.log(`⚡ Webhook SuperPay SALVO NO CACHE: ${externalId}`)
 
-    return savedRecord || paymentData
+    return savedRecord || webhookRecord
   } catch (error) {
-    console.error("❌ Erro crítico ao salvar webhook SuperPay:", error)
+    console.error("❌ Erro crítico ao processar webhook SuperPay:", error)
     throw error
   }
 }
@@ -123,13 +152,29 @@ export async function POST(request: NextRequest) {
     console.log("\n🔔 WEBHOOK SUPERPAY RECEBIDO!")
     console.log("⏰ Timestamp:", new Date().toISOString())
 
-    // Get headers
+    // Get headers para validação
     const headers = Object.fromEntries(request.headers.entries())
-    console.log("📋 Headers recebidos:", headers)
+    console.log("📋 Headers recebidos:", {
+      "user-agent": headers["user-agent"],
+      "content-type": headers["content-type"],
+      "x-forwarded-for": headers["x-forwarded-for"],
+    })
 
     // Parse webhook data
     const webhookData = await request.json()
     console.log("📦 Dados do webhook SuperPay:", JSON.stringify(webhookData, null, 2))
+
+    // Validação básica dos dados
+    if (!webhookData.external_id && !webhookData.id) {
+      console.error("❌ Webhook inválido: external_id ou id não encontrado")
+      return NextResponse.json(
+        {
+          success: false,
+          error: "external_id ou id é obrigatório",
+        },
+        { status: 400 },
+      )
+    }
 
     // Extract key information
     const externalId = webhookData.external_id || webhookData.id
@@ -144,24 +189,25 @@ export async function POST(request: NextRequest) {
       amount: amount,
     })
 
-    // Check if it's a critical status that needs processing
+    // Verificar se é um status crítico que precisa ser processado
     const criticalStatuses = [5, 6, 9, 12, 15] // Pago, Cancelado, Estornado, Negado, Vencido
     const isCritical = criticalStatuses.includes(statusCode)
 
     console.log(`${isCritical ? "🚨" : "ℹ️"} Status ${statusCode} é ${isCritical ? "CRÍTICO" : "informativo"}`)
 
+    // Processar webhook (sempre salvar, mas log diferente para críticos)
+    const savedRecord = await savePaymentWebhook(webhookData)
+
+    console.log("💾 Webhook SuperPay processado:", {
+      id: savedRecord.id,
+      external_id: savedRecord.external_id || externalId,
+      status: savedRecord.status_name || statusName,
+      is_paid: savedRecord.is_paid,
+      is_critical: isCritical,
+    })
+
+    // Log específico para status críticos
     if (isCritical) {
-      // Salvar no sistema híbrido (Supabase + Cache)
-      const savedRecord = await savePaymentConfirmation(webhookData)
-
-      console.log("💾 Webhook SuperPay salvo no sistema híbrido:", {
-        id: savedRecord.id,
-        external_id: savedRecord.external_id || externalId,
-        status: savedRecord.status_name || statusName,
-        is_paid: savedRecord.is_paid,
-      })
-
-      // Log critical status
       if (statusCode === 5) {
         console.log("🎉 PAGAMENTO CONFIRMADO VIA WEBHOOK SUPERPAY!")
         console.log(`💰 Valor: R$ ${amount.toFixed(2)}`)
@@ -188,7 +234,7 @@ export async function POST(request: NextRequest) {
         amount: amount,
         is_critical: isCritical,
         processed_at: new Date().toISOString(),
-        storage: "hybrid_supabase_cache",
+        storage: "supabase_cache_notification",
       },
     }
 
@@ -215,10 +261,11 @@ export async function GET() {
   return NextResponse.json({
     message: "SuperPay Webhook Endpoint",
     status: "active",
-    storage: "hybrid_supabase_cache",
+    storage: "supabase_cache_notification",
     supported_methods: ["POST"],
     critical_statuses: [5, 6, 9, 12, 15],
     cache_size: paymentCache.size,
+    rate_limit_info: "Webhook-based system - No polling to avoid rate limits",
     timestamp: new Date().toISOString(),
   })
 }
