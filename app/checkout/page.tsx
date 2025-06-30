@@ -120,7 +120,7 @@ export default function SuperPayBRCheckoutPage() {
 
   // Timer countdown
   useEffect(() => {
-    if (timeLeft > 0 && invoice && !paymentStatus?.isPaid && !isRedirecting) {
+    if (timeLeft > 0 && invoice && paymentStatus !== "confirmed" && !isRedirecting) {
       timerRef.current = setTimeout(() => {
         setTimeLeft(timeLeft - 1)
       }, 1000)
@@ -132,7 +132,7 @@ export default function SuperPayBRCheckoutPage() {
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current)
     }
-  }, [timeLeft, invoice, paymentStatus?.isPaid, isRedirecting, track, amount])
+  }, [timeLeft, invoice, paymentStatus, isRedirecting, track, amount])
 
   // Carregar dados do usuário e criar fatura
   useEffect(() => {
