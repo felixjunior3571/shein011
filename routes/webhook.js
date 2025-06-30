@@ -1,11 +1,12 @@
 const express = require("express")
+const { supabase } = require("../supabaseClient")
+const { mapStatusCode } = require("../utils/statusMap")
+
 const router = express.Router()
-const supabase = require("../supabaseClient")
-const { mapStatus, isPaid } = require("../utils/statusMap")
 
 /**
  * POST /webhook/superpay
- * Recebe webhooks da SuperPayBR com atualizações de status
+ * Recebe webhooks da SuperPay com atualizações de status
  */
 router.post("/", async (req, res) => {
   try {
@@ -13,27 +14,21 @@ router.post("/", async (req, res) => {
 
     console.log("🔔 Webhook recebido da SuperPay:", JSON.stringify(webhookData, null, 2))
 
-    // Extrair dados do webhook
-    const { external_id, status: statusCode, id: invoiceId, amount, paid_at } = webhookData
-
-    if (!external_id || statusCode === undefined) {
-      console.error("❌ Webhook inválido - dados obrigatórios ausentes")
+    // Validar dados do webhook
+    if (!webhookData.external_id || !webhookData.status) {
+      console.error("❌ Webhook inválido: faltam dados obrigatórios")
       return res.status(400).json({
         success: false,
-        error: "Dados obrigatórios ausentes",
+        error: "Dados do webhook inválidos",
       })
     }
 
-    // Mapear status
-    const { status: newStatus, message } = mapStatus(statusCode)
-    const isPaymentPaid = isPaid(statusCode)
+    const { external_id, status: statusCode, invoice_id } = webhookData
 
-    console.log("📊 Status mapeado:", {
-      statusCode,
-      newStatus,
-      isPaymentPaid,
-      external_id,
-    })
+    // Mapear status code para status interno
+    const newStatus = mapStatusCode(Number.parseInt(statusCode))
+
+    console.log(`📊 Atualizando status: ${external_id} → ${newStatus} (código: ${statusCode})`)
 
     // Preparar dados para atualização
     const updateData = {
@@ -41,56 +36,57 @@ router.post("/", async (req, res) => {
       updated_at: new Date().toISOString(),
     }
 
-    // Se pago, adicionar timestamp de confirmação
-    if (isPaymentPaid) {
-      updateData.paid_at = paid_at ? new Date(paid_at).toISOString() : new Date().toISOString()
+    // Se status é "pago", adicionar timestamp de confirmação
+    if (newStatus === "pago") {
+      updateData.paid_at = new Date().toISOString()
+      console.log(`💰 Pagamento confirmado: ${external_id}`)
     }
 
     // Atualizar no Supabase
-    const { data: updatedPayment, error: updateError } = await supabase
+    const { data: payment, error: dbError } = await supabase
       .from("payments")
       .update(updateData)
       .eq("external_id", external_id)
       .select()
       .single()
 
-    if (updateError) {
-      console.error("❌ Erro ao atualizar pagamento:", updateError)
-
-      // Se não encontrou o pagamento, pode ser que ainda não foi criado
-      if (updateError.code === "PGRST116") {
-        console.warn("⚠️ Pagamento não encontrado para external_id:", external_id)
-        return res.status(404).json({
-          success: false,
-          error: "Pagamento não encontrado",
-        })
-      }
-
-      throw updateError
+    if (dbError) {
+      console.error("❌ Erro ao atualizar no banco:", dbError.message)
+      // Não retornar erro para evitar reenvio do webhook
+      return res.json({
+        success: true,
+        message: "Webhook processado (erro interno registrado)",
+      })
     }
 
-    console.log("✅ Pagamento atualizado via webhook:", {
-      external_id,
-      old_status: "pendente",
-      new_status: newStatus,
-      is_paid: isPaymentPaid,
-    })
+    if (!payment) {
+      console.error("❌ Pagamento não encontrado:", external_id)
+      return res.json({
+        success: true,
+        message: "Pagamento não encontrado",
+      })
+    }
 
-    // Responder à SuperPay
+    console.log(`✅ Status atualizado com sucesso: ${external_id} → ${newStatus}`)
+
+    // Sempre retornar sucesso para evitar reenvios
     res.json({
       success: true,
       message: "Webhook processado com sucesso",
-      external_id: external_id,
-      status: newStatus,
+      data: {
+        external_id,
+        old_status: payment.status,
+        new_status: newStatus,
+      },
     })
   } catch (error) {
-    console.error("❌ Erro ao processar webhook:", error)
+    console.error("❌ Erro no webhook:", error.message)
 
-    // Sempre responder com sucesso para evitar reenvios desnecessários
-    res.status(200).json({
-      success: false,
-      error: "Erro interno",
-      message: "Webhook recebido mas houve erro no processamento",
+    // Sempre retornar sucesso para evitar reenvios
+    res.json({
+      success: true,
+      message: "Webhook processado (erro registrado)",
+      error: error.message,
     })
   }
 })

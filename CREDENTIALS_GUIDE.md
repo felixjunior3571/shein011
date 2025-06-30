@@ -1,200 +1,143 @@
-# 🔐 Guia de Credenciais - SuperPay Integration
+# 🔐 Guia Completo de Credenciais - SuperPay Integration
 
-## 📋 Onde Encontrar Cada Credencial
+## 📍 Onde Encontrar Cada Credencial
 
-### 🏦 SuperPayBR Credentials
+### 🏦 SuperPay Credentials
 
 #### 1. SUPERPAY_TOKEN
-**Onde encontrar:**
-- Acesse o painel da SuperPay: https://painel.superpaybr.com
-- Faça login na sua conta
-- Vá em **"Configurações"** → **"API"** → **"Tokens"**
-- Copie o **Token de Produção** ou **Token de Sandbox**
-
-**Exemplo:**
-\`\`\`env
-SUPERPAY_TOKEN=ykt9tPrVpDSyWyZ
-\`\`\`
+- **Onde encontrar:** Painel SuperPay → Configurações → API → Tokens
+- **Caminho:** https://painel.superpaybr.com → Menu lateral → "API" → "Tokens"
+- **Formato:** `sp_live_abc123...` ou `sp_test_abc123...`
+- **Exemplo:** `sp_live_1234567890abcdef1234567890abcdef`
 
 #### 2. SUPERPAY_SECRET
-**Onde encontrar:**
-- No mesmo painel da SuperPay
-- **"Configurações"** → **"API"** → **"Chaves Secretas"**
-- Copie a **Secret Key** correspondente ao seu token
-
-**Exemplo:**
-\`\`\`env
-SUPERPAY_SECRET=eWt0OXRQclZwRFN5V3laOjoxNzM0OTExODcxMA==
-\`\`\`
+- **Onde encontrar:** Painel SuperPay → Configurações → API → Chaves Secretas
+- **Caminho:** https://painel.superpaybr.com → Menu lateral → "API" → "Webhooks"
+- **Formato:** String aleatória de 32+ caracteres
+- **Exemplo:** `sk_live_abcdef1234567890abcdef1234567890`
 
 #### 3. SUPERPAY_BASE_URL
-**Valor fixo:**
-\`\`\`env
-SUPERPAY_BASE_URL=https://api.superpaybr.com
-\`\`\`
-
----
+- **Valor fixo:** `https://api.superpaybr.com`
+- **Não precisa alterar:** Esta é a URL oficial da API v4
 
 ### 🗄️ Supabase Credentials
 
 #### 1. SUPABASE_URL
-**Onde encontrar:**
-- Acesse: https://supabase.com/dashboard
-- Faça login na sua conta
-- Selecione seu projeto
-- Vá em **"Settings"** → **"API"**
-- Copie a **"Project URL"**
-
-**Exemplo:**
-\`\`\`env
-SUPABASE_URL=https://abcdefghijklmnop.supabase.co
-\`\`\`
+- **Onde encontrar:** Dashboard Supabase → Settings → API → Project URL
+- **Caminho:** https://supabase.com/dashboard → Seu projeto → Settings → API
+- **Formato:** `https://[projeto-id].supabase.co`
+- **Exemplo:** `https://abcdefghijklmnop.supabase.co`
 
 #### 2. SUPABASE_KEY
-**Onde encontrar:**
-- No mesmo painel do Supabase
-- **"Settings"** → **"API"**
-- Copie a **"service_role secret"** (não a anon key)
-- ⚠️ **IMPORTANTE**: Use a service_role para operações do servidor
+- **Onde encontrar:** Dashboard Supabase → Settings → API → service_role secret
+- **Caminho:** https://supabase.com/dashboard → Seu projeto → Settings → API
+- **Tipo:** Use a chave `service_role` (não a `anon public`)
+- **Formato:** String longa começando com `eyJ...`
+- **Exemplo:** `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...`
 
-**Exemplo:**
+### 🔧 Configurações do Servidor
+
+#### 1. PORT
+- **Valor padrão:** `3000`
+- **Descrição:** Porta onde o servidor vai rodar
+- **Exemplo:** `3000`, `8080`, `5000`
+
+#### 2. ALLOWED_ORIGINS
+- **Descrição:** URLs permitidas para CORS
+- **Formato:** URLs separadas por vírgula
+- **Exemplo:** `https://meusite.com,https://www.meusite.com`
+- **Para desenvolvimento:** `*` (permite todas)
+
+#### 3. WEBHOOK_BASE_URL
+- **Descrição:** URL base da sua API para webhooks
+- **Formato:** URL completa sem barra final
+- **Exemplo:** `https://minha-api.vercel.app`
+- **Importante:** SuperPay vai chamar `${WEBHOOK_BASE_URL}/webhook/superpay`
+
+#### 4. WEBHOOK_SECRET_KEY (Opcional)
+- **Descrição:** Chave para validar webhooks (opcional)
+- **Formato:** String aleatória
+- **Exemplo:** `minha-chave-secreta-webhook-123`
+
+## 🚀 Passo a Passo Completo
+
+### Passo 1: Criar Conta SuperPay
+1. Acesse https://superpaybr.com
+2. Crie sua conta
+3. Faça login no painel: https://painel.superpaybr.com
+
+### Passo 2: Obter Credenciais SuperPay
+1. No painel, vá em **API** → **Tokens**
+2. Copie seu `SUPERPAY_TOKEN`
+3. Vá em **API** → **Webhooks**
+4. Copie sua `SUPERPAY_SECRET`
+
+### Passo 3: Criar Projeto Supabase
+1. Acesse https://supabase.com
+2. Crie um novo projeto
+3. Aguarde a criação (2-3 minutos)
+
+### Passo 4: Obter Credenciais Supabase
+1. No dashboard, vá em **Settings** → **API**
+2. Copie a **Project URL** (`SUPABASE_URL`)
+3. Copie a chave **service_role secret** (`SUPABASE_KEY`)
+
+### Passo 5: Configurar .env
 \`\`\`env
+# SuperPay
+SUPERPAY_TOKEN=sp_live_seu_token_aqui
+SUPERPAY_SECRET=sk_live_sua_secret_aqui
+SUPERPAY_BASE_URL=https://api.superpaybr.com
+
+# Supabase
+SUPABASE_URL=https://seu-projeto.supabase.co
 SUPABASE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-\`\`\`
 
----
-
-### 🔧 Configurações Opcionais
-
-#### 1. WEBHOOK_SECRET_KEY
-**Como gerar:**
-\`\`\`bash
-# Gerar uma chave aleatória
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-\`\`\`
-
-**Exemplo:**
-\`\`\`env
-WEBHOOK_SECRET_KEY=a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6
-\`\`\`
-
-#### 2. PORT
-**Valor padrão:**
-\`\`\`env
+# Server
 PORT=3000
+ALLOWED_ORIGINS=https://seusite.com
+WEBHOOK_BASE_URL=https://sua-api.vercel.app
 \`\`\`
 
-#### 3. ALLOWED_ORIGINS
-**Para desenvolvimento:**
-\`\`\`env
-ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3001
-\`\`\`
+### Passo 6: Criar Tabela no Supabase
+1. No Supabase, vá em **SQL Editor**
+2. Execute o conteúdo de `scripts/create-payments-table.sql`
+3. Clique em **Run** para criar a tabela
 
-**Para produção:**
-\`\`\`env
-ALLOWED_ORIGINS=https://seu-frontend.com,https://www.seu-site.com
-\`\`\`
+### Passo 7: Configurar Webhook na SuperPay
+1. No painel SuperPay, vá em **API** → **Webhooks**
+2. Adicione a URL: `https://sua-api.vercel.app/webhook/superpay`
+3. Selecione os eventos de pagamento
+4. Salve a configuração
 
----
+## ⚠️ Dicas Importantes
 
-## 🚀 Configuração Passo a Passo
+### Ambiente de Teste vs Produção
+- **Teste:** Use tokens que começam com `sp_test_`
+- **Produção:** Use tokens que começam com `sp_live_`
 
-### Passo 1: SuperPay
-1. Acesse https://painel.superpaybr.com
-2. Faça login ou crie uma conta
-3. Vá em **Configurações** → **API**
-4. Copie o **Token** e **Secret Key**
-5. Configure o **Webhook URL** para: `https://seu-dominio.com/webhook/superpay`
+### Segurança
+- ✅ Nunca commite o arquivo `.env`
+- ✅ Use variáveis de ambiente no deploy
+- ✅ Mantenha as chaves secretas seguras
+- ✅ Use HTTPS em produção
 
-### Passo 2: Supabase
-1. Acesse https://supabase.com/dashboard
-2. Crie um novo projeto ou selecione existente
-3. Vá em **Settings** → **API**
-4. Copie a **Project URL** e **service_role key**
-5. Execute o SQL do arquivo `scripts/create-payments-table.sql`
+### Troubleshooting Comum
 
-### Passo 3: Configurar .env
-\`\`\`bash
-# Copiar arquivo de exemplo
-cp .env.example .env
+#### Erro: "SUPERPAY_TOKEN não está definida"
+- Verifique se o arquivo `.env` existe
+- Confirme se a variável está sem espaços
+- Reinicie o servidor após alterar `.env`
 
-# Editar com suas credenciais
-nano .env
-\`\`\`
+#### Erro: "Conexão Supabase falhou"
+- Verifique se a URL está correta
+- Confirme se está usando a chave `service_role`
+- Teste a conexão no painel do Supabase
 
-### Passo 4: Testar Conexões
-\`\`\`bash
-# Instalar dependências
-npm install
-
-# Testar em desenvolvimento
-npm run dev
-
-# Verificar health check
-curl http://localhost:3000/health
-\`\`\`
-
----
-
-## 🔍 Verificação das Credenciais
-
-### Testar SuperPay
-\`\`\`bash
-curl -X POST http://localhost:3000/checkout \
-  -H "Content-Type: application/json" \
-  -d '{
-    "amount": 1.00,
-    "description": "Teste",
-    "customer": {
-      "name": "Teste",
-      "email": "teste@email.com"
-    }
-  }'
-\`\`\`
-
-### Testar Supabase
-\`\`\`bash
-# Verificar se a tabela foi criada
-curl http://localhost:3000/health
-\`\`\`
-
----
-
-## ⚠️ Segurança
-
-### ✅ Boas Práticas
-- **NUNCA** commitar o arquivo `.env`
-- Use **service_role key** do Supabase (não anon key)
-- Configure **CORS** adequadamente
-- Use **HTTPS** em produção
-- Mantenha as **chaves secretas** seguras
-
-### 🚫 Não Fazer
-- Não usar tokens de sandbox em produção
-- Não expor credenciais no frontend
-- Não usar anon key do Supabase no servidor
-- Não deixar CORS aberto (*) em produção
-
----
-
-## 🆘 Problemas Comuns
-
-### Erro 401 - SuperPay
-- Verificar se o token está correto
-- Confirmar se está usando token de produção/sandbox correto
-- Verificar se a secret key corresponde ao token
-
-### Erro 403 - Supabase
-- Usar service_role key (não anon key)
-- Verificar se a URL do projeto está correta
-- Confirmar se a tabela foi criada
-
-### Webhook não funciona
-- Verificar se a URL está configurada na SuperPay
-- Confirmar se o endpoint está acessível publicamente
-- Testar com ngrok em desenvolvimento
-
----
+#### Webhook não funciona
+- Confirme se a URL está acessível publicamente
+- Verifique se não há firewall bloqueando
+- Teste com ferramentas como ngrok em desenvolvimento
 
 ## 📞 Suporte
 
@@ -204,4 +147,10 @@ curl http://localhost:3000/health
 
 ### Supabase
 - Documentação: https://supabase.com/docs
-- Discord: https://discord.supabase.com
+- Comunidade: https://github.com/supabase/supabase/discussions
+
+### Este Sistema
+- Verifique os logs do servidor
+- Use o endpoint `/health` para testar
+- Consulte o README.md para mais detalhes
+\`\`\`

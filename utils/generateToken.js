@@ -19,16 +19,26 @@ function generateExternalId() {
 }
 
 /**
- * Calcula timestamp de expiração (15 minutos a partir de agora)
+ * Calcula data de expiração (15 minutos a partir de agora)
  * @returns {Date} Data de expiração
  */
-function getExpirationTime() {
+function getExpirationDate() {
   const now = new Date()
   return new Date(now.getTime() + 15 * 60 * 1000) // 15 minutos
+}
+
+/**
+ * Verifica se um token expirou
+ * @param {Date} expiresAt - Data de expiração
+ * @returns {boolean} True se expirou
+ */
+function isTokenExpired(expiresAt) {
+  return new Date() > new Date(expiresAt)
 }
 
 module.exports = {
   generateSecureToken,
   generateExternalId,
-  getExpirationTime,
+  getExpirationDate,
+  isTokenExpired,
 }
