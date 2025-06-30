@@ -3,6 +3,10 @@ import { createClient } from "@supabase/supabase-js"
 
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
+// Cache em memória para notificações ativas (para múltiplos usuários)
+const activeNotifications = new Map<string, any>()
+const sseConnections = new Map<string, ReadableStreamDefaultController>()
+
 export async function POST(request: NextRequest) {
   try {
     console.log("🔔 Webhook SuperPayBR recebido")
@@ -92,7 +96,7 @@ export async function POST(request: NextRequest) {
         console.log("🚀 Tipo ACTIVATION - Cliente será redirecionado para /upp10")
       }
 
-      // Criar notificação de redirecionamento no localStorage via webhook data
+      // Criar notificação de redirecionamento
       const webhookNotification = {
         external_id: externalId,
         status: "paid",
@@ -107,7 +111,31 @@ export async function POST(request: NextRequest) {
         expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(), // 15 minutos
       }
 
-      // Salvar notificação de webhook para o frontend
+      // Salvar no cache em memória para acesso rápido
+      activeNotifications.set(externalId, webhookNotification)
+      console.log(`💾 Notificação salva no cache para: ${externalId}`)
+
+      // Enviar via SSE para usuários conectados
+      const sseController = sseConnections.get(externalId)
+      if (sseController) {
+        try {
+          const sseData = `data: ${JSON.stringify({
+            type: "payment_confirmed",
+            external_id: externalId,
+            redirect_url: redirectUrl,
+            amount: amount / 100,
+            timestamp: new Date().toISOString(),
+          })}\n\n`
+
+          sseController.enqueue(new TextEncoder().encode(sseData))
+          console.log(`📡 SSE enviado para: ${externalId}`)
+        } catch (sseError) {
+          console.error("❌ Erro ao enviar SSE:", sseError)
+          sseConnections.delete(externalId)
+        }
+      }
+
+      // Salvar notificação no banco (backup)
       const { error: notificationError } = await supabase
         .from("webhook_notifications")
         .upsert(webhookNotification, { onConflict: "external_id" })
@@ -115,7 +143,7 @@ export async function POST(request: NextRequest) {
       if (notificationError) {
         console.error("❌ Erro ao salvar notificação:", notificationError)
       } else {
-        console.log("✅ Notificação de webhook salva para external_id:", externalId)
+        console.log("✅ Notificação de webhook salva no banco para external_id:", externalId)
       }
     }
 
@@ -202,6 +230,8 @@ export async function POST(request: NextRequest) {
       status: newStatus,
       redirect_type: existingInvoice.redirect_type || "checkout",
       processed_at: new Date().toISOString(),
+      active_connections: sseConnections.size,
+      cached_notifications: activeNotifications.size,
     })
   } catch (error) {
     console.error("💥 Erro no webhook SuperPayBR:", error)
@@ -221,7 +251,14 @@ export async function GET() {
     {
       error: "Método não permitido",
       message: "Este endpoint aceita apenas POST",
+      stats: {
+        active_connections: sseConnections.size,
+        cached_notifications: activeNotifications.size,
+      },
     },
     { status: 405 },
   )
 }
+
+// Exportar para uso em outros módulos
+export { activeNotifications, sseConnections }

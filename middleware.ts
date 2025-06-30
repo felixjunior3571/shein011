@@ -1,13 +1,27 @@
 import { NextResponse, type NextRequest } from "next/server"
 
-// Rate limiting storage (in production, use Redis)
+// Rate limiting storage (em produção, usar Redis)
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>()
 
-// Rate limiting configuration
-const RATE_LIMIT = {
-  windowMs: 60 * 1000, // 1 minute
-  maxRequests: 30, // 30 requests per minute
-  blockDurationMs: 5 * 60 * 1000, // 5 minutes block
+// Configuração de rate limiting otimizada para múltiplos usuários
+const RATE_LIMITS = {
+  // Webhook - SEM LIMITE (crítico!)
+  webhook: { windowMs: 0, maxRequests: Number.POSITIVE_INFINITY },
+
+  // SSE Stream - limite alto para suportar múltiplos usuários
+  sse: { windowMs: 60 * 1000, maxRequests: 100 }, // 100 conexões por minuto
+
+  // Check status - limite médio (cache reduz necessidade)
+  status: { windowMs: 60 * 1000, maxRequests: 200 }, // 200 verificações por minuto
+
+  // Create invoice - limite baixo (operação custosa)
+  create: { windowMs: 60 * 1000, maxRequests: 10 }, // 10 criações por minuto
+
+  // APIs gerais - limite padrão
+  api: { windowMs: 60 * 1000, maxRequests: 60 }, // 60 requests por minuto
+
+  // Checkout pages - limite alto
+  checkout: { windowMs: 60 * 1000, maxRequests: 300 }, // 300 acessos por minuto
 }
 
 function getRateLimitKey(request: NextRequest): string {
@@ -17,6 +31,8 @@ function getRateLimitKey(request: NextRequest): string {
 }
 
 function isRateLimited(ip: string, limit: number, windowMs: number): boolean {
+  if (limit === Number.POSITIVE_INFINITY) return false // Sem limite
+
   const now = Date.now()
   const key = ip
 
@@ -35,67 +51,89 @@ function isRateLimited(ip: string, limit: number, windowMs: number): boolean {
   return false
 }
 
+function getRateLimitConfig(pathname: string) {
+  // Webhook - NUNCA limitar!
+  if (pathname.includes("/webhook")) {
+    return RATE_LIMITS.webhook
+  }
+
+  // SSE Stream - limite alto
+  if (pathname.includes("/payment-stream")) {
+    return RATE_LIMITS.sse
+  }
+
+  // Status check - limite médio
+  if (pathname.includes("/check-webhook-status") || pathname.includes("/payment-status")) {
+    return RATE_LIMITS.status
+  }
+
+  // Create invoice - limite baixo
+  if (pathname.includes("/create-invoice") || pathname.includes("/create-activation-invoice")) {
+    return RATE_LIMITS.create
+  }
+
+  // Checkout pages - limite alto
+  if (pathname.startsWith("/checkout") || pathname.startsWith("/upp")) {
+    return RATE_LIMITS.checkout
+  }
+
+  // APIs gerais - limite padrão
+  if (pathname.startsWith("/api")) {
+    return RATE_LIMITS.api
+  }
+
+  // Sem limite para outras rotas
+  return { windowMs: 0, maxRequests: Number.POSITIVE_INFINITY }
+}
+
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
+  const ip = getRateLimitKey(request)
 
-  // NEVER rate limit webhook endpoint - CRITICAL!
-  if (pathname === "/api/tryplopay/webhook") {
-    console.log("🔔 Webhook endpoint - NO rate limiting applied")
-    return NextResponse.next()
+  // Obter configuração de rate limit
+  const config = getRateLimitConfig(pathname)
+
+  // Log para debugging
+  if (pathname.includes("/api/superpaybr")) {
+    console.log(`🔒 Rate limit check: ${pathname} | IP: ${ip} | Limit: ${config.maxRequests}/${config.windowMs}ms`)
   }
 
-  // Apply rate limiting only to API routes and checkout
-  if (pathname.startsWith("/api") || pathname.startsWith("/checkout")) {
-    const ip = getRateLimitKey(request)
+  // Aplicar rate limiting
+  if (isRateLimited(ip, config.maxRequests, config.windowMs)) {
+    console.log(`🚫 Rate limit exceeded: ${pathname} | IP: ${ip}`)
 
-    // Different limits for different endpoints
-    let limit = 30 // requests per minute
-    let windowMs = 60 * 1000 // 1 minute
-
-    // VERY strict limits for TryploPay APIs (except webhook)
-    if (pathname.includes("/tryplopay/") && !pathname.includes("/webhook")) {
-      limit = 3 // Only 3 requests per minute for TryploPay APIs
-      windowMs = 60 * 1000
-      console.log(`🔒 Applying STRICT rate limit (${limit}/min) to TryploPay API: ${pathname}`)
-    }
-
-    if (isRateLimited(ip, limit, windowMs)) {
-      console.log(`🚫 Rate limit exceeded for IP: ${ip} on ${pathname}`)
-
-      return NextResponse.json(
-        {
-          error: "Rate limit exceeded",
-          message: "Too many requests. Please try again later.",
-          retryAfter: Math.ceil(windowMs / 1000),
+    return NextResponse.json(
+      {
+        error: "Rate limit exceeded",
+        message: "Muitas requisições. Tente novamente em alguns segundos.",
+        retryAfter: Math.ceil(config.windowMs / 1000),
+        endpoint: pathname,
+      },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": Math.ceil(config.windowMs / 1000).toString(),
+          "X-RateLimit-Limit": config.maxRequests.toString(),
+          "X-RateLimit-Remaining": "0",
+          "X-RateLimit-Reset": new Date(Date.now() + config.windowMs).toISOString(),
         },
-        {
-          status: 429,
-          headers: {
-            "Retry-After": Math.ceil(windowMs / 1000).toString(),
-            "X-RateLimit-Limit": limit.toString(),
-            "X-RateLimit-Remaining": "0",
-            "X-RateLimit-Reset": new Date(Date.now() + windowMs).toISOString(),
-          },
-        },
-      )
-    }
-
-    // Add rate limit headers to successful responses
-    const current = rateLimitMap.get(ip)
-    const response = NextResponse.next()
-
-    if (current) {
-      response.headers.set("X-RateLimit-Limit", limit.toString())
-      response.headers.set("X-RateLimit-Remaining", Math.max(0, limit - current.count).toString())
-      response.headers.set("X-RateLimit-Reset", new Date(current.resetTime).toISOString())
-    }
-
-    return response
+      },
+    )
   }
 
-  return NextResponse.next()
+  // Adicionar headers de rate limit para respostas bem-sucedidas
+  const current = rateLimitMap.get(ip)
+  const response = NextResponse.next()
+
+  if (current && config.maxRequests !== Number.POSITIVE_INFINITY) {
+    response.headers.set("X-RateLimit-Limit", config.maxRequests.toString())
+    response.headers.set("X-RateLimit-Remaining", Math.max(0, config.maxRequests - current.count).toString())
+    response.headers.set("X-RateLimit-Reset", new Date(current.resetTime).toISOString())
+  }
+
+  return response
 }
 
 export const config = {
-  matcher: ["/api/:path*", "/checkout/:path*", "/upp/checkout/:path*"],
+  matcher: ["/api/:path*", "/checkout/:path*", "/upp/:path*"],
 }
