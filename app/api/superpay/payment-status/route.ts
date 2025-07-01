@@ -1,7 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 
-// Supabase client
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
 export async function GET(request: NextRequest) {
@@ -9,208 +8,86 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const externalId = searchParams.get("externalId")
     const invoiceId = searchParams.get("invoiceId")
-    const token = searchParams.get("token")
 
-    console.log("🔍 Consultando status SuperPay no Supabase:", {
-      externalId,
-      invoiceId,
-      token,
-    })
+    console.log("🔍 Consultando status SuperPay alternativo:", { externalId, invoiceId })
 
-    if (!externalId && !invoiceId && !token) {
+    if (!externalId && !invoiceId) {
       return NextResponse.json(
         {
           success: false,
-          error: "Parâmetro obrigatório: externalId, invoiceId ou token",
+          error: "Parâmetro obrigatório ausente",
+          message: "Forneça externalId ou invoiceId",
         },
         { status: 400 },
       )
     }
 
-    // Build query for Supabase ONLY
-    let query = supabase
-      .from("payment_webhooks")
-      .select("*")
-      .eq("gateway", "superpay")
-      .order("processed_at", { ascending: false })
+    // Construir query para gateway superpay
+    let query = supabase.from("payment_webhooks").select("*").eq("gateway", "superpay")
 
-    // Add search conditions
     if (externalId) {
       query = query.eq("external_id", externalId)
     } else if (invoiceId) {
       query = query.eq("invoice_id", invoiceId)
-    } else if (token) {
-      query = query.or(`external_id.eq.${token},invoice_id.eq.${token}`)
     }
 
-    const { data: records, error } = await query.limit(1)
+    query = query.order("processed_at", { ascending: false }).limit(1)
+
+    const { data, error } = await query.single()
 
     if (error) {
-      console.error("❌ Erro na consulta Supabase:", error)
-      throw error
-    }
-
-    const record = records?.[0]
-
-    if (!record) {
-      console.log("❌ Pagamento SuperPay não encontrado no Supabase")
-      return NextResponse.json({
-        success: true,
-        found: false,
-        data: {
-          isPaid: false,
-          isDenied: false,
-          isExpired: false,
-          isCanceled: false,
-          isRefunded: false,
-          statusCode: null,
-          statusName: "Não encontrado",
-          amount: 0,
-          paymentDate: null,
-          lastUpdate: new Date().toISOString(),
-          source: "supabase_only",
-        },
-      })
-    }
-
-    console.log("✅ Pagamento SuperPay encontrado no Supabase:", {
-      id: record.id,
-      external_id: record.external_id,
-      status: record.status_name,
-      is_paid: record.is_paid,
-    })
-
-    // Return standardized response
-    const response = {
-      success: true,
-      found: true,
-      data: {
-        isPaid: record.is_paid || false,
-        isDenied: record.is_denied || false,
-        isExpired: record.is_expired || false,
-        isCanceled: record.is_canceled || false,
-        isRefunded: record.is_refunded || false,
-        statusCode: record.status_code,
-        statusName: record.status_name,
-        amount: record.amount || 0,
-        paymentDate: record.payment_date,
-        lastUpdate: record.processed_at,
-        externalId: record.external_id,
-        invoiceId: record.invoice_id,
-        webhookData: record.webhook_data,
-        source: "supabase_only",
-      },
-    }
-
-    console.log("📤 Resposta da consulta SuperPay:", {
-      external_id: response.data.externalId,
-      is_paid: response.data.isPaid,
-      status: response.data.statusName,
-      source: response.data.source,
-    })
-
-    return NextResponse.json(response)
-  } catch (error) {
-    console.error("❌ Erro na API de status SuperPay:", error)
-
-    return NextResponse.json(
-      {
-        success: false,
-        error: "Erro interno do servidor",
-        message: error instanceof Error ? error.message : "Erro desconhecido",
-        timestamp: new Date().toISOString(),
-      },
-      { status: 500 },
-    )
-  }
-}
-
-export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json()
-    const { externalIds } = body
-
-    if (!Array.isArray(externalIds) || externalIds.length === 0) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Array de externalIds é obrigatório",
-        },
-        { status: 400 },
-      )
-    }
-
-    console.log("🔍 Consulta em lote SuperPay no Supabase:", externalIds)
-
-    // Query multiple records from Supabase ONLY
-    const { data: records, error } = await supabase
-      .from("payment_webhooks")
-      .select("*")
-      .eq("gateway", "superpay")
-      .in("external_id", externalIds)
-      .order("processed_at", { ascending: false })
-
-    if (error) {
-      console.error("❌ Erro na consulta em lote Supabase:", error)
-      throw error
-    }
-
-    // Map results
-    const results = externalIds.map((externalId) => {
-      const record = records?.find((r) => r.external_id === externalId)
-
-      if (!record) {
-        return {
-          externalId,
+      if (error.code === "PGRST116") {
+        console.log("⚠️ Nenhum webhook SuperPay alternativo encontrado para:", { externalId, invoiceId })
+        return NextResponse.json({
+          success: true,
           found: false,
-          isPaid: false,
-          isDenied: false,
-          isExpired: false,
-          isCanceled: false,
-          isRefunded: false,
-          statusCode: null,
-          statusName: "Não encontrado",
-          amount: 0,
-          paymentDate: null,
-          lastUpdate: new Date().toISOString(),
-          source: "supabase_only",
-        }
+          message: "Nenhum webhook encontrado - aguardando pagamento",
+          data: null,
+          timestamp: new Date().toISOString(),
+        })
       }
 
-      return {
-        externalId: record.external_id,
-        found: true,
-        isPaid: record.is_paid || false,
-        isDenied: record.is_denied || false,
-        isExpired: record.is_expired || false,
-        isCanceled: record.is_canceled || false,
-        isRefunded: record.is_refunded || false,
-        statusCode: record.status_code,
-        statusName: record.status_name,
-        amount: record.amount || 0,
-        paymentDate: record.payment_date,
-        lastUpdate: record.processed_at,
-        invoiceId: record.invoice_id,
-        source: "supabase_only",
-      }
+      console.error("❌ Erro ao consultar SuperPay alternativo:", error)
+      throw error
+    }
+
+    console.log("📊 Status SuperPay alternativo encontrado:", {
+      external_id: data.external_id,
+      status_code: data.status_code,
+      is_paid: data.is_paid,
     })
-
-    console.log(
-      `✅ Consulta em lote SuperPay concluída: ${results.filter((r) => r.found).length}/${externalIds.length} encontrados`,
-    )
 
     return NextResponse.json({
       success: true,
-      data: results,
-      summary: {
-        total: externalIds.length,
-        found: results.filter((r) => r.found).length,
-        paid: results.filter((r) => r.isPaid).length,
-        source: "supabase_only",
+      found: true,
+      message: "Status encontrado",
+      data: {
+        external_id: data.external_id,
+        invoice_id: data.invoice_id,
+        token: data.token,
+        status_code: data.status_code,
+        status_title: data.status_title,
+        status_description: data.status_description,
+        status_text: data.status_text,
+        amount: data.amount,
+        payment_date: data.payment_date,
+        payment_due: data.payment_due,
+        payment_gateway: data.payment_gateway,
+        qr_code: data.qr_code,
+        processed_at: data.processed_at,
+        updated_at: data.updated_at,
+        is_paid: data.is_paid,
+        is_denied: data.is_denied,
+        is_expired: data.is_expired,
+        is_canceled: data.is_canceled,
+        is_refunded: data.is_refunded,
+        gateway: data.gateway,
+        webhook_data: data.webhook_data,
       },
+      timestamp: new Date().toISOString(),
     })
   } catch (error) {
-    console.error("❌ Erro na consulta em lote SuperPay:", error)
+    console.error("❌ Erro na consulta SuperPay alternativo:", error)
 
     return NextResponse.json(
       {

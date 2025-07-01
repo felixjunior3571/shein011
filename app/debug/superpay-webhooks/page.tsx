@@ -1,106 +1,66 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Separator } from "@/components/ui/separator"
-import { Alert, AlertDescription } from "@/components/ui/alert"
-import { RefreshCw, Database, Webhook, CheckCircle, XCircle, Clock, AlertTriangle, Activity } from "lucide-react"
 import { createClient } from "@supabase/supabase-js"
 
-// Supabase client
-const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
+const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
-interface WebhookRecord {
+interface WebhookData {
   id: number
   external_id: string
   invoice_id: string
+  token?: string
   status_code: number
-  status_name: string
+  status_title: string
+  status_description?: string
+  status_text: string
   amount: number
-  payment_date: string | null
+  payment_date?: string
+  payment_due?: string
+  payment_gateway?: string
+  qr_code?: string
   processed_at: string
+  updated_at: string
   is_paid: boolean
   is_denied: boolean
   is_expired: boolean
   is_canceled: boolean
   is_refunded: boolean
   gateway: string
-  webhook_data: any
-}
-
-interface Stats {
-  total: number
-  paid: number
-  denied: number
-  expired: number
-  canceled: number
-  refunded: number
-  pending: number
+  webhook_data?: any
 }
 
 export default function SuperPayWebhooksDebugPage() {
-  const [webhooks, setWebhooks] = useState<WebhookRecord[]>([])
-  const [stats, setStats] = useState<Stats>({
-    total: 0,
-    paid: 0,
-    denied: 0,
-    expired: 0,
-    canceled: 0,
-    refunded: 0,
-    pending: 0,
-  })
+  const [webhooks, setWebhooks] = useState<WebhookData[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [lastUpdate, setLastUpdate] = useState<string>("")
+  const [selectedGateway, setSelectedGateway] = useState<"all" | "superpaybr" | "superpay">("all")
+  const [selectedWebhook, setSelectedWebhook] = useState<WebhookData | null>(null)
 
   const loadWebhooks = async () => {
     try {
       setLoading(true)
       setError(null)
 
-      console.log("🔍 Carregando webhooks SuperPay do Supabase...")
+      let query = supabase.from("payment_webhooks").select("*")
 
-      // Get recent webhooks
-      const { data: webhookData, error: webhookError } = await supabase
-        .from("payment_webhooks")
-        .select("*")
-        .eq("gateway", "superpay")
-        .order("processed_at", { ascending: false })
-        .limit(50)
-
-      if (webhookError) {
-        throw webhookError
+      if (selectedGateway !== "all") {
+        query = query.eq("gateway", selectedGateway)
       }
 
-      setWebhooks(webhookData || [])
+      query = query.order("processed_at", { ascending: false }).limit(50)
 
-      // Calculate stats
-      const totalWebhooks = webhookData?.length || 0
-      const paidCount = webhookData?.filter((w) => w.is_paid).length || 0
-      const deniedCount = webhookData?.filter((w) => w.is_denied).length || 0
-      const expiredCount = webhookData?.filter((w) => w.is_expired).length || 0
-      const canceledCount = webhookData?.filter((w) => w.is_canceled).length || 0
-      const refundedCount = webhookData?.filter((w) => w.is_refunded).length || 0
-      const pendingCount = totalWebhooks - paidCount - deniedCount - expiredCount - canceledCount - refundedCount
+      const { data, error: dbError } = await query
 
-      setStats({
-        total: totalWebhooks,
-        paid: paidCount,
-        denied: deniedCount,
-        expired: expiredCount,
-        canceled: canceledCount,
-        refunded: refundedCount,
-        pending: pendingCount,
-      })
+      if (dbError) {
+        throw dbError
+      }
 
-      setLastUpdate(new Date().toLocaleTimeString("pt-BR"))
-      console.log(`✅ ${totalWebhooks} webhooks SuperPay carregados do Supabase`)
+      setWebhooks(data || [])
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Erro desconhecido"
-      console.error("❌ Erro ao carregar webhooks SuperPay:", errorMessage)
       setError(errorMessage)
+      console.error("❌ Erro ao carregar webhooks:", err)
     } finally {
       setLoading(false)
     }
@@ -108,264 +68,317 @@ export default function SuperPayWebhooksDebugPage() {
 
   useEffect(() => {
     loadWebhooks()
+  }, [selectedGateway])
 
-    // Auto-refresh every 10 seconds
-    const interval = setInterval(loadWebhooks, 10000)
-    return () => clearInterval(interval)
-  }, [])
-
-  const getStatusIcon = (webhook: WebhookRecord) => {
-    if (webhook.is_paid) return <CheckCircle className="h-4 w-4 text-green-500" />
-    if (webhook.is_denied) return <XCircle className="h-4 w-4 text-red-500" />
-    if (webhook.is_expired) return <Clock className="h-4 w-4 text-orange-500" />
-    if (webhook.is_canceled) return <AlertTriangle className="h-4 w-4 text-yellow-500" />
-    if (webhook.is_refunded) return <RefreshCw className="h-4 w-4 text-blue-500" />
-    return <Activity className="h-4 w-4 text-gray-500" />
+  const getStatusBadge = (webhook: WebhookData) => {
+    if (webhook.is_paid) return "✅ Pago"
+    if (webhook.is_denied) return "❌ Negado"
+    if (webhook.is_expired) return "⏰ Vencido"
+    if (webhook.is_canceled) return "🚫 Cancelado"
+    if (webhook.is_refunded) return "🔄 Estornado"
+    return "⏳ Pendente"
   }
 
-  const getStatusBadge = (webhook: WebhookRecord) => {
-    if (webhook.is_paid) return <Badge className="bg-green-500">Pago</Badge>
-    if (webhook.is_denied) return <Badge variant="destructive">Negado</Badge>
-    if (webhook.is_expired) return <Badge className="bg-orange-500">Vencido</Badge>
-    if (webhook.is_canceled) return <Badge className="bg-yellow-500">Cancelado</Badge>
-    if (webhook.is_refunded) return <Badge className="bg-blue-500">Estornado</Badge>
-    return <Badge variant="secondary">Pendente</Badge>
+  const getStatusColor = (webhook: WebhookData) => {
+    if (webhook.is_paid) return "text-green-600 bg-green-100"
+    if (webhook.is_denied) return "text-red-600 bg-red-100"
+    if (webhook.is_expired) return "text-yellow-600 bg-yellow-100"
+    if (webhook.is_canceled) return "text-gray-600 bg-gray-100"
+    if (webhook.is_refunded) return "text-blue-600 bg-blue-100"
+    return "text-orange-600 bg-orange-100"
+  }
+
+  const simulatePayment = async (externalId: string, gateway: string) => {
+    try {
+      const endpoint = gateway === "superpaybr" ? "/api/superpaybr/simulate-payment" : "/api/superpay/simulate-payment"
+
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          external_id: externalId,
+          status_code: 5,
+          amount: 27.97,
+        }),
+      })
+
+      const result = await response.json()
+
+      if (result.success) {
+        alert(`✅ Pagamento simulado com sucesso para ${externalId}`)
+        loadWebhooks() // Recarregar lista
+      } else {
+        alert(`❌ Erro na simulação: ${result.message}`)
+      }
+    } catch (error) {
+      alert(`❌ Erro na simulação: ${error}`)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Carregando webhooks...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="text-red-600 text-6xl mb-4">❌</div>
+          <h2 className="text-xl font-bold text-red-600 mb-2">Erro ao carregar webhooks</h2>
+          <p className="text-gray-600 mb-4">{error}</p>
+          <button
+            onClick={loadWebhooks}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg transition-colors"
+          >
+            Tentar Novamente
+          </button>
+        </div>
+      </div>
+    )
   }
 
   return (
     <div className="min-h-screen bg-gray-50 p-4">
-      <div className="max-w-7xl mx-auto space-y-6">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900">Debug SuperPay Webhooks</h1>
-            <p className="text-gray-600">Sistema 100% Supabase - Monitoramento em tempo real</p>
+      <div className="max-w-7xl mx-auto">
+        <div className="bg-white rounded-lg shadow-md p-6 mb-6">
+          <div className="flex items-center justify-between mb-6">
+            <h1 className="text-2xl font-bold text-gray-900">Debug SuperPay Webhooks</h1>
+            <button
+              onClick={loadWebhooks}
+              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
+            >
+              🔄 Recarregar
+            </button>
           </div>
-          <Button onClick={loadWebhooks} disabled={loading}>
-            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
-            Atualizar
-          </Button>
-        </div>
 
-        {/* System Status */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Database className="h-5 w-5" />
-              Status do Sistema SuperPay
-            </CardTitle>
-            <CardDescription>Configuração e conectividade</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="text-center">
-                <div className="text-2xl font-bold text-green-600">✅</div>
-                <p className="text-sm font-medium">Supabase</p>
-                <p className="text-xs text-gray-500">Conectado</p>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-blue-600">🔔</div>
-                <p className="text-sm font-medium">Webhooks</p>
-                <p className="text-xs text-gray-500">Ativo</p>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-purple-600">⚡</div>
-                <p className="text-sm font-medium">API Status</p>
-                <p className="text-xs text-gray-500">Operacional</p>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-orange-600">🔄</div>
-                <p className="text-sm font-medium">Última Atualização</p>
-                <p className="text-xs text-gray-500">{lastUpdate}</p>
-              </div>
+          {/* Filtros */}
+          <div className="mb-6">
+            <label className="block text-sm font-medium text-gray-700 mb-2">Filtrar por Gateway:</label>
+            <select
+              value={selectedGateway}
+              onChange={(e) => setSelectedGateway(e.target.value as "all" | "superpaybr" | "superpay")}
+              className="border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="all">Todos os Gateways</option>
+              <option value="superpaybr">SuperPayBR</option>
+              <option value="superpay">SuperPay</option>
+            </select>
+          </div>
+
+          {/* Estatísticas */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+              <div className="text-green-600 font-bold text-2xl">{webhooks.filter((w) => w.is_paid).length}</div>
+              <div className="text-green-700 text-sm">Pagamentos Confirmados</div>
             </div>
-          </CardContent>
-        </Card>
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+              <div className="text-red-600 font-bold text-2xl">{webhooks.filter((w) => w.is_denied).length}</div>
+              <div className="text-red-700 text-sm">Pagamentos Negados</div>
+            </div>
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+              <div className="text-yellow-600 font-bold text-2xl">{webhooks.filter((w) => w.is_expired).length}</div>
+              <div className="text-yellow-700 text-sm">Pagamentos Vencidos</div>
+            </div>
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <div className="text-blue-600 font-bold text-2xl">{webhooks.length}</div>
+              <div className="text-blue-700 text-sm">Total de Webhooks</div>
+            </div>
+          </div>
 
-        {/* Statistics */}
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
-          <Card>
-            <CardContent className="p-4 text-center">
-              <div className="text-2xl font-bold text-gray-900">{stats.total}</div>
-              <p className="text-sm text-gray-600">Total</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4 text-center">
-              <div className="text-2xl font-bold text-green-600">{stats.paid}</div>
-              <p className="text-sm text-gray-600">Pagos</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4 text-center">
-              <div className="text-2xl font-bold text-red-600">{stats.denied}</div>
-              <p className="text-sm text-gray-600">Negados</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4 text-center">
-              <div className="text-2xl font-bold text-orange-600">{stats.expired}</div>
-              <p className="text-sm text-gray-600">Vencidos</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4 text-center">
-              <div className="text-2xl font-bold text-yellow-600">{stats.canceled}</div>
-              <p className="text-sm text-gray-600">Cancelados</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4 text-center">
-              <div className="text-2xl font-bold text-blue-600">{stats.refunded}</div>
-              <p className="text-sm text-gray-600">Estornados</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4 text-center">
-              <div className="text-2xl font-bold text-gray-600">{stats.pending}</div>
-              <p className="text-sm text-gray-600">Pendentes</p>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Error Display */}
-        {error && (
-          <Alert className="border-red-200 bg-red-50">
-            <XCircle className="h-4 w-4" />
-            <AlertDescription>
-              <strong>Erro:</strong> {error}
-            </AlertDescription>
-          </Alert>
-        )}
-
-        {/* Webhooks List */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Webhook className="h-5 w-5" />
-              Webhooks Recentes SuperPay
-            </CardTitle>
-            <CardDescription>Últimos 50 webhooks processados (armazenamento: Supabase apenas)</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {loading ? (
-              <div className="flex items-center justify-center py-8">
-                <RefreshCw className="h-6 w-6 animate-spin mr-2" />
-                <span>Carregando webhooks...</span>
-              </div>
-            ) : webhooks.length === 0 ? (
-              <div className="text-center py-8 text-gray-500">
-                <Webhook className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                <p>Nenhum webhook SuperPay encontrado</p>
-                <p className="text-sm">Os webhooks aparecerão aqui quando forem recebidos</p>
-              </div>
-            ) : (
-              <div className="space-y-4">
+          {/* Lista de Webhooks */}
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    External ID
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Gateway
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Status
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Valor
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Data
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Ações
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
                 {webhooks.map((webhook) => (
-                  <div key={webhook.id} className="border rounded-lg p-4 hover:bg-gray-50">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        {getStatusIcon(webhook)}
-                        <span className="font-medium">{webhook.external_id}</span>
+                  <tr key={webhook.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm font-medium text-gray-900">{webhook.external_id}</div>
+                      <div className="text-sm text-gray-500">ID: {webhook.invoice_id}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span
+                        className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                          webhook.gateway === "superpaybr"
+                            ? "bg-purple-100 text-purple-800"
+                            : "bg-indigo-100 text-indigo-800"
+                        }`}
+                      >
+                        {webhook.gateway.toUpperCase()}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span
+                        className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(webhook)}`}
+                      >
                         {getStatusBadge(webhook)}
-                      </div>
-                      <div className="text-sm text-gray-500">
-                        {new Date(webhook.processed_at).toLocaleString("pt-BR")}
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                      <div>
-                        <span className="text-gray-500">Invoice ID:</span>
-                        <p className="font-mono text-xs">{webhook.invoice_id}</p>
-                      </div>
-                      <div>
-                        <span className="text-gray-500">Status Code:</span>
-                        <p className="font-bold">{webhook.status_code}</p>
-                      </div>
-                      <div>
-                        <span className="text-gray-500">Valor:</span>
-                        <p className="font-bold text-green-600">R$ {webhook.amount?.toFixed(2) || "0.00"}</p>
-                      </div>
-                      <div>
-                        <span className="text-gray-500">Gateway:</span>
-                        <p className="uppercase font-medium">{webhook.gateway}</p>
-                      </div>
-                    </div>
-
-                    {webhook.payment_date && (
-                      <div className="mt-2 text-sm">
-                        <span className="text-gray-500">Data do Pagamento:</span>
-                        <span className="ml-2 font-medium">
-                          {new Date(webhook.payment_date).toLocaleString("pt-BR")}
-                        </span>
-                      </div>
-                    )}
-
-                    <Separator className="my-2" />
-
-                    <details className="text-xs">
-                      <summary className="cursor-pointer text-gray-500 hover:text-gray-700">
-                        Ver dados do webhook
-                      </summary>
-                      <pre className="mt-2 p-2 bg-gray-100 rounded text-xs overflow-auto">
-                        {JSON.stringify(webhook.webhook_data, null, 2)}
-                      </pre>
-                    </details>
-                  </div>
+                      </span>
+                      <div className="text-xs text-gray-500 mt-1">Código: {webhook.status_code}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      R$ {webhook.amount.toFixed(2)}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      {new Date(webhook.processed_at).toLocaleString()}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
+                      <button onClick={() => setSelectedWebhook(webhook)} className="text-blue-600 hover:text-blue-900">
+                        Ver Detalhes
+                      </button>
+                      {!webhook.is_paid && (
+                        <button
+                          onClick={() => simulatePayment(webhook.external_id, webhook.gateway)}
+                          className="text-green-600 hover:text-green-900"
+                        >
+                          Simular Pago
+                        </button>
+                      )}
+                    </td>
+                  </tr>
                 ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+              </tbody>
+            </table>
+          </div>
 
-        {/* Technical Info */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Informações Técnicas</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-              <div>
-                <h4 className="font-medium mb-2">Configuração SuperPay:</h4>
-                <ul className="space-y-1 text-gray-600">
-                  <li>
-                    • Webhook Endpoint: <code>/api/superpay/webhook</code>
-                  </li>
-                  <li>
-                    • Status API: <code>/api/superpay/payment-status</code>
-                  </li>
-                  <li>
-                    • Gateway: <code>superpay</code>
-                  </li>
-                  <li>
-                    • Armazenamento: <strong>Supabase apenas</strong>
-                  </li>
-                </ul>
-              </div>
-              <div>
-                <h4 className="font-medium mb-2">Status Codes SuperPay:</h4>
-                <ul className="space-y-1 text-gray-600">
-                  <li>
-                    • <strong>5</strong>: Pago (crítico)
-                  </li>
-                  <li>
-                    • <strong>12</strong>: Negado (crítico)
-                  </li>
-                  <li>
-                    • <strong>15</strong>: Vencido (crítico)
-                  </li>
-                  <li>
-                    • <strong>6</strong>: Cancelado (crítico)
-                  </li>
-                  <li>
-                    • <strong>9</strong>: Estornado (crítico)
-                  </li>
-                </ul>
+          {webhooks.length === 0 && (
+            <div className="text-center py-12">
+              <div className="text-gray-400 text-6xl mb-4">📭</div>
+              <h3 className="text-lg font-medium text-gray-900 mb-2">Nenhum webhook encontrado</h3>
+              <p className="text-gray-500">
+                {selectedGateway === "all"
+                  ? "Não há webhooks registrados ainda."
+                  : `Não há webhooks do gateway ${selectedGateway.toUpperCase()}.`}
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* Modal de Detalhes */}
+        {selectedWebhook && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+              <div className="p-6">
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className="text-xl font-bold text-gray-900">Detalhes do Webhook</h2>
+                  <button onClick={() => setSelectedWebhook(null)} className="text-gray-400 hover:text-gray-600">
+                    ✕
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <h3 className="text-lg font-medium text-gray-900 mb-4">Informações Básicas</h3>
+                    <dl className="space-y-2">
+                      <div>
+                        <dt className="text-sm font-medium text-gray-500">External ID</dt>
+                        <dd className="text-sm text-gray-900">{selectedWebhook.external_id}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-sm font-medium text-gray-500">Invoice ID</dt>
+                        <dd className="text-sm text-gray-900">{selectedWebhook.invoice_id}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-sm font-medium text-gray-500">Gateway</dt>
+                        <dd className="text-sm text-gray-900">{selectedWebhook.gateway.toUpperCase()}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-sm font-medium text-gray-500">Status</dt>
+                        <dd className="text-sm text-gray-900">
+                          {selectedWebhook.status_title} (Código: {selectedWebhook.status_code})
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-sm font-medium text-gray-500">Valor</dt>
+                        <dd className="text-sm text-gray-900">R$ {selectedWebhook.amount.toFixed(2)}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-sm font-medium text-gray-500">Data de Processamento</dt>
+                        <dd className="text-sm text-gray-900">
+                          {new Date(selectedWebhook.processed_at).toLocaleString()}
+                        </dd>
+                      </div>
+                    </dl>
+                  </div>
+
+                  <div>
+                    <h3 className="text-lg font-medium text-gray-900 mb-4">Status Flags</h3>
+                    <div className="space-y-2">
+                      <div
+                        className={`flex items-center space-x-2 ${selectedWebhook.is_paid ? "text-green-600" : "text-gray-400"}`}
+                      >
+                        <span>{selectedWebhook.is_paid ? "✅" : "❌"}</span>
+                        <span>Pago</span>
+                      </div>
+                      <div
+                        className={`flex items-center space-x-2 ${selectedWebhook.is_denied ? "text-red-600" : "text-gray-400"}`}
+                      >
+                        <span>{selectedWebhook.is_denied ? "✅" : "❌"}</span>
+                        <span>Negado</span>
+                      </div>
+                      <div
+                        className={`flex items-center space-x-2 ${selectedWebhook.is_expired ? "text-yellow-600" : "text-gray-400"}`}
+                      >
+                        <span>{selectedWebhook.is_expired ? "✅" : "❌"}</span>
+                        <span>Vencido</span>
+                      </div>
+                      <div
+                        className={`flex items-center space-x-2 ${selectedWebhook.is_canceled ? "text-gray-600" : "text-gray-400"}`}
+                      >
+                        <span>{selectedWebhook.is_canceled ? "✅" : "❌"}</span>
+                        <span>Cancelado</span>
+                      </div>
+                      <div
+                        className={`flex items-center space-x-2 ${selectedWebhook.is_refunded ? "text-blue-600" : "text-gray-400"}`}
+                      >
+                        <span>{selectedWebhook.is_refunded ? "✅" : "❌"}</span>
+                        <span>Estornado</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {selectedWebhook.webhook_data && (
+                  <div className="mt-6">
+                    <h3 className="text-lg font-medium text-gray-900 mb-4">Dados Brutos do Webhook</h3>
+                    <pre className="bg-gray-100 rounded-lg p-4 text-sm overflow-x-auto">
+                      {JSON.stringify(selectedWebhook.webhook_data, null, 2)}
+                    </pre>
+                  </div>
+                )}
               </div>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        )}
       </div>
     </div>
   )
