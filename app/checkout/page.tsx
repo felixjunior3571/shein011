@@ -5,10 +5,9 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Progress } from "@/components/ui/progress"
-import { useSuperpayWebhookMonitor } from "@/hooks/use-superpay-webhook-monitor"
+import { useRealtimePaymentMonitor } from "@/hooks/use-realtime-payment-monitor"
 import { SmartQRCode } from "@/components/smart-qr-code"
-import { Clock, CheckCircle, XCircle, AlertCircle, RefreshCw, Copy } from "lucide-react"
+import { Clock, CheckCircle, XCircle, AlertCircle, RefreshCw, Copy, Wifi, WifiOff } from "lucide-react"
 import Image from "next/image"
 
 interface InvoiceData {
@@ -50,6 +49,35 @@ export default function CheckoutPage() {
   const shipping = searchParams.get("shipping") || "sedex"
   const method = searchParams.get("method") || "SEDEX"
 
+  // Monitor Realtime (SEM POLLING!)
+  const {
+    status,
+    isConnected,
+    error: realtimeError,
+    reconnect,
+    isReady,
+  } = useRealtimePaymentMonitor({
+    externalId,
+    onPaymentConfirmed: (status) => {
+      console.log("🎉 Pagamento confirmado via Realtime! Redirecionando...", status)
+    },
+    onPaymentDenied: (status) => {
+      console.log("❌ Pagamento negado:", status)
+      setError("Pagamento negado pela SuperPay")
+    },
+    onPaymentExpired: (status) => {
+      console.log("⏰ Pagamento vencido:", status)
+      setError("Pagamento vencido")
+    },
+    onPaymentCanceled: (status) => {
+      console.log("🚫 Pagamento cancelado:", status)
+      setError("Pagamento cancelado")
+    },
+    enabled: !!externalId,
+    debug: true,
+    autoRedirect: true,
+  })
+
   // Carregar dados do usuário e criar fatura
   useEffect(() => {
     createInvoice()
@@ -79,50 +107,6 @@ export default function CheckoutPage() {
       }
     }
   }, [invoice])
-
-  // Monitor de webhook SuperPay
-  const {
-    status,
-    isMonitoring,
-    checkCount,
-    maxChecks,
-    currentInterval,
-    error: monitorError,
-    progress,
-  } = useSuperpayWebhookMonitor({
-    externalId,
-    onPaymentConfirmed: (status) => {
-      console.log("🎉 Pagamento confirmado! Redirecionando...", status)
-      // Salvar dados do pagamento
-      localStorage.setItem(
-        "payment_confirmed",
-        JSON.stringify({
-          external_id: status.external_id,
-          amount: status.amount,
-          payment_date: status.payment_date,
-          confirmed_at: new Date().toISOString(),
-        }),
-      )
-      // Redirecionar para página de sucesso
-      setTimeout(() => {
-        router.push("/upp/001")
-      }, 2000)
-    },
-    onPaymentDenied: (status) => {
-      console.log("❌ Pagamento negado:", status)
-      setError("Pagamento negado pela SuperPay")
-    },
-    onPaymentExpired: (status) => {
-      console.log("⏰ Pagamento vencido:", status)
-      setError("Pagamento vencido")
-    },
-    onPaymentCanceled: (status) => {
-      console.log("🚫 Pagamento cancelado:", status)
-      setError("Pagamento cancelado")
-    },
-    enabled: !!externalId,
-    debug: true,
-  })
 
   const createInvoice = async () => {
     try {
@@ -326,26 +310,23 @@ export default function CheckoutPage() {
               </div>
             )}
 
-            {/* Progress Bar */}
-            {isMonitoring && (
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm text-gray-600">
-                  <span>
-                    Verificações: {checkCount} | Intervalo: {Math.floor(currentInterval / 1000)}s | Nível:{" "}
-                    {Math.min(Math.floor(checkCount / 5) + 1, 8)}
-                  </span>
-                </div>
-                <Progress value={progress} className="h-2" />
-                <p className="text-xs text-gray-500 text-center">
-                  Última verificação:{" "}
-                  {status?.last_check ? new Date(status.last_check).toLocaleTimeString() : "Aguardando..."}
-                </p>
-              </div>
-            )}
+            {/* Realtime Connection Status */}
+            <div className="flex items-center gap-2 mb-4">
+              {isConnected ? <Wifi className="h-4 w-4 text-green-500" /> : <WifiOff className="h-4 w-4 text-red-500" />}
+              <span className="text-sm text-gray-600">
+                {isConnected ? "Conectado em tempo real" : "Reconectando..."}
+              </span>
+              {!isReady && <RefreshCw className="h-4 w-4 animate-spin text-blue-500" />}
+            </div>
 
-            {(error || monitorError) && (
+            {(error || realtimeError) && (
               <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-                <p className="text-sm text-red-600">⚠️ {error || monitorError}</p>
+                <p className="text-sm text-red-600">⚠️ {error || realtimeError}</p>
+                {realtimeError && (
+                  <Button onClick={reconnect} variant="outline" size="sm" className="mt-2 bg-transparent">
+                    Reconectar
+                  </Button>
+                )}
               </div>
             )}
           </CardContent>
@@ -421,7 +402,7 @@ export default function CheckoutPage() {
                 <span className="bg-black text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold mt-0.5">
                   4
                 </span>
-                <span>Aguarde a confirmação automática via webhook SuperPay</span>
+                <span>Aguarde a confirmação automática em tempo real</span>
               </div>
             </div>
           </CardContent>
@@ -439,9 +420,9 @@ export default function CheckoutPage() {
 
         {/* Action Buttons */}
         <div className="space-y-3">
-          <Button onClick={() => window.location.reload()} variant="outline" className="w-full" disabled={isMonitoring}>
-            <RefreshCw className={`h-4 w-4 mr-2 ${isMonitoring ? "animate-spin" : ""}`} />
-            Verificar Agora
+          <Button onClick={() => window.location.reload()} variant="outline" className="w-full">
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Recarregar Página
           </Button>
 
           <Button onClick={() => router.push("/")} variant="ghost" className="w-full">
