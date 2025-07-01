@@ -63,11 +63,12 @@ export function useRealtimePaymentMonitor({
   const channelRef = useRef<any>(null)
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const hasRedirectedRef = useRef(false)
+  const maxReconnectAttempts = 10
 
   const log = useCallback(
     (message: string, data?: any) => {
       if (debug) {
-        console.log(`[Realtime Monitor] ${message}`, data || "")
+        console.log(`🔄 [Realtime Monitor] ${message}`, data || "")
       }
     },
     [debug],
@@ -80,46 +81,46 @@ export function useRealtimePaymentMonitor({
     try {
       log(`🔍 Verificando status inicial para: ${externalId}`)
 
+      // Buscar em ambos os gateways (superpay e superpaybr)
       const { data, error } = await supabase
         .from("payment_webhooks")
         .select("*")
         .eq("external_id", externalId)
-        .eq("gateway", "superpaybr")
+        .in("gateway", ["superpay", "superpaybr"])
         .order("updated_at", { ascending: false })
         .limit(1)
-        .single()
 
       if (error && error.code !== "PGRST116") {
-        // PGRST116 = No rows found, que é normal
         log(`❌ Erro ao verificar status inicial:`, error)
         setError(`Erro ao verificar status: ${error.message}`)
         return
       }
 
-      if (data) {
-        log(`✅ Status inicial encontrado:`, data)
-        setCurrentStatus(data)
+      if (data && data.length > 0) {
+        const payment = data[0]
+        log(`✅ Status inicial encontrado:`, payment)
+        setCurrentStatus(payment)
         setLastUpdate(new Date().toISOString())
 
         // Verificar se já está pago
-        if (data.is_paid && !hasRedirectedRef.current) {
+        if (payment.is_paid && !hasRedirectedRef.current) {
           log(`🎉 Pagamento já confirmado! Executando callback...`)
-          onPaymentConfirmed?.(data)
+          onPaymentConfirmed?.(payment)
 
           if (autoRedirect) {
             hasRedirectedRef.current = true
             log(`🚀 Redirecionando para: ${redirectUrl}`)
             router.push(redirectUrl)
           }
-        } else if (data.is_denied) {
+        } else if (payment.is_denied) {
           log(`❌ Pagamento negado`)
-          onPaymentDenied?.(data)
-        } else if (data.is_expired) {
+          onPaymentDenied?.(payment)
+        } else if (payment.is_expired) {
           log(`⏰ Pagamento vencido`)
-          onPaymentExpired?.(data)
-        } else if (data.is_canceled) {
+          onPaymentExpired?.(payment)
+        } else if (payment.is_canceled) {
           log(`🚫 Pagamento cancelado`)
-          onPaymentCanceled?.(data)
+          onPaymentCanceled?.(payment)
         }
       } else {
         log(`ℹ️ Nenhum status encontrado ainda para: ${externalId}`)
@@ -143,7 +144,11 @@ export function useRealtimePaymentMonitor({
 
   // Função para conectar ao Realtime
   const connect = useCallback(() => {
-    if (!externalId || !enabled || channelRef.current) {
+    if (!externalId || !enabled || channelRef.current || connectionAttempts >= maxReconnectAttempts) {
+      if (connectionAttempts >= maxReconnectAttempts) {
+        log(`❌ Máximo de tentativas de reconexão atingido (${maxReconnectAttempts})`)
+        setError("Máximo de tentativas de conexão atingido")
+      }
       return
     }
 
@@ -188,7 +193,7 @@ export function useRealtimePaymentMonitor({
                   log(`🚀 Redirecionando para: ${redirectUrl}`)
                   setTimeout(() => {
                     router.push(redirectUrl)
-                  }, 1000) // Delay de 1 segundo para mostrar a confirmação
+                  }, 1500) // Delay de 1.5 segundos para mostrar a confirmação
                 }
               } else if (newData.is_denied) {
                 log(`❌ PAGAMENTO NEGADO VIA REALTIME`)
@@ -211,10 +216,13 @@ export function useRealtimePaymentMonitor({
             setIsConnecting(false)
             setError(null)
             setIsReady(true)
+            setConnectionAttempts(0) // Reset counter on successful connection
             log(`✅ Conectado ao Realtime com sucesso!`)
 
             // Verificar status inicial após conectar
-            checkInitialStatus()
+            setTimeout(() => {
+              checkInitialStatus()
+            }, 1000)
           } else if (status === "CHANNEL_ERROR") {
             setIsConnected(false)
             setIsConnecting(false)
@@ -243,6 +251,7 @@ export function useRealtimePaymentMonitor({
     externalId,
     enabled,
     connectionAttempts,
+    maxReconnectAttempts,
     log,
     checkInitialStatus,
     onPaymentConfirmed,
@@ -274,14 +283,20 @@ export function useRealtimePaymentMonitor({
 
   // Função para reconectar
   const reconnect = useCallback(() => {
+    if (connectionAttempts >= maxReconnectAttempts) {
+      log(`❌ Máximo de tentativas de reconexão atingido`)
+      return
+    }
+
     log(`🔄 Iniciando reconexão...`)
     disconnect()
 
-    // Aguardar um pouco antes de reconectar
+    // Aguardar um pouco antes de reconectar (backoff exponencial)
+    const delay = Math.min(2000 * Math.pow(2, connectionAttempts), 30000)
     reconnectTimeoutRef.current = setTimeout(() => {
       connect()
-    }, 2000)
-  }, [log, disconnect, connect])
+    }, delay)
+  }, [log, disconnect, connect, connectionAttempts, maxReconnectAttempts])
 
   // Efeito principal para gerenciar a conexão
   useEffect(() => {
@@ -300,8 +315,8 @@ export function useRealtimePaymentMonitor({
 
   // Efeito para reconexão automática em caso de erro
   useEffect(() => {
-    if (error && enabled && externalId && connectionAttempts < 5) {
-      log(`🔄 Tentando reconexão automática em 5 segundos... (tentativa ${connectionAttempts}/5)`)
+    if (error && enabled && externalId && connectionAttempts < maxReconnectAttempts && !isConnecting) {
+      log(`🔄 Tentando reconexão automática em 5 segundos... (tentativa ${connectionAttempts}/${maxReconnectAttempts})`)
 
       reconnectTimeoutRef.current = setTimeout(() => {
         reconnect()
@@ -313,7 +328,7 @@ export function useRealtimePaymentMonitor({
         clearTimeout(reconnectTimeoutRef.current)
       }
     }
-  }, [error, enabled, externalId, connectionAttempts, reconnect, log])
+  }, [error, enabled, externalId, connectionAttempts, maxReconnectAttempts, isConnecting, reconnect, log])
 
   return {
     isConnected,
@@ -322,6 +337,7 @@ export function useRealtimePaymentMonitor({
     lastUpdate,
     currentStatus,
     connectionAttempts,
+    maxReconnectAttempts,
     isReady,
     reconnect,
     disconnect,
