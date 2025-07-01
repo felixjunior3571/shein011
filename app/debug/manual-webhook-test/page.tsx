@@ -3,19 +3,35 @@
 import { useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
-import { Separator } from "@/components/ui/separator"
-import { CheckCircle, XCircle, RefreshCw, Database, Webhook, Play, Eye } from "lucide-react"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { CheckCircle, XCircle, RefreshCw, Database, Webhook, Eye } from "lucide-react"
+
+interface WebhookResponse {
+  success: boolean
+  message: string
+  data?: any
+  error?: string
+}
+
+interface DatabaseRecord {
+  id: number
+  external_id: string
+  status_code: number
+  status_title: string
+  amount: number
+  is_paid: boolean
+  processed_at: string
+}
 
 export default function ManualWebhookTestPage() {
   const [isProcessing, setIsProcessing] = useState(false)
-  const [result, setResult] = useState<any>(null)
+  const [isChecking, setIsChecking] = useState(false)
+  const [webhookResult, setWebhookResult] = useState<WebhookResponse | null>(null)
+  const [databaseRecords, setDatabaseRecords] = useState<DatabaseRecord[]>([])
   const [error, setError] = useState<string | null>(null)
-  const [databaseData, setDatabaseData] = useState<any>(null)
-  const [isCheckingDatabase, setIsCheckingDatabase] = useState(false)
 
-  // Webhook real recebido da SuperPay
+  // Dados do webhook real que falhou
   const realWebhookData = {
     event: {
       type: "webhook.update",
@@ -61,12 +77,13 @@ export default function ManualWebhookTestPage() {
   }
 
   const processWebhook = async () => {
-    try {
-      setIsProcessing(true)
-      setError(null)
-      setResult(null)
+    setIsProcessing(true)
+    setError(null)
+    setWebhookResult(null)
 
-      console.log("🔄 Enviando webhook real para processamento...")
+    try {
+      console.log("🔄 Processando webhook manual...")
+      console.log("📦 Dados:", realWebhookData)
 
       const response = await fetch("/api/superpay/webhook", {
         method: "POST",
@@ -81,46 +98,59 @@ export default function ManualWebhookTestPage() {
         body: JSON.stringify(realWebhookData),
       })
 
-      const data = await response.json()
+      const result = await response.json()
+      console.log("✅ Resposta do webhook:", result)
 
-      if (response.ok) {
-        setResult(data)
-        console.log("✅ Webhook processado com sucesso:", data)
+      setWebhookResult(result)
+
+      if (result.success) {
+        console.log("🎉 Webhook processado com sucesso!")
+        // Verificar dados automaticamente após processar
+        setTimeout(() => {
+          checkDatabaseRecords()
+        }, 1000)
       } else {
-        throw new Error(data.message || "Erro no processamento")
+        console.error("❌ Erro no webhook:", result.error)
+        setError(result.message || result.error)
       }
     } catch (error) {
       console.error("❌ Erro ao processar webhook:", error)
-      setError(error instanceof Error ? error.message : "Erro desconhecido")
+      setError(`Erro de rede: ${error instanceof Error ? error.message : "Erro desconhecido"}`)
     } finally {
       setIsProcessing(false)
     }
   }
 
-  const checkDatabase = async () => {
+  const checkDatabaseRecords = async () => {
+    setIsChecking(true)
+    setError(null)
+
     try {
-      setIsCheckingDatabase(true)
-      setDatabaseData(null)
+      console.log("🔍 Verificando dados no banco...")
 
-      console.log("🔍 Verificando dados no Supabase...")
-
-      const response = await fetch(`/api/superpay/payment-status?external_id=${realWebhookData.invoices.external_id}`, {
-        method: "GET",
+      const response = await fetch("/api/superpaybr/check-payment", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          external_id: "SHEIN_1751349759845_i6qouytzp",
+        }),
       })
 
-      const data = await response.json()
+      const result = await response.json()
+      console.log("📄 Dados do banco:", result)
 
-      if (response.ok) {
-        setDatabaseData(data)
-        console.log("✅ Dados encontrados no Supabase:", data)
+      if (result.success && result.data) {
+        setDatabaseRecords(Array.isArray(result.data) ? result.data : [result.data])
       } else {
-        throw new Error(data.message || "Erro na consulta")
+        setError(result.message || "Nenhum dado encontrado")
       }
     } catch (error) {
-      console.error("❌ Erro ao consultar Supabase:", error)
-      setError(error instanceof Error ? error.message : "Erro desconhecido")
+      console.error("❌ Erro ao verificar banco:", error)
+      setError(`Erro ao consultar banco: ${error instanceof Error ? error.message : "Erro desconhecido"}`)
     } finally {
-      setIsCheckingDatabase(false)
+      setIsChecking(false)
     }
   }
 
@@ -129,59 +159,63 @@ export default function ManualWebhookTestPage() {
       <div className="max-w-4xl mx-auto space-y-6">
         {/* Header */}
         <div className="text-center">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Teste Manual de Webhook SuperPay</h1>
-          <p className="text-gray-600">Processamento do webhook real recebido em 01/07/2025 às 03:03</p>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">🧪 Teste Manual de Webhook</h1>
+          <p className="text-gray-600">Teste o processamento do webhook SuperPay que falhou</p>
         </div>
 
-        {/* Webhook Data */}
+        {/* Dados do Webhook */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Webhook className="h-5 w-5" />
               Dados do Webhook Real
             </CardTitle>
-            <CardDescription>Webhook recebido da SuperPay com status code 5 (Pagamento Confirmado)</CardDescription>
+            <CardDescription>
+              Webhook que foi enviado em 01/07/2025 às 03:03 com status code 5 (Pagamento Confirmado)
+            </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+            <div className="grid grid-cols-2 gap-4 mb-4">
               <div>
-                <span className="text-sm text-gray-500">External ID:</span>
-                <p className="font-mono text-sm">{realWebhookData.invoices.external_id}</p>
+                <label className="text-sm font-medium text-gray-700">External ID:</label>
+                <p className="font-mono text-sm bg-gray-100 p-2 rounded">{realWebhookData.invoices.external_id}</p>
               </div>
               <div>
-                <span className="text-sm text-gray-500">Invoice ID:</span>
-                <p className="font-mono text-sm">{realWebhookData.invoices.id}</p>
+                <label className="text-sm font-medium text-gray-700">Invoice ID:</label>
+                <p className="font-mono text-sm bg-gray-100 p-2 rounded">{realWebhookData.invoices.id}</p>
               </div>
               <div>
-                <span className="text-sm text-gray-500">Status Code:</span>
-                <Badge className="bg-green-500">{realWebhookData.invoices.status.code}</Badge>
+                <label className="text-sm font-medium text-gray-700">Status Code:</label>
+                <p className="font-mono text-sm bg-gray-100 p-2 rounded">
+                  {realWebhookData.invoices.status.code} - {realWebhookData.invoices.status.title}
+                </p>
               </div>
               <div>
-                <span className="text-sm text-gray-500">Valor:</span>
-                <p className="font-bold text-green-600">R$ {realWebhookData.invoices.prices.total.toFixed(2)}</p>
+                <label className="text-sm font-medium text-gray-700">Valor:</label>
+                <p className="font-mono text-sm bg-gray-100 p-2 rounded">
+                  R$ {realWebhookData.invoices.prices.total.toFixed(2)}
+                </p>
               </div>
             </div>
 
-            <details className="text-sm">
-              <summary className="cursor-pointer text-gray-700 hover:text-gray-900 font-medium">
-                Ver JSON completo do webhook
-              </summary>
-              <pre className="mt-2 p-3 bg-gray-100 rounded text-xs overflow-auto">
+            <details className="mt-4">
+              <summary className="cursor-pointer text-sm font-medium text-gray-700 mb-2">Ver JSON completo</summary>
+              <pre className="text-xs bg-gray-100 p-4 rounded overflow-auto max-h-64">
                 {JSON.stringify(realWebhookData, null, 2)}
               </pre>
             </details>
           </CardContent>
         </Card>
 
-        {/* Actions */}
+        {/* Ações */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <Play className="h-5 w-5" />
-                Processar Webhook
+                <Webhook className="h-5 w-5" />
+                1. Processar Webhook
               </CardTitle>
-              <CardDescription>Enviar o webhook real para o endpoint /api/superpay/webhook</CardDescription>
+              <CardDescription>Enviar o webhook para o endpoint /api/superpay/webhook</CardDescription>
             </CardHeader>
             <CardContent>
               <Button onClick={processWebhook} disabled={isProcessing} className="w-full">
@@ -192,7 +226,7 @@ export default function ManualWebhookTestPage() {
                   </>
                 ) : (
                   <>
-                    <Play className="h-4 w-4 mr-2" />
+                    <Webhook className="h-4 w-4 mr-2" />
                     Processar Webhook
                   </>
                 )}
@@ -204,18 +238,18 @@ export default function ManualWebhookTestPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Database className="h-5 w-5" />
-                Verificar Dados
+                2. Verificar Dados
               </CardTitle>
-              <CardDescription>Consultar dados salvos no Supabase</CardDescription>
+              <CardDescription>Consultar os dados salvos no Supabase</CardDescription>
             </CardHeader>
             <CardContent>
               <Button
-                onClick={checkDatabase}
-                disabled={isCheckingDatabase}
+                onClick={checkDatabaseRecords}
+                disabled={isChecking}
                 variant="outline"
                 className="w-full bg-transparent"
               >
-                {isCheckingDatabase ? (
+                {isChecking ? (
                   <>
                     <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
                     Verificando...
@@ -231,7 +265,111 @@ export default function ManualWebhookTestPage() {
           </Card>
         </div>
 
-        {/* Error Display */}
+        {/* Resultado do Webhook */}
+        {webhookResult && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                {webhookResult.success ? (
+                  <CheckCircle className="h-5 w-5 text-green-500" />
+                ) : (
+                  <XCircle className="h-5 w-5 text-red-500" />
+                )}
+                Resultado do Webhook
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Badge variant={webhookResult.success ? "default" : "destructive"}>
+                    {webhookResult.success ? "Sucesso" : "Erro"}
+                  </Badge>
+                  <span className="text-sm">{webhookResult.message}</span>
+                </div>
+
+                {webhookResult.data && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-sm font-medium text-gray-700">External ID:</label>
+                      <p className="text-sm">{webhookResult.data.external_id}</p>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-gray-700">Status:</label>
+                      <p className="text-sm">{webhookResult.data.status_title}</p>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-gray-700">Valor:</label>
+                      <p className="text-sm">R$ {webhookResult.data.amount?.toFixed(2) || "0.00"}</p>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-gray-700">Pago:</label>
+                      <p className="text-sm">{webhookResult.data.is_paid ? "✅ Sim" : "❌ Não"}</p>
+                    </div>
+                  </div>
+                )}
+
+                <details>
+                  <summary className="cursor-pointer text-sm font-medium text-gray-700">Ver resposta completa</summary>
+                  <pre className="text-xs bg-gray-100 p-4 rounded overflow-auto max-h-64 mt-2">
+                    {JSON.stringify(webhookResult, null, 2)}
+                  </pre>
+                </details>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Dados do Banco */}
+        {databaseRecords.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Database className="h-5 w-5 text-blue-500" />
+                Dados Salvos no Supabase
+              </CardTitle>
+              <CardDescription>Registros encontrados na tabela payment_webhooks</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {databaseRecords.map((record, index) => (
+                  <div key={record.id} className="border rounded-lg p-4">
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                      <div>
+                        <label className="text-sm font-medium text-gray-700">ID:</label>
+                        <p className="text-sm">{record.id}</p>
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium text-gray-700">External ID:</label>
+                        <p className="text-sm font-mono">{record.external_id}</p>
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium text-gray-700">Status:</label>
+                        <div className="flex items-center gap-2">
+                          <Badge variant={record.is_paid ? "default" : "secondary"}>{record.status_code}</Badge>
+                          <span className="text-sm">{record.status_title}</span>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium text-gray-700">Valor:</label>
+                        <p className="text-sm font-bold text-green-600">R$ {record.amount.toFixed(2)}</p>
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium text-gray-700">Pago:</label>
+                        <p className="text-sm">{record.is_paid ? "✅ Sim" : "❌ Não"}</p>
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium text-gray-700">Processado:</label>
+                        <p className="text-sm">{new Date(record.processed_at).toLocaleString("pt-BR")}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Erro */}
         {error && (
           <Alert className="border-red-200 bg-red-50">
             <XCircle className="h-4 w-4" />
@@ -241,175 +379,27 @@ export default function ManualWebhookTestPage() {
           </Alert>
         )}
 
-        {/* Processing Result */}
-        {result && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                {result.success ? (
-                  <CheckCircle className="h-5 w-5 text-green-500" />
-                ) : (
-                  <XCircle className="h-5 w-5 text-red-500" />
-                )}
-                Resultado do Processamento
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-500">Status:</span>
-                  <Badge variant={result.success ? "default" : "destructive"}>
-                    {result.success ? "Sucesso" : "Erro"}
-                  </Badge>
-                </div>
-
-                {result.success && result.data && (
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
-                    <div>
-                      <span className="text-gray-500">External ID:</span>
-                      <p className="font-mono">{result.data.external_id}</p>
-                    </div>
-                    <div>
-                      <span className="text-gray-500">Status Code:</span>
-                      <p className="font-bold">{result.data.status_code}</p>
-                    </div>
-                    <div>
-                      <span className="text-gray-500">Status Title:</span>
-                      <p className="font-medium">{result.data.status_title}</p>
-                    </div>
-                    <div>
-                      <span className="text-gray-500">Valor:</span>
-                      <p className="font-bold text-green-600">R$ {result.data.amount?.toFixed(2)}</p>
-                    </div>
-                    <div>
-                      <span className="text-gray-500">Is Paid:</span>
-                      <Badge variant={result.data.is_paid ? "default" : "secondary"}>
-                        {result.data.is_paid ? "Sim" : "Não"}
-                      </Badge>
-                    </div>
-                    <div>
-                      <span className="text-gray-500">Is Critical:</span>
-                      <Badge variant={result.data.is_critical ? "default" : "secondary"}>
-                        {result.data.is_critical ? "Sim" : "Não"}
-                      </Badge>
-                    </div>
-                  </div>
-                )}
-
-                <Separator />
-
-                <details className="text-sm">
-                  <summary className="cursor-pointer text-gray-700 hover:text-gray-900 font-medium">
-                    Ver resposta completa
-                  </summary>
-                  <pre className="mt-2 p-3 bg-gray-100 rounded text-xs overflow-auto">
-                    {JSON.stringify(result, null, 2)}
-                  </pre>
-                </details>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Database Data */}
-        {databaseData && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Database className="h-5 w-5 text-blue-500" />
-                Dados no Supabase
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {databaseData.success && databaseData.data ? (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                    <div>
-                      <span className="text-gray-500">External ID:</span>
-                      <p className="font-mono">{databaseData.data.external_id}</p>
-                    </div>
-                    <div>
-                      <span className="text-gray-500">Status Code:</span>
-                      <p className="font-bold">{databaseData.data.status_code}</p>
-                    </div>
-                    <div>
-                      <span className="text-gray-500">Status Title:</span>
-                      <p className="font-medium">{databaseData.data.status_title}</p>
-                    </div>
-                    <div>
-                      <span className="text-gray-500">Valor:</span>
-                      <p className="font-bold text-green-600">R$ {databaseData.data.amount?.toFixed(2)}</p>
-                    </div>
-                    <div>
-                      <span className="text-gray-500">Is Paid:</span>
-                      <Badge variant={databaseData.data.is_paid ? "default" : "secondary"}>
-                        {databaseData.data.is_paid ? "Sim" : "Não"}
-                      </Badge>
-                    </div>
-                    <div>
-                      <span className="text-gray-500">Processado em:</span>
-                      <p className="text-xs">{new Date(databaseData.data.processed_at).toLocaleString("pt-BR")}</p>
-                    </div>
-                    <div>
-                      <span className="text-gray-500">Atualizado em:</span>
-                      <p className="text-xs">{new Date(databaseData.data.updated_at).toLocaleString("pt-BR")}</p>
-                    </div>
-                  </div>
-
-                  <Separator />
-
-                  <details className="text-sm">
-                    <summary className="cursor-pointer text-gray-700 hover:text-gray-900 font-medium">
-                      Ver dados completos do Supabase
-                    </summary>
-                    <pre className="mt-2 p-3 bg-gray-100 rounded text-xs overflow-auto">
-                      {JSON.stringify(databaseData.data, null, 2)}
-                    </pre>
-                  </details>
-                </div>
-              ) : (
-                <div className="text-center py-4">
-                  <p className="text-gray-500">Nenhum dado encontrado no Supabase</p>
-                  <p className="text-sm text-gray-400 mt-1">
-                    {databaseData.message || "Execute o processamento do webhook primeiro"}
-                  </p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Instructions */}
+        {/* Instruções */}
         <Card>
           <CardHeader>
-            <CardTitle>Instruções de Teste</CardTitle>
+            <CardTitle>📋 Instruções</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-3 text-sm">
-              <div className="flex items-start space-x-2">
-                <span className="bg-blue-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold mt-0.5">
-                  1
-                </span>
-                <span>Execute o script SQL no Supabase para criar/atualizar a tabela</span>
-              </div>
-              <div className="flex items-start space-x-2">
-                <span className="bg-blue-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold mt-0.5">
-                  2
-                </span>
-                <span>Clique em "Processar Webhook" para simular o webhook real</span>
-              </div>
-              <div className="flex items-start space-x-2">
-                <span className="bg-blue-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold mt-0.5">
-                  3
-                </span>
-                <span>Clique em "Verificar Dados" para consultar o Supabase</span>
-              </div>
-              <div className="flex items-start space-x-2">
-                <span className="bg-blue-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold mt-0.5">
-                  4
-                </span>
-                <span>Teste a página /checkout com o external_id: SHEIN_1751349759845_i6qouytzp</span>
-              </div>
+            <div className="space-y-2 text-sm">
+              <p>
+                <strong>1.</strong> Execute o SQL script <code>scripts/create-payment-webhooks-table.sql</code> no
+                Supabase
+              </p>
+              <p>
+                <strong>2.</strong> Clique em "Processar Webhook" para testar o endpoint
+              </p>
+              <p>
+                <strong>3.</strong> Clique em "Verificar Dados" para ver se foi salvo no banco
+              </p>
+              <p>
+                <strong>4.</strong> Acesse <code>/checkout?external_id=SHEIN_1751349759845_i6qouytzp</code> para testar
+                o Realtime
+              </p>
             </div>
           </CardContent>
         </Card>
