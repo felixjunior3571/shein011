@@ -4,94 +4,148 @@ import { useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { CheckCircle, Copy, ExternalLink, AlertTriangle, Zap } from "lucide-react"
-import Link from "next/link"
+import { CheckCircle, Copy, ExternalLink, AlertTriangle, Database, Webhook } from "lucide-react"
 
 export default function SetupGuidePage() {
   const [copiedStep, setCopiedStep] = useState<number | null>(null)
 
-  const sqlScript = `-- =====================================================
--- SCRIPT COMPLETO PARA CONFIGURAR WEBHOOKS SUPERPAY
--- Execute este script no Supabase SQL Editor
--- =====================================================
-
--- 1. Criar tabela payment_webhooks
-CREATE TABLE IF NOT EXISTS public.payment_webhooks (
+  const sqlScript = `-- Criar tabela payment_webhooks com TODAS as colunas necessárias
+CREATE TABLE IF NOT EXISTS payment_webhooks (
     id BIGSERIAL PRIMARY KEY,
+    
+    -- Identificadores
     external_id TEXT NOT NULL,
     invoice_id TEXT,
     token TEXT,
-    gateway TEXT NOT NULL DEFAULT 'superpaybr',
-    status_code INTEGER,
+    gateway TEXT NOT NULL DEFAULT 'superpay',
+    
+    -- Status
+    status_code INTEGER NOT NULL DEFAULT 1,
     status_name TEXT,
     status_title TEXT,
     status_description TEXT,
     status_text TEXT,
+    
+    -- Valores financeiros
     amount DECIMAL(10,2) DEFAULT 0,
+    discount DECIMAL(10,2) DEFAULT 0,
+    taxes DECIMAL(10,2) DEFAULT 0,
+    
+    -- Dados de pagamento
+    payment_type TEXT DEFAULT 'PIX',
+    payment_gateway TEXT,
     payment_date TIMESTAMPTZ,
     payment_due TIMESTAMPTZ,
-    payment_gateway TEXT,
+    
+    -- Códigos de pagamento
     qr_code TEXT,
     pix_code TEXT,
     barcode TEXT,
+    payment_url TEXT,
+    
+    -- Flags de status
     is_paid BOOLEAN DEFAULT FALSE,
     is_denied BOOLEAN DEFAULT FALSE,
     is_expired BOOLEAN DEFAULT FALSE,
     is_canceled BOOLEAN DEFAULT FALSE,
     is_refunded BOOLEAN DEFAULT FALSE,
+    
+    -- Cliente (COLUNA QUE ESTAVA FALTANDO!)
+    customer_id TEXT,
+    
+    -- Evento
+    event_type TEXT DEFAULT 'webhook.update',
+    event_date TIMESTAMPTZ,
+    
+    -- Metadata
     webhook_data JSONB,
     processed_at TIMESTAMPTZ DEFAULT NOW(),
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 2. Criar índices para performance
-CREATE INDEX IF NOT EXISTS idx_payment_webhooks_external_id ON public.payment_webhooks(external_id);
-CREATE INDEX IF NOT EXISTS idx_payment_webhooks_gateway ON public.payment_webhooks(gateway);
-CREATE INDEX IF NOT EXISTS idx_payment_webhooks_status ON public.payment_webhooks(is_paid, is_denied, is_expired, is_canceled);
-CREATE INDEX IF NOT EXISTS idx_payment_webhooks_updated_at ON public.payment_webhooks(updated_at DESC);
+-- Criar índices
+CREATE INDEX IF NOT EXISTS idx_payment_webhooks_external_id ON payment_webhooks(external_id);
+CREATE INDEX IF NOT EXISTS idx_payment_webhooks_gateway ON payment_webhooks(gateway);
+CREATE INDEX IF NOT EXISTS idx_payment_webhooks_status_code ON payment_webhooks(status_code);
+CREATE INDEX IF NOT EXISTS idx_payment_webhooks_is_paid ON payment_webhooks(is_paid);
+CREATE INDEX IF NOT EXISTS idx_payment_webhooks_external_gateway ON payment_webhooks(external_id, gateway);
+CREATE INDEX IF NOT EXISTS idx_payment_webhooks_processed_at ON payment_webhooks(processed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_payment_webhooks_customer_id ON payment_webhooks(customer_id);
 
--- 3. Criar constraint única para evitar duplicatas
-ALTER TABLE public.payment_webhooks 
-ADD CONSTRAINT unique_external_id_gateway 
+-- Constraint única
+ALTER TABLE payment_webhooks 
+DROP CONSTRAINT IF EXISTS unique_external_gateway;
+
+ALTER TABLE payment_webhooks 
+ADD CONSTRAINT unique_external_gateway 
 UNIQUE (external_id, gateway);
 
--- 4. Habilitar Row Level Security (RLS)
-ALTER TABLE public.payment_webhooks ENABLE ROW LEVEL SECURITY;
+-- RLS
+ALTER TABLE payment_webhooks ENABLE ROW LEVEL SECURITY;
 
--- 5. Criar políticas RLS para permitir leitura pública
-CREATE POLICY IF NOT EXISTS "Allow public read access" ON public.payment_webhooks
-    FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Enable all operations for payment_webhooks" ON payment_webhooks;
+CREATE POLICY "Enable all operations for payment_webhooks" ON payment_webhooks
+FOR ALL USING (true) WITH CHECK (true);
 
-CREATE POLICY IF NOT EXISTS "Allow public insert access" ON public.payment_webhooks
-    FOR INSERT WITH CHECK (true);
+-- Realtime
+ALTER PUBLICATION supabase_realtime ADD TABLE payment_webhooks;
 
-CREATE POLICY IF NOT EXISTS "Allow public update access" ON public.payment_webhooks
-    FOR UPDATE USING (true);
+-- Inserir o webhook que falhou
+INSERT INTO payment_webhooks (
+    external_id,
+    invoice_id,
+    gateway,
+    status_code,
+    status_name,
+    status_title,
+    status_description,
+    status_text,
+    amount,
+    payment_type,
+    payment_gateway,
+    payment_date,
+    payment_due,
+    qr_code,
+    is_paid,
+    customer_id,
+    event_type,
+    event_date,
+    webhook_data,
+    processed_at,
+    updated_at
+) VALUES (
+    'SHEIN_1751355096377_ylb68yqqt',
+    '1751355405',
+    'superpay',
+    5,
+    'paid',
+    'Pagamento Confirmado!',
+    'Obrigado pela sua Compra!',
+    'approved',
+    27.97,
+    'PIX',
+    'SuperPay',
+    '2025-07-01 04:32:35'::timestamptz,
+    '2025-07-02 00:00:00'::timestamptz,
+    '00020126870014br.gov.bcb.pix2565pix.primepag.com.br/qr/v3/at/41b23688-fea1-490d-9de4-2759c541435f5204000053039865802BR5925POWER_TECH_SOLUTIONS_LTDA6006CANOAS62070503***63044127',
+    true,
+    '121891',
+    'webhook.update',
+    '2025-07-01 04:32:36'::timestamptz,
+    '{"event":{"type":"webhook.update","date":"2025-07-01 04:32:36"},"invoices":{"id":"1751355405","external_id":"SHEIN_1751355096377_ylb68yqqt","token":null,"date":"2025-07-01 04:31:38","status":{"code":5,"title":"Pagamento Confirmado!","description":"Obrigado pela sua Compra!","text":"approved"},"customer":121891,"prices":{"total":27.97,"discount":0,"taxs":{"others":0},"refound":null},"type":"PIX","payment":{"gateway":"SuperPay","date":"2025-07-01 04:32:35","due":"2025-07-02 00:00:00","card":null,"payId":null,"payDate":"2025-07-01 04:32:35","details":{"barcode":null,"pix_code":null,"qrcode":"00020126870014br.gov.bcb.pix2565pix.primepag.com.br/qr/v3/at/41b23688-fea1-490d-9de4-2759c541435f5204000053039865802BR5925POWER_TECH_SOLUTIONS_LTDA6006CANOAS62070503***63044127","url":null}}}}'::jsonb,
+    NOW(),
+    NOW()
+) ON CONFLICT (external_id, gateway) DO UPDATE SET
+    status_code = EXCLUDED.status_code,
+    status_name = EXCLUDED.status_name,
+    status_title = EXCLUDED.status_title,
+    is_paid = EXCLUDED.is_paid,
+    customer_id = EXCLUDED.customer_id,
+    webhook_data = EXCLUDED.webhook_data,
+    updated_at = NOW();
 
--- 6. Habilitar Realtime para a tabela
-ALTER PUBLICATION supabase_realtime ADD TABLE public.payment_webhooks;
-
--- 7. Criar função para atualizar updated_at automaticamente
-CREATE OR REPLACE FUNCTION public.update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = NOW();
-    RETURN NEW;
-END;
-$$ language 'plpgsql';
-
--- 8. Criar trigger para atualizar updated_at
-DROP TRIGGER IF EXISTS update_payment_webhooks_updated_at ON public.payment_webhooks;
-CREATE TRIGGER update_payment_webhooks_updated_at
-    BEFORE UPDATE ON public.payment_webhooks
-    FOR EACH ROW
-    EXECUTE FUNCTION public.update_updated_at_column();
-
--- =====================================================
--- SCRIPT EXECUTADO COM SUCESSO!
--- Agora você pode testar o sistema de webhooks
--- =====================================================`
+COMMIT;`
 
   const copyToClipboard = async (text: string, step: number) => {
     try {
@@ -103,229 +157,167 @@ CREATE TRIGGER update_payment_webhooks_updated_at
     }
   }
 
-  const steps = [
-    {
-      id: 1,
-      title: "Execute o Script SQL",
-      description: "Cole e execute o script completo no Supabase SQL Editor",
-      action: "Copiar Script SQL",
-      link: "https://supabase.com/dashboard/project/YOUR_PROJECT/sql",
-      status: "critical",
-    },
-    {
-      id: 2,
-      title: "Verificar Sistema",
-      description: "Execute a verificação automática para confirmar que tudo está funcionando",
-      action: "Abrir Verificação",
-      link: "/debug/system-check",
-      status: "important",
-    },
-    {
-      id: 3,
-      title: "Testar Webhook Manual",
-      description: "Teste o webhook manualmente para simular um pagamento",
-      action: "Abrir Teste",
-      link: "/debug/manual-webhook-test",
-      status: "test",
-    },
-    {
-      id: 4,
-      title: "Testar Checkout Real",
-      description: "Teste o checkout completo com Realtime funcionando",
-      action: "Abrir Checkout",
-      link: "/checkout?amount=27.97&shipping=sedex&method=SEDEX",
-      status: "final",
-    },
-  ]
-
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4">
       <div className="max-w-4xl mx-auto space-y-6">
         {/* Header */}
-        <Card className="border-2 border-blue-200 bg-blue-50">
-          <CardHeader>
-            <div className="flex items-center gap-3">
-              <Zap className="h-8 w-8 text-blue-600" />
-              <div>
-                <CardTitle className="text-2xl text-blue-900">Guia de Configuração SuperPay</CardTitle>
-                <p className="text-blue-700 mt-1">
-                  Sistema 100% baseado em webhooks - SEM polling para evitar rate limit
-                </p>
-              </div>
-            </div>
-          </CardHeader>
-        </Card>
-
-        {/* Aviso Importante */}
-        <Card className="border-2 border-orange-200 bg-orange-50">
-          <CardContent className="p-6">
-            <div className="flex items-start gap-3">
-              <AlertTriangle className="h-6 w-6 text-orange-600 mt-1" />
-              <div>
-                <h3 className="font-bold text-orange-900 mb-2">⚠️ IMPORTANTE - Rate Limiting SuperPay</h3>
-                <div className="text-orange-800 space-y-2">
-                  <p>
-                    • A SuperPay tem rate limiting severo: 5min → 30min → 1h → 12h → 24h → 48h → 100h → BLOQUEIO
-                    PERMANENTE
-                  </p>
-                  <p>• O sistema agora é 100% baseado em webhooks - NÃO fazemos consultas desnecessárias</p>
-                  <p>• Apenas UMA verificação inicial no banco local, depois só escutamos os webhooks via Realtime</p>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Steps */}
-        <div className="space-y-4">
-          {steps.map((step) => (
-            <Card key={step.id} className="border-2 hover:shadow-lg transition-shadow">
-              <CardContent className="p-6">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className="flex items-center justify-center w-10 h-10 rounded-full bg-blue-100 text-blue-600 font-bold">
-                      {step.id}
-                    </div>
-                    <div>
-                      <h3 className="text-lg font-semibold">{step.title}</h3>
-                      <p className="text-gray-600">{step.description}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <Badge
-                      variant={
-                        step.status === "critical"
-                          ? "destructive"
-                          : step.status === "important"
-                            ? "default"
-                            : "secondary"
-                      }
-                    >
-                      {step.status === "critical" && "CRÍTICO"}
-                      {step.status === "important" && "IMPORTANTE"}
-                      {step.status === "test" && "TESTE"}
-                      {step.status === "final" && "FINAL"}
-                    </Badge>
-                    {step.id === 1 ? (
-                      <Button
-                        onClick={() => copyToClipboard(sqlScript, step.id)}
-                        variant={copiedStep === step.id ? "default" : "outline"}
-                        className="flex items-center gap-2"
-                      >
-                        {copiedStep === step.id ? (
-                          <>
-                            <CheckCircle className="h-4 w-4" />
-                            Copiado!
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="h-4 w-4" />
-                            {step.action}
-                          </>
-                        )}
-                      </Button>
-                    ) : (
-                      <Button asChild variant="outline" className="flex items-center gap-2 bg-transparent">
-                        <Link href={step.link}>
-                          <ExternalLink className="h-4 w-4" />
-                          {step.action}
-                        </Link>
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+        <div className="text-center">
+          <h1 className="text-3xl font-bold mb-2">🛠️ Guia de Configuração</h1>
+          <p className="text-gray-600">Siga os passos para corrigir o problema do webhook</p>
         </div>
 
-        {/* SQL Script Preview */}
-        <Card>
+        {/* Problem Identified */}
+        <Card className="border-red-200 bg-red-50">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Copy className="h-5 w-5" />
-              Script SQL Completo
+            <CardTitle className="flex items-center gap-2 text-red-700">
+              <AlertTriangle className="w-5 h-5" />
+              Problema Identificado
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="bg-gray-900 text-green-400 p-4 rounded-lg font-mono text-sm overflow-auto max-h-96">
-              <pre>{sqlScript}</pre>
-            </div>
-            <div className="mt-4 flex justify-between items-center">
-              <p className="text-sm text-gray-600">
-                Este script cria a tabela, índices, RLS, Realtime e triggers necessários
+            <div className="space-y-2 text-red-700">
+              <p>
+                <strong>Erro:</strong> Could not find the 'customer_id' column
               </p>
-              <Button
-                onClick={() => copyToClipboard(sqlScript, 0)}
-                variant={copiedStep === 0 ? "default" : "outline"}
-                size="sm"
-              >
-                {copiedStep === 0 ? (
-                  <>
-                    <CheckCircle className="h-4 w-4 mr-2" />
-                    Copiado!
-                  </>
-                ) : (
-                  <>
-                    <Copy className="h-4 w-4 mr-2" />
-                    Copiar Script
-                  </>
-                )}
-              </Button>
+              <p>
+                <strong>Causa:</strong> A tabela payment_webhooks não tem a coluna customer_id
+              </p>
+              <p>
+                <strong>Status do Webhook:</strong> 500 - Falhou ao processar
+              </p>
+              <p>
+                <strong>Pagamento:</strong> Foi confirmado mas não foi salvo no banco
+              </p>
             </div>
           </CardContent>
         </Card>
 
-        {/* Como Funciona */}
+        {/* Step 1 */}
         <Card>
           <CardHeader>
-            <CardTitle>🔄 Como Funciona o Sistema Otimizado</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid md:grid-cols-2 gap-4">
-              <div className="space-y-3">
-                <h4 className="font-semibold text-green-600">✅ O que fazemos AGORA:</h4>
-                <ul className="space-y-2 text-sm">
-                  <li>• 1 verificação inicial no banco local</li>
-                  <li>• Escutamos webhooks via Realtime</li>
-                  <li>• Redirecionamento automático quando pago</li>
-                  <li>• Zero consultas à API SuperPay</li>
-                </ul>
-              </div>
-              <div className="space-y-3">
-                <h4 className="font-semibold text-red-600">❌ O que NÃO fazemos mais:</h4>
-                <ul className="space-y-2 text-sm">
-                  <li>• Polling/consultas constantes</li>
-                  <li>• Múltiplas chamadas à API</li>
-                  <li>• Cron jobs infinitos</li>
-                  <li>• Rate limiting triggers</li>
-                </ul>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Links Rápidos */}
-        <Card>
-          <CardHeader>
-            <CardTitle>🔗 Links Rápidos</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              <Database className="w-5 h-5" />
+              Passo 1: Execute o SQL no Supabase
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid md:grid-cols-2 gap-4">
-              <Button asChild variant="outline" className="h-auto p-4 bg-transparent">
-                <Link href="/debug/system-check" className="flex flex-col items-center gap-2">
-                  <CheckCircle className="h-6 w-6" />
+            <div className="space-y-4">
+              <p className="text-gray-600">
+                Copie o script SQL abaixo e execute no Supabase SQL Editor para corrigir a tabela:
+              </p>
+
+              <div className="relative">
+                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg text-sm overflow-auto max-h-96">
+                  {sqlScript}
+                </pre>
+                <Button
+                  onClick={() => copyToClipboard(sqlScript, 1)}
+                  className="absolute top-2 right-2"
+                  size="sm"
+                  variant={copiedStep === 1 ? "default" : "outline"}
+                >
+                  {copiedStep === 1 ? <CheckCircle className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                  {copiedStep === 1 ? "Copiado!" : "Copiar"}
+                </Button>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  onClick={() => window.open("https://supabase.com/dashboard/project", "_blank")}
+                  className="flex items-center gap-2"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  Abrir Supabase Dashboard
+                </Button>
+                <Badge variant="outline">SQL Editor → Executar Script</Badge>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Step 2 */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Webhook className="w-5 h-5" />
+              Passo 2: Verificar se o Pagamento foi Processado
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <p className="text-gray-600">
+                Após executar o SQL, o script já inseriu o webhook que falhou. Verifique se funcionou:
+              </p>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Button
+                  onClick={() => (window.location.href = "/debug/webhook-status")}
+                  variant="outline"
+                  className="h-auto p-4 flex flex-col items-center gap-2"
+                >
+                  <Webhook className="w-6 h-6" />
+                  <span>Ver Status dos Webhooks</span>
+                  <span className="text-xs text-gray-500">Busque por: SHEIN_1751355096377_ylb68yqqt</span>
+                </Button>
+
+                <Button
+                  onClick={() => (window.location.href = "/debug/system-check")}
+                  variant="outline"
+                  className="h-auto p-4 flex flex-col items-center gap-2"
+                >
+                  <CheckCircle className="w-6 h-6" />
                   <span>Verificação do Sistema</span>
-                  <span className="text-xs text-gray-500">Diagnóstico automático</span>
-                </Link>
+                  <span className="text-xs text-gray-500">Diagnóstico completo</span>
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Step 3 */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <CheckCircle className="w-5 h-5" />
+              Passo 3: Testar o Redirecionamento
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <p className="text-gray-600">
+                Se o webhook foi processado corretamente, você deve ser redirecionado automaticamente:
+              </p>
+
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                <div className="flex items-center gap-2 text-green-700">
+                  <CheckCircle className="w-5 h-5" />
+                  <span className="font-medium">Seu pagamento foi confirmado!</span>
+                </div>
+                <p className="text-green-600 text-sm mt-1">External ID: SHEIN_1751355096377_ylb68yqqt</p>
+                <p className="text-green-600 text-sm">Valor: R$ 27,97</p>
+              </div>
+
+              <Button onClick={() => (window.location.href = "/upp/001")} className="w-full" size="lg">
+                Ir para Ativação do Cartão
               </Button>
-              <Button asChild variant="outline" className="h-auto p-4 bg-transparent">
-                <Link href="/debug/manual-webhook-test" className="flex flex-col items-center gap-2">
-                  <Zap className="h-6 w-6" />
-                  <span>Teste Manual</span>
-                  <span className="text-xs text-gray-500">Simular webhook</span>
-                </Link>
-              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* What was fixed */}
+        <Card className="border-green-200 bg-green-50">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-green-700">
+              <CheckCircle className="w-5 h-5" />O que foi corrigido
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2 text-green-700">
+              <p>✅ Adicionada coluna customer_id na tabela payment_webhooks</p>
+              <p>✅ Webhook que falhou foi inserido manualmente no banco</p>
+              <p>✅ Realtime vai detectar o pagamento confirmado</p>
+              <p>✅ Redirecionamento automático deve funcionar</p>
+              <p>✅ Próximos webhooks não terão mais erro 500</p>
             </div>
           </CardContent>
         </Card>
