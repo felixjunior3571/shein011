@@ -1,220 +1,372 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { useState, useEffect, useRef } from "react"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Separator } from "@/components/ui/separator"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import {
+  Wifi,
+  WifiOff,
+  Play,
+  Square,
+  RotateCcw,
+  Zap,
+  CheckCircle,
+  XCircle,
+  Clock,
+  AlertTriangle,
+  Activity,
+  Terminal,
+} from "lucide-react"
 import { useRealtimePaymentMonitor } from "@/hooks/use-realtime-payment-monitor"
-import { Wifi, WifiOff, RefreshCw, Play, Square } from "lucide-react"
 
 export default function RealtimeTestPage() {
-  const [testExternalId, setTestExternalId] = useState<string>("")
-  const [isTestActive, setIsTestActive] = useState(false)
+  const [externalId, setExternalId] = useState(`SHEIN_${Date.now()}_test`)
+  const [isMonitoring, setIsMonitoring] = useState(false)
+  const [selectedStatus, setSelectedStatus] = useState("5")
+  const [isSimulating, setIsSimulating] = useState(false)
   const [logs, setLogs] = useState<string[]>([])
+  const logsEndRef = useRef<HTMLDivElement>(null)
 
-  const addLog = (message: string) => {
-    const timestamp = new Date().toLocaleTimeString()
-    setLogs((prev) => [`[${timestamp}] ${message}`, ...prev.slice(0, 49)]) // Manter últimos 50 logs
+  // Hook do monitor Realtime
+  const { isConnected, isConnecting, error, lastUpdate, currentStatus, connectionAttempts, reconnect, disconnect } =
+    useRealtimePaymentMonitor({
+      externalId,
+      enabled: isMonitoring,
+      onPaymentConfirmed: (payment) => {
+        addLog(`🎉 PAGAMENTO CONFIRMADO! Valor: R$ ${payment.amount}`, "success")
+      },
+      onPaymentDenied: (payment) => {
+        addLog(`❌ PAGAMENTO NEGADO! Status: ${payment.status_title}`, "error")
+      },
+      onPaymentExpired: (payment) => {
+        addLog(`⏰ PAGAMENTO VENCIDO! Status: ${payment.status_title}`, "warning")
+      },
+      onPaymentCanceled: (payment) => {
+        addLog(`🚫 PAGAMENTO CANCELADO! Status: ${payment.status_title}`, "warning")
+      },
+      onStatusChange: (payment) => {
+        addLog(`📊 Status atualizado: ${payment.status_code} - ${payment.status_title}`, "info")
+      },
+    })
+
+  // Função para adicionar logs
+  const addLog = (message: string, type: "info" | "success" | "error" | "warning" = "info") => {
+    const timestamp = new Date().toLocaleTimeString("pt-BR")
+    const logEntry = `[${timestamp}] ${message}`
+    setLogs((prev) => [...prev.slice(-49), logEntry]) // Manter apenas os últimos 50 logs
   }
 
-  const { status, isConnected, error, reconnect, isReady } = useRealtimePaymentMonitor({
-    externalId: testExternalId,
-    onPaymentConfirmed: (status) => {
-      addLog(`🎉 PAGAMENTO CONFIRMADO! Status: ${status.status_code}`)
-    },
-    onPaymentDenied: (status) => {
-      addLog(`❌ PAGAMENTO NEGADO! Status: ${status.status_code}`)
-    },
-    onPaymentExpired: (status) => {
-      addLog(`⏰ PAGAMENTO VENCIDO! Status: ${status.status_code}`)
-    },
-    onPaymentCanceled: (status) => {
-      addLog(`🚫 PAGAMENTO CANCELADO! Status: ${status.status_code}`)
-    },
-    enabled: isTestActive && !!testExternalId,
-    debug: true,
-    autoRedirect: false, // Não redirecionar no teste
-  })
+  // Auto-scroll dos logs
+  useEffect(() => {
+    logsEndRef.current?.scrollIntoView({ behavior: "smooth" })
+  }, [logs])
 
-  const startTest = () => {
-    const newExternalId = `TEST_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`
-    setTestExternalId(newExternalId)
-    setIsTestActive(true)
-    setLogs([])
-    addLog(`Iniciando teste com External ID: ${newExternalId}`)
+  // Função para iniciar monitoramento
+  const startMonitoring = () => {
+    setIsMonitoring(true)
+    addLog(`🚀 Iniciando monitoramento Realtime para: ${externalId}`, "info")
   }
 
-  const stopTest = () => {
-    setIsTestActive(false)
-    addLog("Teste parado")
+  // Função para parar monitoramento
+  const stopMonitoring = () => {
+    setIsMonitoring(false)
+    disconnect()
+    addLog(`🛑 Monitoramento parado`, "warning")
   }
 
+  // Função para gerar novo External ID
+  const generateNewId = () => {
+    const newId = `SHEIN_${Date.now()}_test`
+    setExternalId(newId)
+    addLog(`🆔 Novo External ID gerado: ${newId}`, "info")
+  }
+
+  // Função para simular pagamento
   const simulatePayment = async () => {
-    if (!testExternalId) return
-
     try {
-      addLog("Simulando pagamento...")
+      setIsSimulating(true)
+      addLog(`🧪 Simulando pagamento com status ${selectedStatus}...`, "info")
 
       const response = await fetch("/api/superpaybr/simulate-payment", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({
-          external_id: testExternalId,
-          status_code: 5, // Pagamento confirmado
+          external_id: externalId,
+          status_code: Number.parseInt(selectedStatus),
           amount: 27.97,
         }),
       })
 
-      const data = await response.json()
+      const result = await response.json()
 
-      if (data.success) {
-        addLog("✅ Simulação enviada com sucesso!")
+      if (result.success) {
+        addLog(`✅ Webhook simulado enviado com sucesso!`, "success")
       } else {
-        addLog(`❌ Erro na simulação: ${data.error}`)
+        addLog(`❌ Erro na simulação: ${result.error}`, "error")
       }
     } catch (error) {
-      addLog(`❌ Erro na simulação: ${error}`)
+      addLog(`❌ Erro na simulação: ${error}`, "error")
+    } finally {
+      setIsSimulating(false)
     }
   }
 
-  useEffect(() => {
-    if (status) {
-      addLog(`Status atualizado: ${status.status_code} - ${status.status_title}`)
-    }
-  }, [status])
+  // Função para limpar logs
+  const clearLogs = () => {
+    setLogs([])
+    addLog(`🧹 Logs limpos`, "info")
+  }
 
-  useEffect(() => {
-    if (error) {
-      addLog(`❌ Erro: ${error}`)
-    }
-  }, [error])
+  // Status codes disponíveis
+  const statusCodes = [
+    { value: "1", label: "1 - Aguardando Pagamento", color: "gray" },
+    { value: "5", label: "5 - Pagamento Confirmado", color: "green" },
+    { value: "6", label: "6 - Pagamento Negado", color: "red" },
+    { value: "9", label: "9 - Vencido", color: "orange" },
+    { value: "10", label: "10 - Cancelado", color: "yellow" },
+    { value: "7", label: "7 - Estornado", color: "blue" },
+  ]
+
+  // Ícone de status da conexão
+  const getConnectionIcon = () => {
+    if (isConnecting) return <Activity className="h-4 w-4 animate-spin text-blue-500" />
+    if (isConnected) return <Wifi className="h-4 w-4 text-green-500" />
+    if (error) return <WifiOff className="h-4 w-4 text-red-500" />
+    return <WifiOff className="h-4 w-4 text-gray-400" />
+  }
+
+  // Badge de status da conexão
+  const getConnectionBadge = () => {
+    if (isConnecting) return <Badge variant="outline">Conectando...</Badge>
+    if (isConnected) return <Badge className="bg-green-500">Conectado</Badge>
+    if (error) return <Badge variant="destructive">Erro</Badge>
+    return <Badge variant="secondary">Desconectado</Badge>
+  }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-8">
-      <div className="max-w-4xl mx-auto space-y-6">
+    <div className="min-h-screen bg-gray-50 p-4">
+      <div className="max-w-6xl mx-auto space-y-6">
+        {/* Header */}
         <div className="text-center">
-          <h1 className="text-3xl font-bold mb-2">Teste Realtime SuperPay</h1>
-          <p className="text-gray-600">Teste o monitoramento em tempo real sem polling</p>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Teste Realtime SuperPay</h1>
+          <p className="text-gray-600">Sistema de monitoramento em tempo real via Supabase WebSocket</p>
         </div>
 
-        {/* Controles */}
+        {/* Status da Conexão */}
         <Card>
           <CardHeader>
-            <CardTitle>Controles de Teste</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              {getConnectionIcon()}
+              Status da Conexão Realtime
+            </CardTitle>
+            <CardDescription>Monitoramento via WebSocket do Supabase</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex gap-4">
-              <Button onClick={startTest} disabled={isTestActive} className="flex items-center gap-2">
-                <Play className="h-4 w-4" />
-                Iniciar Teste
-              </Button>
-
-              <Button
-                onClick={stopTest}
-                disabled={!isTestActive}
-                variant="outline"
-                className="flex items-center gap-2 bg-transparent"
-              >
-                <Square className="h-4 w-4" />
-                Parar Teste
-              </Button>
-
-              <Button
-                onClick={simulatePayment}
-                disabled={!isTestActive || !testExternalId}
-                variant="secondary"
-                className="flex items-center gap-2"
-              >
-                <RefreshCw className="h-4 w-4" />
-                Simular Pagamento
-              </Button>
+          <CardContent>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+              <div className="text-center">
+                <div className="text-lg font-bold">{getConnectionBadge()}</div>
+                <p className="text-sm text-gray-500">Status</p>
+              </div>
+              <div className="text-center">
+                <div className="text-lg font-bold">{connectionAttempts}</div>
+                <p className="text-sm text-gray-500">Tentativas</p>
+              </div>
+              <div className="text-center">
+                <div className="text-lg font-bold">{lastUpdate ? "Sim" : "Não"}</div>
+                <p className="text-sm text-gray-500">Dados Recebidos</p>
+              </div>
+              <div className="text-center">
+                <div className="text-lg font-bold">{currentStatus?.status_code || "N/A"}</div>
+                <p className="text-sm text-gray-500">Status Atual</p>
+              </div>
             </div>
 
-            {testExternalId && (
-              <div className="p-3 bg-gray-100 rounded-lg">
-                <p className="text-sm font-mono">External ID: {testExternalId}</p>
-              </div>
+            {error && (
+              <Alert className="border-red-200 bg-red-50 mb-4">
+                <XCircle className="h-4 w-4" />
+                <AlertDescription>
+                  <strong>Erro:</strong> {error}
+                </AlertDescription>
+              </Alert>
             )}
+
+            <div className="flex gap-2">
+              <Button onClick={reconnect} variant="outline" size="sm">
+                <RotateCcw className="h-4 w-4 mr-2" />
+                Reconectar
+              </Button>
+              {lastUpdate && (
+                <Badge variant="outline">Última atualização: {new Date(lastUpdate).toLocaleTimeString("pt-BR")}</Badge>
+              )}
+            </div>
           </CardContent>
         </Card>
 
-        {/* Status */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Controles */}
+        <div className="grid md:grid-cols-2 gap-6">
+          {/* Configuração */}
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                {isConnected ? (
-                  <Wifi className="h-5 w-5 text-green-500" />
-                ) : (
-                  <WifiOff className="h-5 w-5 text-red-500" />
-                )}
-                Conexão Realtime
-              </CardTitle>
+              <CardTitle>Configuração do Teste</CardTitle>
+              <CardDescription>Configure o External ID e status para simulação</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex items-center justify-between">
-                <span>Status:</span>
-                <Badge variant={isConnected ? "default" : "destructive"}>
-                  {isConnected ? "Conectado" : "Desconectado"}
-                </Badge>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <span>Pronto:</span>
-                <Badge variant={isReady ? "default" : "secondary"}>{isReady ? "Sim" : "Carregando..."}</Badge>
-              </div>
-
-              {error && (
-                <div className="p-2 bg-red-50 border border-red-200 rounded">
-                  <p className="text-sm text-red-600">{error}</p>
-                  <Button onClick={reconnect} size="sm" className="mt-2">
-                    Reconectar
+            <CardContent className="space-y-4">
+              <div>
+                <Label htmlFor="external-id">External ID</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="external-id"
+                    value={externalId}
+                    onChange={(e) => setExternalId(e.target.value)}
+                    placeholder="SHEIN_123456789_test"
+                  />
+                  <Button onClick={generateNewId} variant="outline" size="sm">
+                    <RotateCcw className="h-4 w-4" />
                   </Button>
                 </div>
-              )}
+              </div>
+
+              <div>
+                <Label htmlFor="status-code">Status Code para Simulação</Label>
+                <Select value={selectedStatus} onValueChange={setSelectedStatus}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione um status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {statusCodes.map((status) => (
+                      <SelectItem key={status.value} value={status.value}>
+                        {status.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <Separator />
+
+              <div className="flex gap-2">
+                {!isMonitoring ? (
+                  <Button onClick={startMonitoring} className="flex-1">
+                    <Play className="h-4 w-4 mr-2" />
+                    Iniciar Monitoramento
+                  </Button>
+                ) : (
+                  <Button onClick={stopMonitoring} variant="destructive" className="flex-1">
+                    <Square className="h-4 w-4 mr-2" />
+                    Parar Monitoramento
+                  </Button>
+                )}
+
+                <Button onClick={simulatePayment} disabled={isSimulating || !isMonitoring} variant="outline">
+                  <Zap className="h-4 w-4 mr-2" />
+                  {isSimulating ? "Simulando..." : "Simular"}
+                </Button>
+              </div>
             </CardContent>
           </Card>
 
+          {/* Status Atual */}
           <Card>
             <CardHeader>
-              <CardTitle>Status do Pagamento</CardTitle>
+              <CardTitle>Status Atual do Pagamento</CardTitle>
+              <CardDescription>Informações em tempo real via Realtime</CardDescription>
             </CardHeader>
             <CardContent>
-              {status ? (
-                <div className="space-y-2">
+              {currentStatus ? (
+                <div className="space-y-3">
                   <div className="flex items-center justify-between">
-                    <span>Código:</span>
-                    <Badge>{status.status_code}</Badge>
+                    <span className="text-sm text-gray-500">Status Code:</span>
+                    <Badge variant="outline">{currentStatus.status_code}</Badge>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span>Título:</span>
-                    <span className="text-sm">{status.status_title}</span>
+                    <span className="text-sm text-gray-500">Título:</span>
+                    <span className="font-medium">{currentStatus.status_title}</span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span>Pago:</span>
-                    <Badge variant={status.is_paid ? "default" : "secondary"}>{status.is_paid ? "Sim" : "Não"}</Badge>
+                    <span className="text-sm text-gray-500">Valor:</span>
+                    <span className="font-bold text-green-600">R$ {currentStatus.amount.toFixed(2)}</span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span>Valor:</span>
-                    <span className="font-mono">R$ {status.amount?.toFixed(2) || "0.00"}</span>
+                    <span className="text-sm text-gray-500">Processado:</span>
+                    <span className="text-sm">{new Date(currentStatus.processed_at).toLocaleString("pt-BR")}</span>
+                  </div>
+
+                  <Separator />
+
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div className="flex items-center gap-2">
+                      {currentStatus.is_paid ? (
+                        <CheckCircle className="h-4 w-4 text-green-500" />
+                      ) : (
+                        <XCircle className="h-4 w-4 text-gray-300" />
+                      )}
+                      Pago
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {currentStatus.is_denied ? (
+                        <XCircle className="h-4 w-4 text-red-500" />
+                      ) : (
+                        <CheckCircle className="h-4 w-4 text-gray-300" />
+                      )}
+                      Negado
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {currentStatus.is_expired ? (
+                        <Clock className="h-4 w-4 text-orange-500" />
+                      ) : (
+                        <CheckCircle className="h-4 w-4 text-gray-300" />
+                      )}
+                      Vencido
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {currentStatus.is_canceled ? (
+                        <AlertTriangle className="h-4 w-4 text-yellow-500" />
+                      ) : (
+                        <CheckCircle className="h-4 w-4 text-gray-300" />
+                      )}
+                      Cancelado
+                    </div>
                   </div>
                 </div>
               ) : (
-                <p className="text-gray-500">Nenhum status recebido ainda</p>
+                <div className="text-center py-8 text-gray-500">
+                  <Activity className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                  <p>Nenhum status encontrado</p>
+                  <p className="text-sm">Inicie o monitoramento e simule um pagamento</p>
+                </div>
               )}
             </CardContent>
           </Card>
         </div>
 
-        {/* Logs */}
+        {/* Logs em Tempo Real */}
         <Card>
           <CardHeader>
-            <CardTitle>Logs em Tempo Real</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              <Terminal className="h-5 w-5" />
+              Logs em Tempo Real
+            </CardTitle>
+            <CardDescription>Acompanhe o funcionamento do sistema Realtime</CardDescription>
           </CardHeader>
           <CardContent>
+            <div className="flex justify-between items-center mb-4">
+              <Badge variant="outline">{logs.length} entradas</Badge>
+              <Button onClick={clearLogs} variant="outline" size="sm">
+                Limpar Logs
+              </Button>
+            </div>
+
             <div className="bg-black text-green-400 p-4 rounded-lg h-64 overflow-y-auto font-mono text-sm">
               {logs.length === 0 ? (
-                <p className="text-gray-500">Nenhum log ainda...</p>
+                <div className="text-gray-500">Aguardando logs...</div>
               ) : (
                 logs.map((log, index) => (
                   <div key={index} className="mb-1">
@@ -222,6 +374,7 @@ export default function RealtimeTestPage() {
                   </div>
                 ))
               )}
+              <div ref={logsEndRef} />
             </div>
           </CardContent>
         </Card>
@@ -229,33 +382,17 @@ export default function RealtimeTestPage() {
         {/* Instruções */}
         <Card>
           <CardHeader>
-            <CardTitle>Como Testar</CardTitle>
+            <CardTitle>Como Usar</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex items-start space-x-2">
-              <span className="bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold mt-0.5">
-                1
-              </span>
-              <span>Clique em "Iniciar Teste" para gerar um External ID único</span>
-            </div>
-            <div className="flex items-start space-x-2">
-              <span className="bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold mt-0.5">
-                2
-              </span>
-              <span>Observe a conexão Realtime sendo estabelecida</span>
-            </div>
-            <div className="flex items-start space-x-2">
-              <span className="bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold mt-0.5">
-                3
-              </span>
-              <span>Clique em "Simular Pagamento" para testar o webhook</span>
-            </div>
-            <div className="flex items-start space-x-2">
-              <span className="bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold mt-0.5">
-                4
-              </span>
-              <span>Veja o status sendo atualizado instantaneamente via Realtime</span>
-            </div>
+          <CardContent>
+            <ol className="list-decimal list-inside space-y-2 text-sm">
+              <li>Configure um External ID único (ou gere um novo)</li>
+              <li>Clique em "Iniciar Monitoramento" para conectar ao Realtime</li>
+              <li>Aguarde a conexão ser estabelecida (status "Conectado")</li>
+              <li>Selecione um status code e clique em "Simular" para testar</li>
+              <li>Observe os logs em tempo real e as mudanças de status</li>
+              <li>O sistema deve reagir instantaneamente aos webhooks</li>
+            </ol>
           </CardContent>
         </Card>
       </div>

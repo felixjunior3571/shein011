@@ -1,114 +1,58 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 
+// Cliente Supabase com service key para operações de servidor
 const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!)
-
-// Rate limiting em memória para evitar sobrecarga
-const rateLimitMap = new Map<string, { count: number; resetTime: number }>()
-const RATE_LIMIT_WINDOW = 60000 // 1 minuto
-const MAX_REQUESTS_PER_WINDOW = 30 // 30 requests por minuto
-
-function checkRateLimit(key: string): boolean {
-  const now = Date.now()
-  const record = rateLimitMap.get(key)
-
-  if (!record || now > record.resetTime) {
-    rateLimitMap.set(key, { count: 1, resetTime: now + RATE_LIMIT_WINDOW })
-    return true
-  }
-
-  if (record.count >= MAX_REQUESTS_PER_WINDOW) {
-    return false
-  }
-
-  record.count++
-  return true
-}
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
-    const externalId = searchParams.get("external_id")
-    const invoiceId = searchParams.get("invoice_id")
+    const external_id = searchParams.get("external_id")
 
-    if (!externalId && !invoiceId) {
+    if (!external_id) {
       return NextResponse.json(
         {
           success: false,
-          error: "Parâmetro obrigatório",
-          message: "Informe external_id ou invoice_id",
+          error: "external_id é obrigatório",
         },
         { status: 400 },
       )
     }
 
-    // Rate limiting por external_id ou invoice_id
-    const rateLimitKey = externalId || invoiceId || "unknown"
-    if (!checkRateLimit(rateLimitKey)) {
-      console.log(`⚠️ Rate limit atingido para ${rateLimitKey}`)
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Rate limit exceeded",
-          message: "Muitas requisições. Tente novamente em 1 minuto.",
-          retry_after: RATE_LIMIT_WINDOW,
-        },
-        { status: 429 },
-      )
-    }
+    console.log(`🔍 [Payment Status] Consultando status para: ${external_id}`)
 
-    console.log("🔍 Consultando status SuperPay:", { externalId, invoiceId })
-
-    // Construir query baseada nos parâmetros disponíveis
-    let query = supabase
+    // Buscar status no Supabase
+    const { data, error } = await supabase
       .from("payment_webhooks")
       .select("*")
-      .eq("gateway", "superpaybr")
+      .eq("external_id", external_id)
       .order("processed_at", { ascending: false })
+      .limit(1)
+      .single()
 
-    if (externalId) {
-      query = query.eq("external_id", externalId)
-    } else if (invoiceId) {
-      query = query.eq("invoice_id", invoiceId)
-    }
-
-    const { data, error } = await query.limit(1).single()
-
-    if (error) {
-      console.error("❌ Erro ao consultar status SuperPay:", error)
-
-      if (error.code === "PGRST116") {
-        // Nenhum registro encontrado
-        return NextResponse.json({
-          success: true,
-          found: false,
-          message: "Pagamento não encontrado",
-          data: {
-            external_id: externalId,
-            invoice_id: invoiceId,
-            status_code: 1,
-            status_title: "Aguardando Pagamento",
-            is_paid: false,
-            is_denied: false,
-            is_expired: false,
-            is_canceled: false,
-            is_refunded: false,
-            last_check: new Date().toISOString(),
-          },
-        })
-      }
-
+    if (error && error.code !== "PGRST116") {
+      console.error("❌ [Payment Status] Erro no Supabase:", error)
       return NextResponse.json(
         {
           success: false,
-          error: "Erro de banco de dados",
-          message: error.message,
+          error: "Erro na consulta ao banco de dados",
+          details: error.message,
         },
         { status: 500 },
       )
     }
 
-    console.log("✅ Status SuperPay encontrado:", {
+    if (!data) {
+      console.log(`📋 [Payment Status] Nenhum status encontrado para: ${external_id}`)
+      return NextResponse.json({
+        success: true,
+        found: false,
+        message: "Nenhum status encontrado para este external_id",
+        data: null,
+      })
+    }
+
+    console.log(`✅ [Payment Status] Status encontrado:`, {
       external_id: data.external_id,
       status_code: data.status_code,
       status_title: data.status_title,
@@ -121,39 +65,119 @@ export async function GET(request: NextRequest) {
       data: {
         external_id: data.external_id,
         invoice_id: data.invoice_id,
-        token: data.token,
         status_code: data.status_code,
         status_name: data.status_name,
         status_title: data.status_title,
-        status_description: data.status_description,
-        status_text: data.status_text,
         amount: data.amount,
         payment_date: data.payment_date,
-        payment_due: data.payment_due,
-        payment_gateway: data.payment_gateway,
-        qr_code: data.qr_code,
-        pix_code: data.pix_code,
-        barcode: data.barcode,
-        processed_at: data.processed_at,
-        updated_at: data.updated_at,
         is_paid: data.is_paid,
         is_denied: data.is_denied,
         is_expired: data.is_expired,
         is_canceled: data.is_canceled,
         is_refunded: data.is_refunded,
-        gateway: data.gateway,
-        last_check: new Date().toISOString(),
+        processed_at: data.processed_at,
+        created_at: data.created_at,
       },
     })
   } catch (error) {
-    console.error("❌ Erro interno ao consultar status SuperPay:", error)
-
+    console.error("❌ [Payment Status] Erro geral:", error)
     return NextResponse.json(
       {
         success: false,
         error: "Erro interno do servidor",
         message: error instanceof Error ? error.message : "Erro desconhecido",
-        timestamp: new Date().toISOString(),
+      },
+      { status: 500 },
+    )
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json()
+    const { external_ids } = body
+
+    if (!external_ids || !Array.isArray(external_ids)) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "external_ids deve ser um array",
+        },
+        { status: 400 },
+      )
+    }
+
+    console.log(`🔍 [Payment Status Batch] Consultando status para ${external_ids.length} external_ids`)
+
+    // Buscar status em lote
+    const { data, error } = await supabase
+      .from("payment_webhooks")
+      .select("*")
+      .in("external_id", external_ids)
+      .order("processed_at", { ascending: false })
+
+    if (error) {
+      console.error("❌ [Payment Status Batch] Erro no Supabase:", error)
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Erro na consulta ao banco de dados",
+          details: error.message,
+        },
+        { status: 500 },
+      )
+    }
+
+    // Agrupar por external_id (pegar o mais recente de cada)
+    const statusMap = new Map()
+    data.forEach((item) => {
+      if (
+        !statusMap.has(item.external_id) ||
+        new Date(item.processed_at) > new Date(statusMap.get(item.external_id).processed_at)
+      ) {
+        statusMap.set(item.external_id, item)
+      }
+    })
+
+    const results = external_ids.map((external_id) => {
+      const status = statusMap.get(external_id)
+      return {
+        external_id,
+        found: !!status,
+        data: status
+          ? {
+              external_id: status.external_id,
+              invoice_id: status.invoice_id,
+              status_code: status.status_code,
+              status_name: status.status_name,
+              status_title: status.status_title,
+              amount: status.amount,
+              payment_date: status.payment_date,
+              is_paid: status.is_paid,
+              is_denied: status.is_denied,
+              is_expired: status.is_expired,
+              is_canceled: status.is_canceled,
+              is_refunded: status.is_refunded,
+              processed_at: status.processed_at,
+            }
+          : null,
+      }
+    })
+
+    console.log(`✅ [Payment Status Batch] Retornando ${results.length} resultados`)
+
+    return NextResponse.json({
+      success: true,
+      count: results.length,
+      results,
+    })
+  } catch (error) {
+    console.error("❌ [Payment Status Batch] Erro geral:", error)
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Erro interno do servidor",
+        message: error instanceof Error ? error.message : "Erro desconhecido",
       },
       { status: 500 },
     )
