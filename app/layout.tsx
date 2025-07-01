@@ -23,25 +23,83 @@ export default function RootLayout({
   return (
     <html lang="pt-BR">
       <head>
-        {/* Scripts da Utmify */}
-        <Script
+        {/* UTMify Scripts - Rastreamento completo do funil */}
+        <script
           src="https://cdn.utmify.com.br/scripts/utms/latest.js"
           data-utmify-prevent-xcod-sck=""
           data-utmify-prevent-subids=""
-          strategy="afterInteractive"
-        />
-        <Script id="utmify-pixel" strategy="afterInteractive">
-          {`
-            try {
+          async
+          defer
+        ></script>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
               window.pixelId = "6836abf356b3052677c77248";
               var a = document.createElement("script");
               a.setAttribute("async", "");
               a.setAttribute("defer", "");
               a.setAttribute("src", "https://cdn.utmify.com.br/scripts/pixel/pixel.js");
               document.head.appendChild(a);
-            } catch (error) {
-              console.warn("Erro ao inicializar Utmify:", error);
-            }
+            `,
+          }}
+        />
+
+        {/* UTMify Helper Functions para rastreamento do funil */}
+        <Script id="utmify-funnel-tracking" strategy="afterInteractive">
+          {`
+            // Função global para rastrear eventos do funil
+            window.trackUTMifyFunnel = function(event, data) {
+              try {
+                if (window.utmify && typeof window.utmify.track === 'function') {
+                  window.utmify.track(event, {
+                    ...data,
+                    funnel: 'shein_card',
+                    timestamp: new Date().toISOString(),
+                    page: window.location.pathname,
+                    url: window.location.href
+                  });
+                  console.log('✅ UTMify Funil tracked:', event, data);
+                } else {
+                  console.log('⚠️ UTMify não disponível, evento salvo:', event, data);
+                  // Salva eventos para quando UTMify carregar
+                  window.utmifyQueue = window.utmifyQueue || [];
+                  window.utmifyQueue.push({ event, data });
+                }
+              } catch (error) {
+                console.error('❌ Erro no rastreamento UTMify:', error);
+              }
+            };
+
+            // Processa eventos salvos quando UTMify carrega
+            window.addEventListener('load', function() {
+              setTimeout(function() {
+                if (window.utmifyQueue && window.utmify) {
+                  console.log('🔄 Processando eventos salvos do UTMify...');
+                  window.utmifyQueue.forEach(function(item) {
+                    window.trackUTMifyFunnel(item.event, item.data);
+                  });
+                  window.utmifyQueue = [];
+                }
+                
+                // Auto-track page view
+                window.trackUTMifyFunnel('page_view', {
+                  step: window.location.pathname.replace('/', '') || 'home'
+                });
+              }, 1000);
+            });
+
+            // Função de teste
+            window.testUTMify = function() {
+              console.log("🧪 Testando UTMify...");
+              if (typeof window.utmify !== 'undefined' && window.utmify.track) {
+                console.log("✅ UTMify está funcionando!");
+                window.trackUTMifyFunnel('test_event', { test: true });
+                return true;
+              } else {
+                console.warn("❌ UTMify não está disponível");
+                return false;
+              }
+            };
           `}
         </Script>
       </head>
