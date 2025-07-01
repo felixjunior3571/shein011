@@ -137,7 +137,9 @@ export async function POST(request: NextRequest) {
     console.log("📋 [SuperPay Webhook] Headers importantes:", {
       "content-type": headers["content-type"],
       "user-agent": headers["user-agent"],
-      "x-forwarded-for": headers["x-forwarded-for"],
+      userid: headers["userid"],
+      gateway: headers["gateway"],
+      webhook: headers["webhook"],
     })
 
     // Obter e validar body
@@ -257,8 +259,8 @@ export async function POST(request: NextRequest) {
       is_canceled: statusInfo.is_canceled,
       is_refunded: statusInfo.is_refunded,
 
-      // Cliente
-      customer_id,
+      // Cliente (OBRIGATÓRIO - corrigido)
+      customer_id: customer_id || "UNKNOWN",
 
       // Evento
       event_type: event.type || "webhook.update",
@@ -310,6 +312,7 @@ export async function POST(request: NextRequest) {
             external_id,
             status_code,
             amount,
+            customer_id: webhookData.customer_id,
             processing_time: Date.now() - startTime,
           },
         },
@@ -353,6 +356,7 @@ export async function POST(request: NextRequest) {
         status_name: statusInfo.name,
         status_title: statusInfo.title,
         amount,
+        customer_id: webhookData.customer_id,
         is_paid: statusInfo.is_paid,
         is_final: statusInfo.is_paid || statusInfo.is_denied || statusInfo.is_expired || statusInfo.is_canceled,
         processed_at: webhookData.processed_at,
@@ -382,7 +386,7 @@ export async function GET() {
   return NextResponse.json({
     message: "SuperPay Webhook Endpoint",
     status: "active",
-    version: "4.0.0",
+    version: "5.0.0",
     timestamp: new Date().toISOString(),
     endpoints: {
       webhook: "/api/superpay/webhook",
@@ -390,5 +394,6 @@ export async function GET() {
     },
     supported_events: ["webhook.update", "invoice.update"],
     critical_statuses: [5, 6, 9, 10, 12, 16],
+    schema_cache: "refreshed",
   })
 }
