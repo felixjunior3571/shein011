@@ -60,8 +60,7 @@ export function useStableRealtimeMonitor({
   const hasRedirectedRef = useRef(false)
   const hasInitialCheckRef = useRef(false)
   const isUnmountedRef = useRef(false)
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const stableConnectionRef = useRef(false)
+  const isConnectedRef = useRef(false)
 
   const log = useCallback(
     (message: string, data?: any) => {
@@ -147,27 +146,22 @@ export function useStableRealtimeMonitor({
       channelRef.current = null
     }
 
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current)
-      reconnectTimeoutRef.current = null
-    }
-
-    stableConnectionRef.current = false
+    isConnectedRef.current = false
     setIsConnected(false)
     setIsConnecting(false)
   }, [log])
 
-  // Função para conectar ao Realtime (ESTÁVEL)
+  // Função para conectar ao Realtime (ÚNICA VEZ)
   const connectToRealtime = useCallback(() => {
-    if (!enabled || !externalId || isUnmountedRef.current || stableConnectionRef.current) {
+    if (!enabled || !externalId || isUnmountedRef.current || isConnectedRef.current) {
       return
     }
 
-    log("🚀 Conectando ao Realtime ESTÁVEL", { externalId, attempt: connectionAttempts + 1 })
+    log("🚀 Conectando ao Realtime AUTENTICADO", { externalId })
     setIsConnecting(true)
     setError(null)
 
-    const channelName = `stable_payment_${externalId}`
+    const channelName = `authenticated_payment_${externalId}`
     const channel = supabase
       .channel(channelName, {
         config: {
@@ -234,33 +228,23 @@ export function useStableRealtimeMonitor({
         log("📡 Status da conexão Realtime:", status)
 
         if (status === "SUBSCRIBED") {
-          stableConnectionRef.current = true
+          isConnectedRef.current = true
           setIsConnected(true)
           setIsConnecting(false)
           setError(null)
           setIsReady(true)
           setConnectionAttempts(0)
-          log("✅ Conectado ao Realtime ESTÁVEL - Aguardando webhooks da SuperPay!")
+          log("✅ Conectado ao Realtime AUTENTICADO - Aguardando webhooks da SuperPay!")
         } else if (status === "CHANNEL_ERROR") {
-          stableConnectionRef.current = false
-          setIsConnected(false)
-          setIsConnecting(false)
-          setError("Erro na conexão Realtime")
           log("❌ Erro na conexão Realtime")
-
-          // NÃO reconectar automaticamente para evitar loops
-          log("⏸️ Conexão pausada para evitar loops")
+          setError("Erro na conexão Realtime")
         } else if (status === "TIMED_OUT") {
-          stableConnectionRef.current = false
-          setIsConnected(false)
-          setIsConnecting(false)
-          setError("Timeout na conexão Realtime")
           log("⏰ Timeout na conexão Realtime")
+          setError("Timeout na conexão Realtime")
         } else if (status === "CLOSED") {
-          stableConnectionRef.current = false
-          setIsConnected(false)
-          setIsConnecting(false)
           log("🔌 Conexão Realtime fechada")
+          isConnectedRef.current = false
+          setIsConnected(false)
         }
       })
 
@@ -268,7 +252,6 @@ export function useStableRealtimeMonitor({
   }, [
     enabled,
     externalId,
-    connectionAttempts,
     log,
     onPaymentConfirmed,
     onPaymentDenied,
@@ -291,7 +274,6 @@ export function useStableRealtimeMonitor({
     cleanupConnection()
     setConnectionAttempts((prev) => prev + 1)
 
-    // Delay antes de reconectar
     setTimeout(() => {
       if (!isUnmountedRef.current) {
         connectToRealtime()

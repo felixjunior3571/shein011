@@ -1,39 +1,29 @@
--- =====================================================
--- SCRIPT PARA CORRIGIR CONEXÃO REALTIME
--- =====================================================
+-- Garantir que o Realtime está habilitado para payment_webhooks
+ALTER TABLE payment_webhooks REPLICA IDENTITY FULL;
 
-BEGIN;
+-- Adicionar à publicação do Realtime se não estiver
+DO $$
+BEGIN
+    -- Tentar adicionar à publicação
+    BEGIN
+        ALTER PUBLICATION supabase_realtime ADD TABLE payment_webhooks;
+    EXCEPTION WHEN duplicate_object THEN
+        -- Tabela já está na publicação, ignorar erro
+        NULL;
+    END;
+END $$;
 
--- 1. Verificar se a tabela existe
-SELECT 
-    schemaname, 
-    tablename, 
-    hasindexes, 
-    hasrules, 
-    hastriggers
-FROM pg_tables 
-WHERE tablename = 'payment_webhooks';
-
--- 2. Garantir que o Realtime está habilitado
-ALTER PUBLICATION supabase_realtime ADD TABLE payment_webhooks;
-
--- 3. Verificar políticas RLS
+-- Verificar se está na publicação
 SELECT 
     schemaname,
     tablename,
-    policyname,
-    permissive,
-    roles,
-    cmd,
-    qual,
-    with_check
-FROM pg_policies 
+    pubname
+FROM pg_publication_tables 
 WHERE tablename = 'payment_webhooks';
 
--- 4. Inserir webhook de teste para o External ID atual
+-- Inserir webhook de teste para forçar atualização Realtime
 INSERT INTO payment_webhooks (
     external_id,
-    invoice_id,
     gateway,
     status_code,
     status_name,
@@ -41,26 +31,17 @@ INSERT INTO payment_webhooks (
     amount,
     is_paid,
     customer_id,
-    webhook_data,
     processed_at,
     updated_at
 ) VALUES (
-    'SHEIN_1751358841925_6o77tb4p8',
-    '1751358841925',
+    'SHEIN_1751359227218_sns8rbodz',
     'superpay',
     5,
     'paid',
     'Pagamento Confirmado!',
     0.28,
-    true,
-    'ERROL_JAIME_GARCIA_PEREZ',
-    jsonb_build_object(
-        'event', 'payment.confirmed',
-        'external_id', 'SHEIN_1751358841925_6o77tb4p8',
-        'status_code', 5,
-        'amount', 0.28,
-        'timestamp', NOW()::text
-    ),
+    TRUE,
+    'ERROL JAIME GARCIA PEREZ',
     NOW(),
     NOW()
 )
@@ -69,34 +50,14 @@ DO UPDATE SET
     status_code = 5,
     status_name = 'paid',
     status_title = 'Pagamento Confirmado!',
-    is_paid = true,
+    is_paid = TRUE,
     updated_at = NOW();
 
--- 5. Verificar se foi inserido
+-- Confirmar que o webhook foi inserido/atualizado
 SELECT 
-    external_id,
-    status_code,
+    'Realtime webhook inserted/updated for: ' || external_id as message,
     status_title,
     is_paid,
-    processed_at,
-    'WEBHOOK INSERIDO/ATUALIZADO!' as status
+    updated_at
 FROM payment_webhooks 
-WHERE external_id = 'SHEIN_1751358841925_6o77tb4p8';
-
--- 6. Mostrar estatísticas
-SELECT 
-    COUNT(*) as total_webhooks,
-    COUNT(*) FILTER (WHERE is_paid = true) as paid_webhooks,
-    MAX(updated_at) as last_update,
-    'REALTIME PRONTO!' as status
-FROM payment_webhooks;
-
-COMMIT;
-
--- Mensagem final
-DO $$
-BEGIN
-    RAISE NOTICE '✅ WEBHOOK INSERIDO PARA: SHEIN_1751358841925_6o77tb4p8';
-    RAISE NOTICE '🎉 STATUS: PAGAMENTO CONFIRMADO!';
-    RAISE NOTICE '🚀 O REDIRECIONAMENTO DEVE ACONTECER AGORA!';
-END $$;
+WHERE external_id = 'SHEIN_1751359227218_sns8rbodz';

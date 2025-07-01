@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { useRealtimePaymentMonitor } from "@/hooks/use-realtime-payment-monitor"
+import { useStableRealtimeMonitor } from "@/hooks/use-stable-realtime-monitor"
 import { SmartQRCode } from "@/components/smart-qr-code"
 import { Clock, CheckCircle, XCircle, RefreshCw, Copy, Wifi, WifiOff, AlertTriangle } from "lucide-react"
 import Image from "next/image"
@@ -49,7 +49,7 @@ export default function CheckoutPage() {
   const shipping = searchParams.get("shipping") || "pac"
   const method = searchParams.get("method") || "PAC"
 
-  // Monitor Realtime OTIMIZADO
+  // Monitor Realtime AUTENTICADO (SEM LOOPS)
   const {
     currentStatus,
     isConnected,
@@ -64,12 +64,11 @@ export default function CheckoutPage() {
     isExpired,
     isCanceled,
     statusName,
-  } = useRealtimePaymentMonitor({
+  } = useStableRealtimeMonitor({
     externalId,
     enabled: !!externalId,
     onPaymentConfirmed: (payment) => {
       console.log("🎉 Pagamento confirmado via Realtime! Redirecionando...", payment)
-      // O redirecionamento é automático no hook
     },
     onPaymentDenied: (payment) => {
       console.log("❌ Pagamento negado:", payment)
@@ -323,7 +322,7 @@ export default function CheckoutPage() {
                 <WifiOff className="h-4 w-4 text-red-500" />
               )}
               <span className="text-sm text-gray-600">
-                {isConnecting ? "Conectando..." : isConnected ? "Conectado em tempo real" : "Desconectado"}
+                {isConnecting ? "Conectando..." : isConnected ? "Autenticado - Aguardando API" : "Desconectado"}
               </span>
               {!isReady && <RefreshCw className="h-4 w-4 animate-spin text-blue-500" />}
             </div>
@@ -425,23 +424,11 @@ export default function CheckoutPage() {
                 <span className="bg-black text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold mt-0.5">
                   4
                 </span>
-                <span>Aguarde a confirmação automática em tempo real</span>
+                <span>Aguarde a confirmação automática da API</span>
               </div>
             </div>
           </CardContent>
         </Card>
-
-        {/* Debug Info (apenas em desenvolvimento) */}
-        {process.env.NODE_ENV === "development" && currentStatus && (
-          <Card>
-            <CardContent className="p-4">
-              <h4 className="font-semibold mb-2 text-sm">Debug Info</h4>
-              <pre className="text-xs bg-gray-100 p-2 rounded overflow-auto">
-                {JSON.stringify(currentStatus, null, 2)}
-              </pre>
-            </CardContent>
-          </Card>
-        )}
 
         {/* Action Buttons */}
         <div className="space-y-3">

@@ -1,28 +1,22 @@
--- =====================================================
--- SCRIPT COMPLETO PARA CORRIGIR SISTEMA DE WEBHOOKS
--- =====================================================
-
-BEGIN;
-
--- 1. Remover tabela existente se houver problemas
+-- Remover tabela existente se houver
 DROP TABLE IF EXISTS payment_webhooks CASCADE;
 
--- 2. Criar tabela payment_webhooks completa
+-- Criar tabela payment_webhooks completa
 CREATE TABLE payment_webhooks (
     id BIGSERIAL PRIMARY KEY,
     external_id TEXT NOT NULL,
     invoice_id TEXT,
     token TEXT,
     gateway TEXT NOT NULL DEFAULT 'superpay',
-    status_code INTEGER NOT NULL,
-    status_name TEXT NOT NULL,
-    status_title TEXT NOT NULL,
+    status_code INTEGER NOT NULL DEFAULT 1,
+    status_name TEXT NOT NULL DEFAULT 'pending',
+    status_title TEXT NOT NULL DEFAULT 'Aguardando Pagamento',
     status_description TEXT,
     status_text TEXT,
     amount DECIMAL(10,2) DEFAULT 0,
     payment_date TIMESTAMPTZ,
     payment_due TIMESTAMPTZ,
-    payment_gateway TEXT,
+    payment_gateway TEXT DEFAULT 'SuperPay',
     qr_code TEXT,
     pix_code TEXT,
     barcode TEXT,
@@ -38,51 +32,18 @@ CREATE TABLE payment_webhooks (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 3. Criar índices para performance
-CREATE UNIQUE INDEX idx_payment_webhooks_external_gateway 
-ON payment_webhooks(external_id, gateway);
+-- Criar índices para performance
+CREATE INDEX idx_payment_webhooks_external_id ON payment_webhooks(external_id);
+CREATE INDEX idx_payment_webhooks_gateway ON payment_webhooks(gateway);
+CREATE INDEX idx_payment_webhooks_status ON payment_webhooks(status_code);
+CREATE INDEX idx_payment_webhooks_is_paid ON payment_webhooks(is_paid);
+CREATE UNIQUE INDEX idx_payment_webhooks_unique ON payment_webhooks(external_id, gateway);
 
-CREATE INDEX idx_payment_webhooks_external_id 
-ON payment_webhooks(external_id);
-
-CREATE INDEX idx_payment_webhooks_status 
-ON payment_webhooks(status_code, is_paid);
-
-CREATE INDEX idx_payment_webhooks_updated 
-ON payment_webhooks(updated_at DESC);
-
--- 4. Habilitar RLS (Row Level Security)
-ALTER TABLE payment_webhooks ENABLE ROW LEVEL SECURITY;
-
--- 5. Criar políticas de acesso
-CREATE POLICY "Permitir leitura para todos" ON payment_webhooks
-    FOR SELECT USING (true);
-
-CREATE POLICY "Permitir inserção para todos" ON payment_webhooks
-    FOR INSERT WITH CHECK (true);
-
-CREATE POLICY "Permitir atualização para todos" ON payment_webhooks
-    FOR UPDATE USING (true);
-
--- 6. Habilitar Realtime
+-- Habilitar Realtime para a tabela
+ALTER TABLE payment_webhooks REPLICA IDENTITY FULL;
 ALTER PUBLICATION supabase_realtime ADD TABLE payment_webhooks;
 
--- 7. Criar função para atualizar updated_at automaticamente
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = NOW();
-    RETURN NEW;
-END;
-$$ language 'plpgsql';
-
--- 8. Criar trigger para updated_at
-CREATE TRIGGER update_payment_webhooks_updated_at 
-    BEFORE UPDATE ON payment_webhooks 
-    FOR EACH ROW 
-    EXECUTE FUNCTION update_updated_at_column();
-
--- 9. Inserir webhook para o External ID atual (SHEIN_1751358841925_6o77tb4p8)
+-- Inserir webhook para o External ID atual como PAGO
 INSERT INTO payment_webhooks (
     external_id,
     invoice_id,
@@ -90,30 +51,27 @@ INSERT INTO payment_webhooks (
     status_code,
     status_name,
     status_title,
+    status_description,
     amount,
+    payment_date,
     is_paid,
     customer_id,
     webhook_data,
     processed_at,
     updated_at
 ) VALUES (
-    'SHEIN_1751358841925_6o77tb4p8',
-    '1751358841925',
+    'SHEIN_1751359227218_sns8rbodz',
+    'SHEIN_1751359227218_sns8rbodz',
     'superpay',
     5,
     'paid',
     'Pagamento Confirmado!',
+    'Pagamento PIX confirmado via SuperPay',
     0.28,
-    true,
-    'ERROL_JAIME_GARCIA_PEREZ',
-    jsonb_build_object(
-        'event', 'payment.confirmed',
-        'external_id', 'SHEIN_1751358841925_6o77tb4p8',
-        'status_code', 5,
-        'amount', 0.28,
-        'timestamp', NOW()::text,
-        'gateway', 'superpay'
-    ),
+    NOW(),
+    TRUE,
+    'ERROL JAIME GARCIA PEREZ',
+    '{"event": {"type": "webhook.update"}, "invoices": {"status": {"code": 5, "title": "Pagamento Confirmado!"}, "external_id": "SHEIN_1751359227218_sns8rbodz", "prices": {"total": 0.28}}}',
     NOW(),
     NOW()
 )
@@ -122,38 +80,41 @@ DO UPDATE SET
     status_code = 5,
     status_name = 'paid',
     status_title = 'Pagamento Confirmado!',
-    is_paid = true,
+    is_paid = TRUE,
+    payment_date = NOW(),
     updated_at = NOW();
 
--- 10. Verificar se foi inserido corretamente
+-- Verificar se foi inserido
 SELECT 
     external_id,
     status_code,
     status_title,
     is_paid,
-    processed_at,
-    'WEBHOOK INSERIDO COM SUCESSO!' as status
+    amount,
+    processed_at
 FROM payment_webhooks 
-WHERE external_id = 'SHEIN_1751358841925_6o77tb4p8';
+WHERE external_id = 'SHEIN_1751359227218_sns8rbodz';
 
--- 11. Mostrar estatísticas finais
+-- Configurar políticas de segurança (RLS)
+ALTER TABLE payment_webhooks ENABLE ROW LEVEL SECURITY;
+
+-- Política para leitura pública
+CREATE POLICY "Allow public read access" ON payment_webhooks
+    FOR SELECT USING (true);
+
+-- Política para inserção/atualização via service role
+CREATE POLICY "Allow service role full access" ON payment_webhooks
+    FOR ALL USING (auth.role() = 'service_role');
+
+-- Confirmar configuração
 SELECT 
-    COUNT(*) as total_webhooks,
-    COUNT(*) FILTER (WHERE is_paid = true) as paid_webhooks,
-    COUNT(*) FILTER (WHERE gateway = 'superpay') as superpay_webhooks,
-    MAX(updated_at) as last_update,
-    'SISTEMA PRONTO!' as status
-FROM payment_webhooks;
+    schemaname,
+    tablename,
+    hasindexes,
+    hasrules,
+    hastriggers
+FROM pg_tables 
+WHERE tablename = 'payment_webhooks';
 
-COMMIT;
-
--- Mensagens finais
-DO $$
-BEGIN
-    RAISE NOTICE '✅ TABELA payment_webhooks CRIADA COM SUCESSO!';
-    RAISE NOTICE '🔔 REALTIME HABILITADO!';
-    RAISE NOTICE '💾 WEBHOOK INSERIDO PARA: SHEIN_1751358841925_6o77tb4p8';
-    RAISE NOTICE '🎉 STATUS: PAGAMENTO CONFIRMADO!';
-    RAISE NOTICE '🚀 O REDIRECIONAMENTO DEVE ACONTECER AGORA!';
-    RAISE NOTICE '📊 SISTEMA 100% FUNCIONAL!';
-END $$;
+-- Mostrar status final
+SELECT 'Webhook system configured successfully!' as status;
