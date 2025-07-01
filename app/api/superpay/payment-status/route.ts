@@ -9,7 +9,7 @@ export async function GET(request: NextRequest) {
     const externalId = searchParams.get("externalId")
     const invoiceId = searchParams.get("invoiceId")
 
-    console.log("🔍 Consultando status SuperPay alternativo:", { externalId, invoiceId })
+    console.log("🔍 Consultando status SuperPay (alternativo):", { externalId, invoiceId })
 
     if (!externalId && !invoiceId) {
       return NextResponse.json(
@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Construir query para gateway superpay
+    // Construir query para gateway alternativo
     let query = supabase.from("payment_webhooks").select("*").eq("gateway", "superpay")
 
     if (externalId) {
@@ -37,27 +37,28 @@ export async function GET(request: NextRequest) {
 
     if (error) {
       if (error.code === "PGRST116") {
-        console.log("⚠️ Nenhum webhook SuperPay alternativo encontrado para:", { externalId, invoiceId })
+        console.log("⚠️ Nenhum webhook SuperPay (alternativo) encontrado para:", { externalId, invoiceId })
         return NextResponse.json({
           success: true,
           found: false,
           message: "Nenhum webhook encontrado - aguardando pagamento",
           data: null,
+          gateway: "superpay",
           timestamp: new Date().toISOString(),
         })
       }
 
-      console.error("❌ Erro ao consultar SuperPay alternativo:", error)
+      console.error("❌ Erro ao consultar SuperPay (alternativo):", error)
       throw error
     }
 
-    console.log("📊 Status SuperPay alternativo encontrado:", {
+    console.log("📊 Status SuperPay (alternativo) encontrado:", {
       external_id: data.external_id,
       status_code: data.status_code,
       is_paid: data.is_paid,
     })
 
-    return NextResponse.json({
+    const response = {
       success: true,
       found: true,
       message: "Status encontrado",
@@ -84,16 +85,20 @@ export async function GET(request: NextRequest) {
         gateway: data.gateway,
         webhook_data: data.webhook_data,
       },
+      gateway: "superpay",
       timestamp: new Date().toISOString(),
-    })
+    }
+
+    return NextResponse.json(response)
   } catch (error) {
-    console.error("❌ Erro na consulta SuperPay alternativo:", error)
+    console.error("❌ Erro na consulta SuperPay (alternativo):", error)
 
     return NextResponse.json(
       {
         success: false,
         error: "Erro interno do servidor",
         message: error instanceof Error ? error.message : "Erro desconhecido",
+        gateway: "superpay",
         timestamp: new Date().toISOString(),
       },
       { status: 500 },

@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS payment_webhooks (
     is_expired BOOLEAN DEFAULT FALSE,
     is_canceled BOOLEAN DEFAULT FALSE,
     is_refunded BOOLEAN DEFAULT FALSE,
-    gateway TEXT DEFAULT 'superpaybr',
+    gateway TEXT NOT NULL DEFAULT 'superpaybr',
     UNIQUE(external_id, gateway)
 );
 
@@ -31,7 +31,7 @@ CREATE INDEX IF NOT EXISTS idx_payment_webhooks_invoice_id ON payment_webhooks(i
 CREATE INDEX IF NOT EXISTS idx_payment_webhooks_status_code ON payment_webhooks(status_code);
 CREATE INDEX IF NOT EXISTS idx_payment_webhooks_is_paid ON payment_webhooks(is_paid);
 CREATE INDEX IF NOT EXISTS idx_payment_webhooks_gateway ON payment_webhooks(gateway);
-CREATE INDEX IF NOT EXISTS idx_payment_webhooks_processed_at ON payment_webhooks(processed_at);
+CREATE INDEX IF NOT EXISTS idx_payment_webhooks_processed_at ON payment_webhooks(processed_at DESC);
 
 -- Trigger para atualizar updated_at automaticamente
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -48,7 +48,16 @@ CREATE TRIGGER update_payment_webhooks_updated_at
     EXECUTE FUNCTION update_updated_at_column();
 
 -- Comentários para documentação
-COMMENT ON TABLE payment_webhooks IS 'Armazena webhooks de pagamento da SuperPay';
-COMMENT ON COLUMN payment_webhooks.external_id IS 'ID externo único da fatura';
-COMMENT ON COLUMN payment_webhooks.status_code IS 'Código de status da SuperPay (5=pago, 12=negado, etc)';
-COMMENT ON COLUMN payment_webhooks.webhook_data IS 'Dados completos do webhook em JSON';
+COMMENT ON TABLE payment_webhooks IS 'Armazena webhooks recebidos da SuperPay para monitoramento de pagamentos';
+COMMENT ON COLUMN payment_webhooks.external_id IS 'ID externo único da fatura gerado pelo sistema';
+COMMENT ON COLUMN payment_webhooks.invoice_id IS 'ID da fatura na SuperPay';
+COMMENT ON COLUMN payment_webhooks.status_code IS 'Código numérico do status (5=pago, 12=negado, etc)';
+COMMENT ON COLUMN payment_webhooks.gateway IS 'Gateway usado (superpaybr, superpay, etc)';
+COMMENT ON COLUMN payment_webhooks.webhook_data IS 'Dados brutos do webhook em JSON';
+
+-- Verificar se a tabela foi criada com sucesso
+SELECT 
+    'payment_webhooks' as table_name,
+    COUNT(*) as record_count,
+    NOW() as created_at
+FROM payment_webhooks;
