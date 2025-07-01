@@ -1,23 +1,29 @@
 "use client"
 
-import { useEffect, useRef, useState, useCallback } from "react"
+import { useEffect, useState, useCallback, useRef } from "react"
 import { createClient } from "@supabase/supabase-js"
 import { useRouter } from "next/navigation"
 
+// Cliente Supabase para o frontend
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
 
 interface PaymentStatus {
+  id: number
   external_id: string
+  invoice_id: string
   status_code: number
   status_name: string
   status_title: string
+  status_description?: string
   amount: number
+  payment_date?: string
+  payment_gateway?: string
   is_paid: boolean
   is_denied: boolean
   is_expired: boolean
   is_canceled: boolean
   is_refunded: boolean
-  payment_date?: string
+  gateway: string
   processed_at: string
   updated_at: string
 }
@@ -31,6 +37,7 @@ interface UseRealtimePaymentMonitorProps {
   onPaymentCanceled?: (payment: PaymentStatus) => void
   debug?: boolean
   autoRedirect?: boolean
+  redirectUrl?: string
 }
 
 export function useRealtimePaymentMonitor({
@@ -41,7 +48,8 @@ export function useRealtimePaymentMonitor({
   onPaymentExpired,
   onPaymentCanceled,
   debug = false,
-  autoRedirect = false,
+  autoRedirect = true,
+  redirectUrl = "/upp/001",
 }: UseRealtimePaymentMonitorProps) {
   const [isConnected, setIsConnected] = useState(false)
   const [isConnecting, setIsConnecting] = useState(false)
@@ -51,26 +59,26 @@ export function useRealtimePaymentMonitor({
   const [connectionAttempts, setConnectionAttempts] = useState(0)
   const [isReady, setIsReady] = useState(false)
 
-  const channelRef = useRef<any>(null)
   const router = useRouter()
-  const hasInitialCheckRef = useRef(false)
+  const channelRef = useRef<any>(null)
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const hasRedirectedRef = useRef(false)
 
-  // Log debug
-  const debugLog = useCallback(
+  const log = useCallback(
     (message: string, data?: any) => {
       if (debug) {
-        console.log(`🔄 [Realtime Monitor] ${message}`, data || "")
+        console.log(`[Realtime Monitor] ${message}`, data || "")
       }
     },
     [debug],
   )
 
-  // Verificação inicial do status
+  // Função para verificar status inicial
   const checkInitialStatus = useCallback(async () => {
-    if (!externalId || hasInitialCheckRef.current) return
+    if (!externalId || !enabled) return
 
     try {
-      debugLog("Verificando status inicial", { externalId })
+      log(`🔍 Verificando status inicial para: ${externalId}`)
 
       const { data, error } = await supabase
         .from("payment_webhooks")
@@ -82,182 +90,230 @@ export function useRealtimePaymentMonitor({
         .single()
 
       if (error && error.code !== "PGRST116") {
-        debugLog("Erro na verificação inicial", error)
+        // PGRST116 = No rows found, que é normal
+        log(`❌ Erro ao verificar status inicial:`, error)
+        setError(`Erro ao verificar status: ${error.message}`)
         return
       }
 
       if (data) {
-        debugLog("Status inicial encontrado", data)
+        log(`✅ Status inicial encontrado:`, data)
         setCurrentStatus(data)
         setLastUpdate(new Date().toISOString())
 
-        // Processar status inicial
-        if (data.is_paid) {
-          debugLog("Pagamento já confirmado!")
+        // Verificar se já está pago
+        if (data.is_paid && !hasRedirectedRef.current) {
+          log(`🎉 Pagamento já confirmado! Executando callback...`)
           onPaymentConfirmed?.(data)
+
           if (autoRedirect) {
-            setTimeout(() => router.push("/upp/001"), 1000)
+            hasRedirectedRef.current = true
+            log(`🚀 Redirecionando para: ${redirectUrl}`)
+            router.push(redirectUrl)
           }
         } else if (data.is_denied) {
-          debugLog("Pagamento já negado!")
+          log(`❌ Pagamento negado`)
           onPaymentDenied?.(data)
         } else if (data.is_expired) {
-          debugLog("Pagamento já vencido!")
+          log(`⏰ Pagamento vencido`)
           onPaymentExpired?.(data)
         } else if (data.is_canceled) {
-          debugLog("Pagamento já cancelado!")
+          log(`🚫 Pagamento cancelado`)
           onPaymentCanceled?.(data)
         }
       } else {
-        debugLog("Nenhum status inicial encontrado")
+        log(`ℹ️ Nenhum status encontrado ainda para: ${externalId}`)
       }
-
-      hasInitialCheckRef.current = true
     } catch (error) {
-      debugLog("Erro na verificação inicial", error)
+      log(`❌ Erro na verificação inicial:`, error)
+      setError(`Erro na verificação: ${error instanceof Error ? error.message : "Erro desconhecido"}`)
     }
-  }, [
-    externalId,
-    debugLog,
-    onPaymentConfirmed,
-    onPaymentDenied,
-    onPaymentExpired,
-    onPaymentCanceled,
-    autoRedirect,
-    router,
-  ])
-
-  // Conectar ao Realtime
-  const connect = useCallback(() => {
-    if (!externalId || !enabled || channelRef.current) return
-
-    debugLog("Iniciando conexão Realtime", { externalId })
-    setIsConnecting(true)
-    setError(null)
-    setConnectionAttempts((prev) => prev + 1)
-
-    const channelName = `payment-status-${externalId}`
-    const channel = supabase
-      .channel(channelName)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "payment_webhooks",
-          filter: `external_id=eq.${externalId}`,
-        },
-        (payload) => {
-          debugLog("Webhook recebido via Realtime", payload)
-
-          const newData = payload.new as PaymentStatus
-          if (!newData) return
-
-          setCurrentStatus(newData)
-          setLastUpdate(new Date().toISOString())
-
-          // Processar mudanças de status
-          if (newData.is_paid && !currentStatus?.is_paid) {
-            debugLog("🎉 Pagamento confirmado via Realtime!")
-            onPaymentConfirmed?.(newData)
-            if (autoRedirect) {
-              setTimeout(() => router.push("/upp/001"), 2000)
-            }
-          } else if (newData.is_denied && !currentStatus?.is_denied) {
-            debugLog("❌ Pagamento negado via Realtime!")
-            onPaymentDenied?.(newData)
-          } else if (newData.is_expired && !currentStatus?.is_expired) {
-            debugLog("⏰ Pagamento vencido via Realtime!")
-            onPaymentExpired?.(newData)
-          } else if (newData.is_canceled && !currentStatus?.is_canceled) {
-            debugLog("🚫 Pagamento cancelado via Realtime!")
-            onPaymentCanceled?.(newData)
-          }
-        },
-      )
-      .subscribe((status) => {
-        debugLog("Status da conexão Realtime", status)
-
-        if (status === "SUBSCRIBED") {
-          setIsConnected(true)
-          setIsConnecting(false)
-          setError(null)
-          setIsReady(true)
-          debugLog("✅ Conectado ao Realtime com sucesso!")
-        } else if (status === "CHANNEL_ERROR") {
-          setIsConnected(false)
-          setIsConnecting(false)
-          setError("Erro na conexão Realtime")
-          debugLog("❌ Erro na conexão Realtime")
-        } else if (status === "TIMED_OUT") {
-          setIsConnected(false)
-          setIsConnecting(false)
-          setError("Timeout na conexão Realtime")
-          debugLog("⏰ Timeout na conexão Realtime")
-        } else if (status === "CLOSED") {
-          setIsConnected(false)
-          setIsConnecting(false)
-          setError("Conexão Realtime fechada")
-          debugLog("🔌 Conexão Realtime fechada")
-        }
-      })
-
-    channelRef.current = channel
   }, [
     externalId,
     enabled,
-    debugLog,
+    log,
     onPaymentConfirmed,
     onPaymentDenied,
     onPaymentExpired,
     onPaymentCanceled,
     autoRedirect,
+    redirectUrl,
     router,
-    currentStatus,
   ])
 
-  // Desconectar
-  const disconnect = useCallback(() => {
-    if (channelRef.current) {
-      debugLog("Desconectando do Realtime")
-      supabase.removeChannel(channelRef.current)
-      channelRef.current = null
-      setIsConnected(false)
-      setIsConnecting(false)
-      setIsReady(false)
-    }
-  }, [debugLog])
-
-  // Reconectar
-  const reconnect = useCallback(() => {
-    debugLog("Reconectando...")
-    disconnect()
-    setTimeout(() => {
-      connect()
-    }, 1000)
-  }, [debugLog, disconnect, connect])
-
-  // Efeito principal
-  useEffect(() => {
-    if (!externalId || !enabled) {
-      debugLog("Monitor desabilitado", { externalId, enabled })
+  // Função para conectar ao Realtime
+  const connect = useCallback(() => {
+    if (!externalId || !enabled || channelRef.current) {
       return
     }
 
-    debugLog("Iniciando monitor Realtime", { externalId })
+    setIsConnecting(true)
+    setConnectionAttempts((prev) => prev + 1)
+    log(`🔄 Tentativa de conexão #${connectionAttempts + 1} para: ${externalId}`)
 
-    // Verificar status inicial primeiro
-    checkInitialStatus()
+    try {
+      // Criar canal único para este external_id
+      const channelName = `payment_monitor_${externalId}_${Date.now()}`
 
-    // Conectar ao Realtime
-    connect()
+      const channel = supabase
+        .channel(channelName)
+        .on(
+          "postgres_changes",
+          {
+            event: "*", // Escutar INSERT, UPDATE, DELETE
+            schema: "public",
+            table: "payment_webhooks",
+            filter: `external_id=eq.${externalId}`,
+          },
+          (payload) => {
+            log(`📡 Evento Realtime recebido:`, payload)
 
-    // Cleanup
-    return () => {
-      debugLog("Limpando monitor Realtime")
+            const newData = payload.new as PaymentStatus
+            const eventType = payload.eventType
+
+            if (newData && newData.external_id === externalId) {
+              log(`✅ Dados atualizados via Realtime (${eventType}):`, newData)
+
+              setCurrentStatus(newData)
+              setLastUpdate(new Date().toISOString())
+              setError(null)
+
+              // Executar callbacks baseados no status
+              if (newData.is_paid && !hasRedirectedRef.current) {
+                log(`🎉 PAGAMENTO CONFIRMADO VIA REALTIME!`)
+                onPaymentConfirmed?.(newData)
+
+                if (autoRedirect) {
+                  hasRedirectedRef.current = true
+                  log(`🚀 Redirecionando para: ${redirectUrl}`)
+                  setTimeout(() => {
+                    router.push(redirectUrl)
+                  }, 1000) // Delay de 1 segundo para mostrar a confirmação
+                }
+              } else if (newData.is_denied) {
+                log(`❌ PAGAMENTO NEGADO VIA REALTIME`)
+                onPaymentDenied?.(newData)
+              } else if (newData.is_expired) {
+                log(`⏰ PAGAMENTO VENCIDO VIA REALTIME`)
+                onPaymentExpired?.(newData)
+              } else if (newData.is_canceled) {
+                log(`🚫 PAGAMENTO CANCELADO VIA REALTIME`)
+                onPaymentCanceled?.(newData)
+              }
+            }
+          },
+        )
+        .subscribe((status) => {
+          log(`📡 Status da subscrição Realtime:`, status)
+
+          if (status === "SUBSCRIBED") {
+            setIsConnected(true)
+            setIsConnecting(false)
+            setError(null)
+            setIsReady(true)
+            log(`✅ Conectado ao Realtime com sucesso!`)
+
+            // Verificar status inicial após conectar
+            checkInitialStatus()
+          } else if (status === "CHANNEL_ERROR") {
+            setIsConnected(false)
+            setIsConnecting(false)
+            setError("Erro na conexão Realtime")
+            log(`❌ Erro na conexão Realtime`)
+          } else if (status === "TIMED_OUT") {
+            setIsConnected(false)
+            setIsConnecting(false)
+            setError("Timeout na conexão Realtime")
+            log(`⏰ Timeout na conexão Realtime`)
+          } else if (status === "CLOSED") {
+            setIsConnected(false)
+            setIsConnecting(false)
+            log(`🔌 Conexão Realtime fechada`)
+          }
+        })
+
+      channelRef.current = channel
+      log(`📡 Canal Realtime criado: ${channelName}`)
+    } catch (error) {
+      log(`❌ Erro ao criar conexão Realtime:`, error)
+      setIsConnecting(false)
+      setError(`Erro de conexão: ${error instanceof Error ? error.message : "Erro desconhecido"}`)
+    }
+  }, [
+    externalId,
+    enabled,
+    connectionAttempts,
+    log,
+    checkInitialStatus,
+    onPaymentConfirmed,
+    onPaymentDenied,
+    onPaymentExpired,
+    onPaymentCanceled,
+    autoRedirect,
+    redirectUrl,
+    router,
+  ])
+
+  // Função para desconectar
+  const disconnect = useCallback(() => {
+    if (channelRef.current) {
+      log(`🔌 Desconectando do Realtime...`)
+      supabase.removeChannel(channelRef.current)
+      channelRef.current = null
+    }
+
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current)
+      reconnectTimeoutRef.current = null
+    }
+
+    setIsConnected(false)
+    setIsConnecting(false)
+    setIsReady(false)
+  }, [log])
+
+  // Função para reconectar
+  const reconnect = useCallback(() => {
+    log(`🔄 Iniciando reconexão...`)
+    disconnect()
+
+    // Aguardar um pouco antes de reconectar
+    reconnectTimeoutRef.current = setTimeout(() => {
+      connect()
+    }, 2000)
+  }, [log, disconnect, connect])
+
+  // Efeito principal para gerenciar a conexão
+  useEffect(() => {
+    if (externalId && enabled) {
+      log(`🚀 Iniciando monitor Realtime para: ${externalId}`)
+      connect()
+    } else {
+      log(`⏹️ Monitor desabilitado ou sem external_id`)
       disconnect()
     }
-  }, [externalId, enabled, debugLog, checkInitialStatus, connect, disconnect])
+
+    return () => {
+      disconnect()
+    }
+  }, [externalId, enabled, connect, disconnect, log])
+
+  // Efeito para reconexão automática em caso de erro
+  useEffect(() => {
+    if (error && enabled && externalId && connectionAttempts < 5) {
+      log(`🔄 Tentando reconexão automática em 5 segundos... (tentativa ${connectionAttempts}/5)`)
+
+      reconnectTimeoutRef.current = setTimeout(() => {
+        reconnect()
+      }, 5000)
+    }
+
+    return () => {
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current)
+      }
+    }
+  }, [error, enabled, externalId, connectionAttempts, reconnect, log])
 
   return {
     isConnected,
@@ -268,5 +324,6 @@ export function useRealtimePaymentMonitor({
     connectionAttempts,
     isReady,
     reconnect,
+    disconnect,
   }
 }
