@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-import { useState, useEffect } from "react"
 
 import Image from "next/image"
 import { Shield, Clock, CreditCard, HelpCircle, Lock, FileCheck } from "lucide-react"
@@ -15,23 +14,6 @@ export default function Home() {
 
   // Rastreia a página inicial
   usePageTracking("home")
-
-  // Adicionar no início do componente, após os outros useStates
-  const [paymentConfirmed, setPaymentConfirmed] = useState(false)
-
-  // Adicionar no useEffect existente
-  useEffect(() => {
-    // Verificar se o pagamento foi confirmado
-    const confirmed = localStorage.getItem("paymentConfirmed")
-    if (confirmed === "true") {
-      setPaymentConfirmed(true)
-      // Limpar o flag após mostrar a mensagem
-      setTimeout(() => {
-        localStorage.removeItem("paymentConfirmed")
-        setPaymentConfirmed(false)
-      }, 10000) // Remove após 10 segundos
-    }
-  }, [])
 
   const handleBackgroundClick = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) {
@@ -56,20 +38,6 @@ export default function Home() {
     <div className="min-h-screen bg-gray-50">
       {/* Overlay transparente para capturar cliques */}
       <div className="fixed inset-0 z-40 cursor-pointer" onClick={handleBackgroundClick}></div>
-
-      {paymentConfirmed && (
-        <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 bg-green-500 text-white px-6 py-4 rounded-lg shadow-lg animate-bounce">
-          <div className="flex items-center space-x-2">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-            </svg>
-            <div>
-              <p className="font-bold">🎉 Parabéns! Pagamento Confirmado!</p>
-              <p className="text-sm">Seu cartão SHEIN foi aprovado com sucesso!</p>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Hero Section */}
       <section className="relative h-[450px] sm:h-[500px] lg:h-[600px] flex items-center justify-center text-white overflow-hidden">

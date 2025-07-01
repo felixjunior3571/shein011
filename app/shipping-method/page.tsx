@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Package, Truck, Gift, CheckCircle } from "lucide-react"
+import { Package, Truck, Gift, CheckCircle, Play } from "lucide-react"
 import { usePageTracking, useTracking } from "@/hooks/use-tracking"
 
 interface AddressData {
@@ -26,7 +26,7 @@ export default function ShippingMethodPage() {
   const [videoEnded, setVideoEnded] = useState(false)
   const [videoLoaded, setVideoLoaded] = useState(false)
   const [videoStarted, setVideoStarted] = useState(false)
-  const [videoVolume, setVideoVolume] = useState(0.35) // Volume inicial em 35%
+  const [videoVolume, setVideoVolume] = useState(0.5) // Volume inicial em 50%
 
   // Detectar se é mobile
   const [isMobile, setIsMobile] = useState(false)
@@ -67,23 +67,7 @@ export default function ShippingMethodPage() {
     }
   }, [])
 
-  // Função para definir volume do vídeo
-  const setVideoVolumeLevel = (volume: number) => {
-    const iframe = document.querySelector("iframe")
-    if (iframe && iframe.contentWindow) {
-      iframe.contentWindow.postMessage(
-        JSON.stringify({
-          method: "setVolume",
-          value: volume,
-        }),
-        "https://player.vimeo.com",
-      )
-      setVideoVolume(volume)
-      console.log(`🔊 Volume definido para: ${Math.round(volume * 100)}%`)
-    }
-  }
-
-  // Listener para eventos do Vimeo com controle de volume melhorado
+  // Listener para eventos do Vimeo com debug melhorado
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       // Aceita mensagens do Vimeo
@@ -97,29 +81,33 @@ export default function ShippingMethodPage() {
           setVideoLoaded(true)
           console.log("✅ Vídeo carregado e pronto!")
 
-          // Define o volume para 35% imediatamente quando o vídeo estiver pronto
-          setTimeout(() => setVideoVolumeLevel(0.35), 100)
-          // Reforça o volume após um tempo para garantir
-          setTimeout(() => setVideoVolumeLevel(0.35), 500)
-          setTimeout(() => setVideoVolumeLevel(0.35), 1000)
-        }
-
-        if (data.event === "loaded") {
-          console.log("📹 Vídeo foi carregado completamente")
-          // Define o volume novamente quando carregado
-          setTimeout(() => setVideoVolumeLevel(0.35), 100)
+          // Define o volume para 50% quando o vídeo estiver pronto
+          const iframe = document.querySelector("iframe")
+          if (iframe && iframe.contentWindow) {
+            setTimeout(() => {
+              iframe.contentWindow.postMessage(
+                JSON.stringify({
+                  method: "setVolume",
+                  value: 0.5,
+                }),
+                "https://player.vimeo.com",
+              )
+            }, 1000)
+          }
         }
 
         if (data.event === "play") {
           setVideoStarted(true)
           console.log("▶️ Vídeo iniciou!")
-          // Garante que o volume está correto quando o vídeo inicia
-          setTimeout(() => setVideoVolumeLevel(0.35), 100)
         }
 
         if (data.event === "ended") {
           setVideoEnded(true)
           console.log("🎬 Vídeo terminou!")
+        }
+
+        if (data.event === "loaded") {
+          console.log("📹 Vídeo foi carregado completamente")
         }
       } catch (error) {
         console.log("Erro ao processar evento Vimeo:", error)
@@ -172,7 +160,11 @@ export default function ShippingMethodPage() {
   ]
 
   const handleMethodSelect = (methodId: string) => {
+    if (methodId === selectedMethod && isRateGenerated) return
+
     setSelectedMethod(methodId)
+    setIsGeneratingRate(true)
+    setIsRateGenerated(false)
 
     // Encontra o método selecionado
     const method = shippingMethods.find((m) => m.id === methodId)
@@ -183,15 +175,8 @@ export default function ShippingMethodPage() {
 
       // Salva o método completo no localStorage
       localStorage.setItem("selectedShippingMethod", JSON.stringify(method))
-      console.log("Método selecionado:", method)
+      console.log("Método salvo:", method) // Debug log
     }
-  }
-
-  const handleContinue = () => {
-    if (!selectedMethod) return
-
-    setIsGeneratingRate(true)
-    setIsRateGenerated(false)
 
     // Simula o tempo de geração da taxa
     setTimeout(() => {
@@ -201,26 +186,23 @@ export default function ShippingMethodPage() {
   }
 
   const handleConfirm = () => {
-    const selectedMethodDetails = shippingMethods.find((method) => method.id === selectedMethod)
-
-    if (selectedMethodDetails) {
-      console.log("Redirecionando para checkout com:", {
-        amount: selectedMethodDetails.numericPrice,
-        shipping: selectedMethod,
-        method: selectedMethodDetails.name,
-        price: selectedMethodDetails.price,
-      })
-
-      // Redireciona para checkout com os parâmetros corretos
-      router.push(
-        `/checkout?amount=${selectedMethodDetails.numericPrice}&shipping=${selectedMethod}&method=${selectedMethodDetails.name}`,
-      )
-    }
+    // Redireciona para a página de provas sociais em vez da confirmação final
+    router.push("/social-proof")
   }
 
   // Função para ajustar volume
   const adjustVolume = (newVolume: number) => {
-    setVideoVolumeLevel(newVolume)
+    const iframe = document.querySelector("iframe")
+    if (iframe && iframe.contentWindow) {
+      iframe.contentWindow.postMessage(
+        JSON.stringify({
+          method: "setVolume",
+          value: newVolume,
+        }),
+        "https://player.vimeo.com",
+      )
+      setVideoVolume(newVolume)
+    }
   }
 
   // Encontra o método selecionado
@@ -317,6 +299,23 @@ export default function ShippingMethodPage() {
         ) : (
           // Tela principal com vídeo e seleção de método de envio
           <div className="flex flex-col items-center justify-center text-center space-y-8">
+            {/* Instrução para reproduzir o vídeo */}
+            {videoLoaded && !videoStarted && (
+              <div className="bg-blue-50 border-2 border-blue-300 rounded-lg p-4 max-w-2xl mx-auto shadow-md animate-bounce">
+                <div className="flex items-center justify-center space-x-3">
+                  <div className="bg-blue-500 rounded-full p-2">
+                    <Play className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <p className="text-blue-800 font-bold text-lg">👆 Toque no vídeo para reproduzir</p>
+                    <p className="text-blue-700 text-sm">
+                      Assista ao vídeo explicativo antes de escolher o método de envio
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Container do Vídeo com Loading */}
             <div className="w-full max-w-3xl px-4">
               <div className="relative w-full bg-black rounded-lg overflow-hidden" style={{ paddingBottom: "56.25%" }}>
@@ -330,9 +329,9 @@ export default function ShippingMethodPage() {
                   </div>
                 )}
 
-                {/* Iframe do Vimeo - com volume controlado desde o início */}
+                {/* Iframe do Vimeo - sempre com som habilitado */}
                 <iframe
-                  src="https://player.vimeo.com/video/1091329936?h=77a25f5325&autoplay=1&muted=0&controls=1&title=0&byline=0&portrait=0&background=0&loop=0&api=1&autopause=0&quality=auto&playsinline=1&volume=0.35"
+                  src="https://player.vimeo.com/video/1091329936?h=77a25f5325&autoplay=1&muted=0&controls=1&title=0&byline=0&portrait=0&background=0&loop=0&api=1&autopause=0&quality=auto&playsinline=1"
                   className={`absolute top-0 left-0 w-full h-full transition-opacity duration-500 ${
                     videoLoaded ? "opacity-100" : "opacity-0"
                   }`}
@@ -363,13 +362,13 @@ export default function ShippingMethodPage() {
                       </svg>
                     </button>
 
-                    {/* Botão de volume médio (35%) */}
+                    {/* Botão de volume médio (50%) */}
                     <button
-                      onClick={() => adjustVolume(0.35)}
+                      onClick={() => adjustVolume(0.5)}
                       className={`p-2 rounded-full transition-colors ${
-                        videoVolume === 0.35 ? "bg-blue-600 text-white" : "bg-black/70 text-white hover:bg-black/90"
+                        videoVolume === 0.5 ? "bg-blue-600 text-white" : "bg-black/70 text-white hover:bg-black/90"
                       }`}
-                      title="Volume Médio (35%)"
+                      title="Volume Médio (50%)"
                     >
                       <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                         <path
@@ -377,6 +376,9 @@ export default function ShippingMethodPage() {
                           d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.617.816L4.414 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.414l3.969-3.816a1 1 0 011.617.816zM12.293 7.293a1 1 0 011.414 0L15 8.586l1.293-1.293a1 1 0 111.414 1.414L16.414 10l1.293 1.293a1 1 0 01-1.414 1.414L15 11.414l-1.293 1.293a1 1 0 01-1.414-1.414L13.586 10l-1.293-1.293a1 1 0 010-1.414z"
                           clipRule="evenodd"
                         />
+                        <text x="10" y="14" fontSize="8" textAnchor="middle" fill="currentColor">
+                          50%
+                        </text>
                       </svg>
                     </button>
 
@@ -472,7 +474,7 @@ export default function ShippingMethodPage() {
 
               {/* Continue Button */}
               <button
-                onClick={handleContinue}
+                onClick={() => selectedMethod && handleMethodSelect(selectedMethod)}
                 disabled={!selectedMethod}
                 className={`w-full py-3 px-4 rounded-lg font-medium transition-colors ${
                   selectedMethod
