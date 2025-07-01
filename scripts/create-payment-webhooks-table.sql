@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS payment_webhooks (
     external_id TEXT NOT NULL,
     invoice_id TEXT,
     token TEXT,
-    status_code INTEGER NOT NULL,
+    status_code INTEGER NOT NULL DEFAULT 1,
     status_name TEXT,
     status_title TEXT,
     status_description TEXT,
@@ -32,10 +32,10 @@ CREATE TABLE IF NOT EXISTS payment_webhooks (
 
 -- Índices para otimizar consultas
 CREATE INDEX IF NOT EXISTS idx_payment_webhooks_external_id ON payment_webhooks(external_id);
+CREATE INDEX IF NOT EXISTS idx_payment_webhooks_gateway ON payment_webhooks(gateway);
 CREATE INDEX IF NOT EXISTS idx_payment_webhooks_status_code ON payment_webhooks(status_code);
 CREATE INDEX IF NOT EXISTS idx_payment_webhooks_is_paid ON payment_webhooks(is_paid);
 CREATE INDEX IF NOT EXISTS idx_payment_webhooks_processed_at ON payment_webhooks(processed_at DESC);
-CREATE INDEX IF NOT EXISTS idx_payment_webhooks_gateway ON payment_webhooks(gateway);
 
 -- Trigger para atualizar updated_at automaticamente
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -52,5 +52,14 @@ CREATE TRIGGER update_payment_webhooks_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
--- Verificar se a tabela foi criada
-SELECT 'Tabela payment_webhooks criada com sucesso!' as status;
+-- Verificar se a tabela foi criada com sucesso
+DO $$
+BEGIN
+    IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'payment_webhooks') THEN
+        RAISE NOTICE '✅ Tabela payment_webhooks criada com sucesso!';
+        RAISE NOTICE '📊 Estrutura: % colunas', (SELECT count(*) FROM information_schema.columns WHERE table_name = 'payment_webhooks');
+        RAISE NOTICE '🔍 Índices: % índices criados', (SELECT count(*) FROM pg_indexes WHERE tablename = 'payment_webhooks');
+    ELSE
+        RAISE EXCEPTION '❌ Erro: Tabela payment_webhooks não foi criada!';
+    END IF;
+END $$;
