@@ -2,132 +2,181 @@ import { NextResponse } from "next/server"
 
 export async function GET() {
   try {
-    console.log("=== TESTE DE CONEXÃO SUPERPAYBR ===")
+    console.log("🔍 TESTE DE CONEXÃO SUPERPAYBR COMPLETO")
 
-    const token = process.env.SUPERPAYBR_TOKEN
-    const secretKey = process.env.SUPERPAYBR_SECRET_KEY
+    // 1. Verificar variáveis de ambiente
+    const envVars = {
+      SUPERPAYBR_TOKEN: process.env.SUPERPAYBR_TOKEN,
+      SUPERPAYBR_SECRET_KEY: process.env.SUPERPAYBR_SECRET_KEY,
+      SUPERPAY_TOKEN: process.env.SUPERPAY_TOKEN,
+      SUPERPAY_SECRET_KEY: process.env.SUPERPAY_SECRET_KEY,
+      SUPERPAY_API_URL: process.env.SUPERPAY_API_URL,
+      SUPABASE_URL: process.env.SUPABASE_URL,
+      SUPABASE_SERVICE_KEY: process.env.SUPABASE_SERVICE_KEY,
+    }
+
+    console.log("📋 Variáveis de ambiente:", {
+      SUPERPAYBR_TOKEN: !!envVars.SUPERPAYBR_TOKEN,
+      SUPERPAYBR_SECRET_KEY: !!envVars.SUPERPAYBR_SECRET_KEY,
+      SUPERPAY_TOKEN: !!envVars.SUPERPAY_TOKEN,
+      SUPERPAY_SECRET_KEY: !!envVars.SUPERPAY_SECRET_KEY,
+      SUPERPAY_API_URL: !!envVars.SUPERPAY_API_URL,
+      SUPABASE_URL: !!envVars.SUPABASE_URL,
+      SUPABASE_SERVICE_KEY: !!envVars.SUPABASE_SERVICE_KEY,
+    })
+
+    // 2. Tentar usar as credenciais corretas
+    const token = envVars.SUPERPAYBR_TOKEN || envVars.SUPERPAY_TOKEN
+    const secretKey = envVars.SUPERPAYBR_SECRET_KEY || envVars.SUPERPAY_SECRET_KEY
 
     if (!token || !secretKey) {
       return NextResponse.json(
         {
           success: false,
-          error: "Credenciais SuperPayBR não configuradas",
-          missing: {
-            token: !token,
-            secretKey: !secretKey,
-          },
+          error: "Credenciais não encontradas",
+          message: "Nenhuma combinação válida de token/secret encontrada",
+          available_vars: envVars,
         },
         { status: 500 },
       )
     }
 
-    console.log("🔑 Testando autenticação SuperPayBR...")
-
-    // Teste 1: Autenticação
-    const authResponse = await fetch("https://api.superpaybr.com/auth", {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Basic ${Buffer.from(`${token}:${secretKey}`).toString("base64")}`,
-        scope: "invoice.write, customer.write, webhook.write",
-      },
+    console.log("🔑 Usando credenciais:", {
+      token_preview: token.substring(0, 10) + "...",
+      secret_preview: secretKey.substring(0, 20) + "...",
     })
 
-    const authResult = {
-      status: authResponse.status,
-      ok: authResponse.ok,
-      statusText: authResponse.statusText,
-    }
-
-    let authData = null
-    if (authResponse.ok) {
-      authData = await authResponse.json()
-      console.log("✅ Autenticação SuperPayBR bem-sucedida!")
-    } else {
-      const errorText = await authResponse.text()
-      console.log("❌ Erro na autenticação SuperPayBR:", errorText)
-    }
-
-    // Teste 2: Verificar status do token (se autenticação funcionou)
-    let statusResult = null
-    if (authData?.access_token) {
-      console.log("🔍 Testando status do token...")
-
-      const statusResponse = await fetch("https://api.superpaybr.com/status", {
+    // 3. Testar diferentes URLs e métodos de autenticação
+    const testConfigs = [
+      {
+        name: "SuperPayBR API v1",
+        url: "https://api.superpaybr.com/auth",
         method: "GET",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${authData.access_token}`,
+          Authorization: `Basic ${Buffer.from(`${token}:${secretKey}`).toString("base64")}`,
+          scope: "invoice.write, customer.write, webhook.write",
         },
-      })
+      },
+      {
+        name: "SuperPayBR API v2",
+        url: "https://api.superpaybr.com/v2/auth",
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: {
+          token: token,
+          secret: secretKey,
+        },
+      },
+      {
+        name: "SuperPay Alternative",
+        url: "https://api.superpay.com.br/auth",
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          "X-Secret-Key": secretKey,
+        },
+      },
+    ]
 
-      statusResult = {
-        status: statusResponse.status,
-        ok: statusResponse.ok,
-        statusText: statusResponse.statusText,
-      }
+    const results = []
 
-      if (statusResponse.ok) {
-        const statusData = await statusResponse.json()
-        statusResult.data = statusData
-        console.log("✅ Status do token verificado!")
-      } else {
-        const errorText = await statusResponse.text()
-        console.log("❌ Erro ao verificar status:", errorText)
-        statusResult.error = errorText
+    for (const config of testConfigs) {
+      try {
+        console.log(`🌐 Testando: ${config.name} - ${config.url}`)
+
+        const fetchOptions: RequestInit = {
+          method: config.method,
+          headers: config.headers,
+        }
+
+        if (config.body) {
+          fetchOptions.body = JSON.stringify(config.body)
+        }
+
+        const response = await fetch(config.url, fetchOptions)
+        const responseText = await response.text()
+
+        let responseData = null
+        try {
+          responseData = JSON.parse(responseText)
+        } catch {
+          responseData = responseText
+        }
+
+        const result = {
+          name: config.name,
+          url: config.url,
+          method: config.method,
+          status: response.status,
+          ok: response.ok,
+          statusText: response.statusText,
+          response: responseData,
+          headers: Object.fromEntries(response.headers.entries()),
+        }
+
+        results.push(result)
+
+        if (response.ok) {
+          console.log(`✅ ${config.name} funcionou!`)
+
+          return NextResponse.json({
+            success: true,
+            message: `Conexão bem-sucedida com ${config.name}`,
+            working_config: result,
+            all_results: results,
+            credentials_used: {
+              token_preview: token.substring(0, 10) + "...",
+              secret_preview: secretKey.substring(0, 20) + "...",
+            },
+          })
+        } else {
+          console.log(`❌ ${config.name} falhou:`, response.status, responseText)
+        }
+      } catch (error) {
+        console.log(`❌ Erro em ${config.name}:`, error)
+        results.push({
+          name: config.name,
+          url: config.url,
+          method: config.method,
+          error: error instanceof Error ? error.message : "Network error",
+        })
       }
     }
 
-    // Teste 3: URLs disponíveis
-    const availableUrls = {
-      auth: "https://api.superpaybr.com/auth",
-      status: "https://api.superpaybr.com/status",
-      createInvoice: "https://api.superpaybr.com/v4/invoices",
-      listInvoices: "https://api.superpaybr.com/invoices",
-      qrcode: "https://api.superpaybr.com/invoices/qrcode/:id",
-      webhooks: "https://api.superpaybr.com/webhooks",
-      customers: "https://api.superpaybr.com/costumers",
-    }
+    // 4. Se chegou aqui, nenhuma configuração funcionou
+    console.log("❌ Nenhuma configuração de API funcionou")
 
-    return NextResponse.json({
-      success: authResponse.ok,
-      timestamp: new Date().toISOString(),
-      credentials: {
-        token_configured: !!token,
-        secret_configured: !!secretKey,
-        token_preview: token ? `${token.substring(0, 8)}...` : null,
-        secret_preview: secretKey ? `${secretKey.substring(0, 20)}...` : null,
-      },
-      tests: {
-        auth: {
-          ...authResult,
-          data: authData
-            ? {
-                account: authData.account,
-                working: authData.working,
-                expires_in: authData.expires_in,
-                scope: authData.scope,
-              }
-            : null,
-        },
-        status: statusResult,
-      },
-      urls: availableUrls,
-      notes: [
-        "✅ POST /v4/invoices - Para criar faturas",
-        "✅ GET /auth - Para autenticação",
-        "✅ GET /status - Para verificar token",
-        "✅ GET /invoices/qrcode/:id - Para obter QR Code",
-        "⚠️ Não usar GET em /v4/invoices (não suportado)",
-      ],
-    })
-  } catch (error) {
-    console.log("❌ Erro no teste de conexão SuperPayBR:", error)
     return NextResponse.json(
       {
         success: false,
-        error: "Erro interno no teste de conexão",
-        details: error instanceof Error ? error.message : "Unknown error",
+        error: "Nenhuma configuração de API funcionou",
+        message: "Todas as tentativas de autenticação falharam",
+        all_results: results,
+        credentials_used: {
+          token_preview: token.substring(0, 10) + "...",
+          secret_preview: secretKey.substring(0, 20) + "...",
+        },
+        suggestions: [
+          "Verificar se as credenciais estão corretas",
+          "Verificar se a API SuperPayBR está funcionando",
+          "Verificar se o IP está liberado na SuperPayBR",
+          "Tentar usar modo de emergência (PIX manual)",
+        ],
+      },
+      { status: 401 },
+    )
+  } catch (error) {
+    console.error("❌ Erro geral no teste de conexão:", error)
+
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Erro interno do servidor",
+        message: error instanceof Error ? error.message : "Unknown error",
       },
       { status: 500 },
     )
