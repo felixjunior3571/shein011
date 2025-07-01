@@ -1,646 +1,328 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import Image from "next/image"
-import { Copy, CheckCircle, Clock, AlertCircle, RefreshCw } from "lucide-react"
 import { useSuperpayPaymentMonitor } from "@/hooks/use-superpay-payment-monitor"
-import { useOptimizedTracking } from "@/hooks/use-optimized-tracking"
-import { SmartQRCode } from "@/components/smart-qr-code"
 
-interface InvoiceData {
-  id: string
-  invoice_id: string
-  pix: {
-    payload: string
-    image: string
-    qr_code: string
-  }
-  status: {
-    code: number
-    title: string
-    text: string
-  }
-  valores: {
-    bruto: number
-    liquido: number
-  }
-  vencimento: {
-    dia: string
-  }
-  type: "real" | "simulated" | "emergency"
-  external_id?: string
-}
-
-export default function SuperPayCheckoutPage() {
-  const [loading, setLoading] = useState(true)
-  const [invoice, setInvoice] = useState<InvoiceData | null>(null)
-  const [timeLeft, setTimeLeft] = useState(7200) // 2 horas
-  const [copied, setCopied] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [externalId, setExternalId] = useState<string | null>(null)
-  const [redirecting, setRedirecting] = useState(false)
-  const [redirectCountdown, setRedirectCountdown] = useState(0)
-
+export default function CheckoutPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const timerRef = useRef<NodeJS.Timeout | null>(null)
-  const redirectTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const [paymentData, setPaymentData] = useState<any>(null)
+  const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [countdown, setCountdown] = useState<number | null>(null)
 
-  // Obter parâmetros da URL
-  const amount = searchParams.get("amount") || "27.97"
-  const shipping = searchParams.get("shipping") || "sedex"
-  const method = searchParams.get("method") || "SEDEX"
+  // Obter dados do pagamento da URL ou localStorage
+  const externalId =
+    searchParams.get("externalId") || (typeof window !== "undefined" ? localStorage.getItem("currentPaymentId") : null)
 
-  // Optimized tracking
-  const { track, trackPageView, trackConversion } = useOptimizedTracking({
-    enableDebug: process.env.NODE_ENV === "development",
-  })
-
-  // SuperPay payment monitoring com rate limiting inteligente
+  // Monitor de pagamento
   const {
-    paymentData,
-    isWaitingForPayment,
-    error: monitorError,
-    lastCheck,
-    checksCount,
-    currentInterval,
-    rateLimitLevel,
-    isPaid,
-    isDenied,
-    isExpired,
-    isCanceled,
-    isRefunded,
-    checkNow,
+    status,
+    isLoading: isMonitoring,
+    error,
+    checkCount,
+    isActive,
   } = useSuperpayPaymentMonitor({
-    externalId,
-    enableDebug: process.env.NODE_ENV === "development",
+    externalId: externalId || undefined,
+    enabled: !!externalId,
     onPaymentConfirmed: (data) => {
-      console.log("🎉 PAGAMENTO CONFIRMADO VIA WEBHOOK SUPERPAY!")
-      console.log("Dados do pagamento:", data)
+      console.log("🎉 Pagamento confirmado! Iniciando redirecionamento...")
 
-      // Track conversion
-      trackConversion("payment_confirmed", data.amount || 0)
+      // Salvar dados do pagamento
+      if (typeof window !== "undefined") {
+        localStorage.setItem(
+          "paymentConfirmed",
+          JSON.stringify({
+            ...data,
+            confirmedAt: new Date().toISOString(),
+          }),
+        )
+      }
 
-      // Salvar confirmação no localStorage
-      localStorage.setItem("paymentConfirmed", "true")
-      localStorage.setItem("paymentAmount", (data.amount || 0).toFixed(2))
-      localStorage.setItem("paymentDate", data.payment_date || new Date().toISOString())
-      localStorage.setItem("paymentExternalId", data.external_id)
-      localStorage.setItem("paymentInvoiceId", data.invoice_id || "")
-
-      // Mostrar estado de redirecionamento com countdown
-      setRedirecting(true)
-      setRedirectCountdown(3)
-
-      // Countdown de redirecionamento
-      let countdown = 3
-      redirectTimerRef.current = setInterval(() => {
-        countdown--
-        setRedirectCountdown(countdown)
-
-        if (countdown <= 0) {
-          if (redirectTimerRef.current) {
-            clearInterval(redirectTimerRef.current)
-          }
-          console.log("🚀 Redirecionando para página de ativação...")
-          window.location.href = "/upp/001"
-        }
-      }, 1000)
-    },
-    onPaymentDenied: (data) => {
-      console.log("❌ PAGAMENTO NEGADO VIA WEBHOOK SUPERPAY!")
-      track("payment_denied", { amount: data.amount, reason: data.status_title })
-      setError(`Pagamento negado: ${data.status_title}`)
-    },
-    onPaymentExpired: (data) => {
-      console.log("⏰ PAGAMENTO VENCIDO VIA WEBHOOK SUPERPAY!")
-      track("payment_expired", { amount: data.amount })
-      setError("Pagamento vencido. Gere um novo PIX.")
-    },
-    onPaymentCanceled: (data) => {
-      console.log("🚫 PAGAMENTO CANCELADO VIA WEBHOOK SUPERPAY!")
-      track("payment_canceled", { amount: data.amount })
-      setError("Pagamento cancelado.")
-    },
-    onPaymentRefunded: (data) => {
-      console.log("🔄 PAGAMENTO ESTORNADO VIA WEBHOOK SUPERPAY!")
-      track("payment_refunded", { amount: data.amount })
-      setError("Pagamento estornado.")
+      // Iniciar countdown
+      setCountdown(3)
     },
   })
 
-  // Track page view on mount
+  // Countdown para redirecionamento
   useEffect(() => {
-    trackPageView("/checkout")
-    track("checkout_page_loaded", {
-      amount: Number.parseFloat(amount),
-      shipping_method: method,
-    })
-  }, [trackPageView, track, amount, method])
+    if (countdown === null) return
 
-  // Timer countdown
-  useEffect(() => {
-    if (timeLeft > 0 && invoice && !isPaid && !redirecting) {
-      timerRef.current = setTimeout(() => {
-        setTimeLeft(timeLeft - 1)
-      }, 1000)
-    } else if (timeLeft === 0 && !isPaid) {
-      setError("Tempo expirado. Gere um novo PIX.")
-      track("payment_timeout", { amount: Number.parseFloat(amount) })
+    if (countdown > 0) {
+      const timer = setTimeout(() => setCountdown(countdown - 1), 1000)
+      return () => clearTimeout(timer)
+    } else {
+      // Redirecionar para /upp/001
+      router.push("/upp/001")
     }
+  }, [countdown, router])
 
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current)
-    }
-  }, [timeLeft, invoice, isPaid, redirecting, track, amount])
-
-  // Carregar dados do usuário e criar fatura
+  // Carregar dados do pagamento
   useEffect(() => {
-    createInvoice()
-  }, [])
+    const loadPaymentData = async () => {
+      try {
+        // Tentar obter do localStorage primeiro
+        if (typeof window !== "undefined") {
+          const stored = localStorage.getItem("currentPaymentData")
+          if (stored) {
+            const data = JSON.parse(stored)
+            setPaymentData(data)
 
-  // Carregar external_id quando a fatura for criada
-  useEffect(() => {
-    if (invoice) {
-      console.log("🔍 Dados da fatura SuperPay recebida:", invoice)
-
-      let capturedExternalId = null
-
-      if (invoice.external_id) {
-        capturedExternalId = invoice.external_id
-        console.log("✅ External ID encontrado na fatura SuperPay:", capturedExternalId)
-      } else {
-        capturedExternalId = invoice.id
-        console.log("⚠️ External ID não encontrado, usando invoice.id:", capturedExternalId)
-      }
-
-      if (capturedExternalId) {
-        localStorage.setItem("currentExternalId", capturedExternalId)
-        setExternalId(capturedExternalId)
-        console.log("💾 External ID SuperPay salvo:", capturedExternalId)
-
-        // Track PIX generation
-        track("pix_generated", {
-          external_id: capturedExternalId,
-          amount: Number.parseFloat(amount),
-          type: invoice.type,
-        })
-      } else {
-        console.error("❌ Não foi possível obter external_id SuperPay!")
-      }
-    }
-  }, [invoice, track, amount])
-
-  // Cleanup timers on unmount
-  useEffect(() => {
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current)
-      if (redirectTimerRef.current) clearInterval(redirectTimerRef.current)
-    }
-  }, [])
-
-  const createInvoice = async () => {
-    try {
-      setLoading(true)
-      setError(null)
-
-      console.log("🔄 Criando fatura PIX SuperPay...")
-      console.log("Parâmetros:", { amount: Number.parseFloat(amount), shipping, method })
-
-      // Track invoice creation start
-      track("invoice_creation_started", {
-        amount: Number.parseFloat(amount),
-        shipping_method: method,
-      })
-
-      // Carregar dados do usuário do localStorage
-      const cpfData = JSON.parse(localStorage.getItem("cpfConsultaData") || "{}")
-      const userEmail = localStorage.getItem("userEmail") || ""
-      const userWhatsApp = localStorage.getItem("userWhatsApp") || ""
-      const deliveryAddress = JSON.parse(localStorage.getItem("deliveryAddress") || "{}")
-
-      console.log("📋 Dados do usuário SuperPay:", {
-        nome: cpfData.nome,
-        email: userEmail,
-        whatsapp: userWhatsApp,
-        endereco: deliveryAddress,
-      })
-
-      const response = await fetch("/api/superpaybr/create-invoice", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-cpf-data": JSON.stringify(cpfData),
-          "x-user-email": userEmail,
-          "x-user-whatsapp": userWhatsApp,
-          "x-delivery-address": JSON.stringify(deliveryAddress),
-        },
-        body: JSON.stringify({
-          amount: Number.parseFloat(amount),
-          shipping,
-          method,
-        }),
-      })
-
-      const data = await response.json()
-
-      if (data.success) {
-        setInvoice(data.data)
-        localStorage.setItem("superPayInvoice", JSON.stringify(data.data))
-
-        if (data.data.external_id) {
-          localStorage.setItem("currentExternalId", data.data.external_id)
+            // Gerar QR Code se disponível
+            if (data.qr_code) {
+              setQrCodeUrl(`data:image/svg+xml;base64,${btoa(generateQRCodeSVG(data.qr_code))}`)
+            }
+          }
         }
 
-        console.log(
-          `✅ Fatura SuperPay criada: ${data.data.type} - Valor: R$ ${(data.data.valores.bruto / 100).toFixed(2)}`,
-        )
-        console.log(`👤 Cliente: ${cpfData.nome || "N/A"}`)
-
-        // Track successful invoice creation
-        track("invoice_created", {
-          external_id: data.data.external_id,
-          amount: data.data.valores.bruto / 100,
-          type: data.data.type,
-          customer_name: cpfData.nome,
-        })
-      } else {
-        throw new Error(data.error || "Erro ao criar fatura SuperPay")
+        setIsLoading(false)
+      } catch (error) {
+        console.error("Erro ao carregar dados do pagamento:", error)
+        setIsLoading(false)
       }
-    } catch (error) {
-      console.log("❌ Erro ao criar fatura SuperPay:", error)
-      setError("Erro ao gerar PIX SuperPay. Tente novamente.")
-
-      // Track error
-      track("invoice_creation_error", {
-        error: error instanceof Error ? error.message : "Unknown error",
-        amount: Number.parseFloat(amount),
-      })
-
-      createEmergencyPix()
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const createEmergencyPix = () => {
-    console.log("🚨 Criando PIX de emergência SuperPay...")
-
-    const totalAmount = Number.parseFloat(amount)
-    const emergencyExternalId = `EMERGENCY_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`
-    const emergencyPix = `00020101021226580014br.gov.bcb.pix2536emergency.quickchart.io/qr/v2/${emergencyExternalId}520400005303986540${totalAmount.toFixed(2)}5802BR5909SHEIN5011SAO PAULO62070503***6304EMRG`
-
-    const emergencyInvoice: InvoiceData = {
-      id: emergencyExternalId,
-      invoice_id: `EMERGENCY_${Date.now()}`,
-      external_id: emergencyExternalId,
-      pix: {
-        payload: emergencyPix,
-        image: "/placeholder.svg?height=250&width=250",
-        qr_code: `https://quickchart.io/qr?text=${encodeURIComponent(emergencyPix)}&size=200&margin=1&format=png`,
-      },
-      status: {
-        code: 1,
-        title: "Aguardando Pagamento",
-        text: "pending",
-      },
-      valores: {
-        bruto: Math.round(totalAmount * 100),
-        liquido: Math.round(totalAmount * 100),
-      },
-      vencimento: {
-        dia: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0],
-      },
-      type: "emergency",
     }
 
-    setInvoice(emergencyInvoice)
-    setError(null)
-    console.log(`✅ PIX de emergência SuperPay criado - Valor: R$ ${totalAmount.toFixed(2)}`)
+    loadPaymentData()
+  }, [])
 
-    // Track emergency PIX creation
-    track("emergency_pix_created", {
-      amount: totalAmount,
-      external_id: emergencyExternalId,
-      invoice_id: emergencyInvoice.id,
-    })
+  // Função para gerar SVG do QR Code (placeholder)
+  const generateQRCodeSVG = (qrCode: string) => {
+    return `
+      <svg width="200" height="200" xmlns="http://www.w3.org/2000/svg">
+        <rect width="200" height="200" fill="white"/>
+        <text x="100" y="100" textAnchor="middle" fontFamily="Arial" fontSize="12" fill="black">
+          QR Code PIX
+        </text>
+        <text x="100" y="120" textAnchor="middle" fontFamily="Arial" fontSize="8" fill="gray">
+          ${qrCode.substring(0, 20)}...
+        </text>
+      </svg>
+    `
   }
 
-  const copyPixCode = async () => {
-    if (!invoice) return
-
-    try {
-      await navigator.clipboard.writeText(invoice.pix.payload)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-
-      // Track PIX code copy
-      track("pix_code_copied", {
-        external_id: externalId,
-        amount: Number.parseFloat(amount),
-      })
-    } catch (error) {
-      console.log("❌ Erro ao copiar:", error)
-    }
-  }
-
-  const formatTime = (seconds: number) => {
-    const hours = Math.floor(seconds / 3600)
-    const mins = Math.floor((seconds % 3600) / 60)
-    const secs = seconds % 60
-
-    if (hours > 0) {
-      return `${hours.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
-    }
-    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
-  }
-
-  const handleManualCheck = async () => {
-    console.log("🔄 Verificação manual solicitada")
-    track("manual_check_requested", { external_id: externalId })
-    await checkNow()
-  }
-
-  // Função para simular pagamento (apenas para testes)
-  const simulatePayment = async () => {
-    if (!externalId) {
-      console.log("❌ Não é possível simular: External ID não encontrado")
-      return
-    }
-
-    try {
-      console.log("🧪 Simulando pagamento SuperPay para:", externalId)
-
-      const response = await fetch("/api/superpaybr/simulate-payment", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          external_id: externalId,
-          status_code: 5, // Pago
-          amount: Number.parseFloat(amount),
-        }),
-      })
-
-      const data = await response.json()
-
-      if (data.success) {
-        console.log("✅ Pagamento SuperPay simulado com sucesso!")
-        track("payment_simulated", { external_id: externalId, amount: Number.parseFloat(amount) })
-
-        // Forçar verificação imediata após simulação
-        setTimeout(() => {
-          handleManualCheck()
-        }, 1000)
-      } else {
-        console.error("❌ Erro na simulação SuperPay:", data.error)
-      }
-    } catch (error) {
-      console.error("❌ Erro na simulação SuperPay:", error)
-    }
-  }
-
-  if (loading) {
+  if (isLoading) {
     return (
-      <main className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="bg-white rounded-lg shadow-md p-8 max-w-md w-full mx-4">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-black mx-auto mb-4"></div>
-            <h2 className="text-xl font-bold mb-2">Gerando PIX SuperPay...</h2>
-            <p className="text-gray-600 mb-2">Aguarde enquanto processamos seu pagamento</p>
-            <div className="text-sm text-gray-500">
-              <p>Valor: R$ {Number.parseFloat(amount).toFixed(2)}</p>
-              <p>Método: {method}</p>
-            </div>
-          </div>
+      <div className="min-h-screen bg-gradient-to-br from-pink-50 to-purple-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-pink-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Carregando dados do pagamento...</p>
         </div>
-      </main>
+      </div>
     )
   }
 
-  if (error && !invoice) {
+  if (!externalId) {
     return (
-      <main className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="bg-white rounded-lg shadow-md p-8 max-w-md w-full mx-4">
-          <div className="text-center">
-            <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
-            <h2 className="text-xl font-bold mb-2 text-red-600">Erro no Pagamento</h2>
-            <p className="text-gray-600 mb-4">{error}</p>
-            <button
-              onClick={createInvoice}
-              className="bg-black text-white px-6 py-2 rounded-lg hover:bg-black/90 transition-colors"
-            >
-              Tentar Novamente
-            </button>
+      <div className="min-h-screen bg-gradient-to-br from-pink-50 to-purple-50 flex items-center justify-center">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold text-gray-800 mb-4">Pagamento não encontrado</h1>
+          <p className="text-gray-600 mb-6">Não foi possível localizar os dados do pagamento.</p>
+          <button
+            onClick={() => router.push("/")}
+            className="bg-pink-600 text-white px-6 py-3 rounded-lg hover:bg-pink-700 transition-colors"
+          >
+            Voltar ao início
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // Tela de redirecionamento
+  if (countdown !== null) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-green-50 to-emerald-50 flex items-center justify-center">
+        <div className="text-center bg-white p-8 rounded-2xl shadow-xl max-w-md mx-4">
+          <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <svg className="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+
+          <h1 className="text-2xl font-bold text-green-800 mb-2">Pagamento Confirmado!</h1>
+          <p className="text-green-600 mb-6">Seu pagamento foi processado com sucesso.</p>
+
+          <div className="text-4xl font-bold text-green-600 mb-2">{countdown}</div>
+          <p className="text-gray-600">
+            Redirecionando em {countdown} segundo{countdown !== 1 ? "s" : ""}...
+          </p>
+
+          <div className="mt-6">
+            <div className="w-full bg-green-200 rounded-full h-2">
+              <div
+                className="bg-green-600 h-2 rounded-full transition-all duration-1000"
+                style={{ width: `${((3 - countdown) / 3) * 100}%` }}
+              ></div>
+            </div>
           </div>
         </div>
-      </main>
+      </div>
     )
   }
 
   return (
-    <main className="min-h-screen bg-gray-50">
-      <div className="max-w-md mx-auto p-4">
-        <div className="bg-white rounded-lg shadow-md p-6">
-          {/* Header */}
-          <div className="text-center mb-6">
-            <Image src="/shein-card-logo-new.png" alt="SHEIN Card" width={100} height={60} className="mx-auto mb-4" />
-            <h1 className="text-2xl font-bold mb-2">Pagamento PIX</h1>
+    <div className="min-h-screen bg-gradient-to-br from-pink-50 to-purple-50">
+      {/* Header */}
+      <div className="bg-white shadow-sm border-b">
+        <div className="max-w-4xl mx-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            <Image src="/shein-logo.png" alt="SHEIN" width={120} height={40} className="h-8 w-auto" />
+            <div className="text-sm text-gray-600">Checkout Seguro</div>
           </div>
-
-          {/* Status de Redirecionamento */}
-          {redirecting && (
-            <div className="bg-green-100 border border-green-300 rounded-lg p-4 mb-6">
-              <div className="flex items-center justify-center space-x-2 mb-3">
-                <CheckCircle className="w-6 h-6 text-green-600" />
-                <span className="font-bold text-green-800">✅ Pagamento Confirmado!</span>
-              </div>
-              <div className="text-center">
-                <p className="text-green-700 text-sm mb-2">
-                  Redirecionando para ativação do cartão em {redirectCountdown} segundos...
-                </p>
-                <div className="flex items-center justify-center space-x-2">
-                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-green-600"></div>
-                  <span className="text-green-600 font-mono text-lg">{redirectCountdown}</span>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Mensagem de Atenção */}
-          {!redirecting && (
-            <div className="bg-yellow-100 border-l-4 border-yellow-500 rounded-lg p-4 mb-6">
-              <div className="flex items-start">
-                <div className="flex-shrink-0">
-                  <span className="text-yellow-600 text-lg">⚠️</span>
-                </div>
-                <div className="ml-3">
-                  <h3 className="text-yellow-800 font-bold text-sm mb-2">ATENÇÃO! ⏳</h3>
-                  <div className="text-yellow-700 text-sm space-y-2">
-                    <p>
-                      Para garantir o envio do seu <strong>Cartão SHEIN</strong>, este pagamento deve ser confirmado em
-                      até <strong>2 horas</strong>. Após esse prazo, a sua solicitação será automaticamente cancelada,
-                      sem custos adicionais.
-                    </p>
-                    <p>
-                      Ao confirmar o pagamento do frete, você garante todos os benefícios exclusivos:{" "}
-                      <strong>cashback, parcelamento sem juros e uso imediato do cartão</strong>.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Timer */}
-          {!redirecting && (
-            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
-              <div className="flex items-center justify-center space-x-2">
-                <Clock className="w-5 h-5 text-yellow-600" />
-                <span className="font-bold text-yellow-800">Tempo restante: {formatTime(timeLeft)}</span>
-              </div>
-            </div>
-          )}
-
-          {/* Status do Monitoramento */}
-          {!redirecting && (
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-              <div className="text-center">
-                <div className="flex items-center justify-center space-x-2 mb-2">
-                  {isWaitingForPayment && <div className="animate-pulse w-3 h-3 bg-blue-500 rounded-full"></div>}
-                  <p className="text-blue-800 font-medium">
-                    {isPaid
-                      ? "✅ Pagamento Confirmado!"
-                      : isDenied
-                        ? "❌ Pagamento Negado"
-                        : isExpired
-                          ? "⏰ Pagamento Vencido"
-                          : isCanceled
-                            ? "🚫 Pagamento Cancelado"
-                            : isRefunded
-                              ? "🔄 Pagamento Estornado"
-                              : isWaitingForPayment
-                                ? "⏳ Aguardando confirmação..."
-                                : "🔍 Verificando pagamento..."}
-                  </p>
-                </div>
-
-                <div className="text-blue-600 text-sm space-y-1">
-                  <p>External ID: {externalId || "Carregando..."}</p>
-                  <p>
-                    Verificações: {checksCount} | Intervalo: {Math.round(currentInterval / 1000)}s | Nível:{" "}
-                    {rateLimitLevel + 1}
-                  </p>
-                  {lastCheck && <p>Última verificação: {lastCheck.toLocaleTimeString()}</p>}
-                  {paymentData && <p>Status atual: {paymentData.status_title}</p>}
-                </div>
-
-                {/* Botão de verificação manual */}
-                <button
-                  onClick={handleManualCheck}
-                  disabled={isWaitingForPayment}
-                  className="mt-3 flex items-center justify-center space-x-2 mx-auto px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white text-sm rounded-lg transition-colors"
-                >
-                  <RefreshCw className={`w-4 h-4 ${isWaitingForPayment ? "animate-spin" : ""}`} />
-                  <span>Verificar Agora</span>
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Valor */}
-          <div className="text-center mb-6">
-            <p className="text-gray-600 mb-1">Valor a pagar</p>
-            <p className="text-3xl font-bold text-green-600">R$ {Number.parseFloat(amount).toFixed(2)}</p>
-            <p className="text-sm text-gray-500">Frete {method} - Cartão SHEIN</p>
-          </div>
-
-          {/* QR Code */}
-          {!redirecting && (
-            <div className="text-center mb-6">
-              <div className="bg-white p-4 rounded-lg border-2 border-gray-200 inline-block">
-                {invoice && <SmartQRCode invoice={invoice} width={200} height={200} className="mx-auto" />}
-              </div>
-              <p className="text-sm text-gray-600 mt-2">Escaneie o QR Code com seu app do banco</p>
-            </div>
-          )}
-
-          {/* Código PIX */}
-          {!redirecting && (
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 mb-2">Ou copie o código PIX:</label>
-              <div className="flex space-x-2">
-                <input
-                  type="text"
-                  value={invoice?.pix.payload || ""}
-                  readOnly
-                  className="flex-1 p-3 border border-gray-300 rounded-lg bg-gray-50 text-sm font-mono"
-                />
-                <button
-                  onClick={copyPixCode}
-                  className={`px-4 py-3 rounded-lg font-medium transition-colors ${
-                    copied ? "bg-green-500 text-white" : "bg-black text-white hover:bg-black/90"
-                  }`}
-                >
-                  {copied ? <CheckCircle className="w-5 h-5" /> : <Copy className="w-5 h-5" />}
-                </button>
-              </div>
-              {copied && <p className="text-green-600 text-sm mt-2">✅ Código copiado!</p>}
-            </div>
-          )}
-
-          {/* Instruções */}
-          {!redirecting && (
-            <div className="space-y-3 text-sm text-gray-600 mb-6">
-              <div className="flex items-start space-x-2">
-                <span className="bg-black text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold mt-0.5">
-                  1
-                </span>
-                <span>Abra o app do seu banco</span>
-              </div>
-              <div className="flex items-start space-x-2">
-                <span className="bg-black text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold mt-0.5">
-                  2
-                </span>
-                <span>Escaneie o QR Code ou cole o código PIX</span>
-              </div>
-              <div className="flex items-start space-x-2">
-                <span className="bg-black text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold mt-0.5">
-                  3
-                </span>
-                <span>Confirme o pagamento</span>
-              </div>
-              <div className="flex items-start space-x-2">
-                <span className="bg-black text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold mt-0.5">
-                  4
-                </span>
-                <span>Aguarde a confirmação automática via webhook SuperPay</span>
-              </div>
-            </div>
-          )}
-
-          {/* Botão de Teste (apenas em desenvolvimento) */}
-          {process.env.NODE_ENV === "development" && externalId && !redirecting && (
-            <button
-              onClick={simulatePayment}
-              className="w-full bg-green-600 hover:bg-green-700 text-white font-medium py-3 px-4 rounded-lg transition-colors"
-            >
-              🧪 SIMULAR PAGAMENTO APROVADO (TESTE)
-            </button>
-          )}
-
-          {/* Erro de monitoramento */}
-          {monitorError && !redirecting && (
-            <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-              <p className="text-red-700 text-sm">
-                <strong>Erro de monitoramento:</strong> {monitorError}
-              </p>
-            </div>
-          )}
         </div>
       </div>
-    </main>
+
+      <div className="max-w-4xl mx-auto px-4 py-8">
+        <div className="grid lg:grid-cols-2 gap-8">
+          {/* Coluna da esquerda - QR Code */}
+          <div className="bg-white rounded-2xl shadow-xl p-8">
+            <div className="text-center">
+              <h1 className="text-2xl font-bold text-gray-800 mb-2">Finalize seu Pagamento</h1>
+              <p className="text-gray-600 mb-8">Escaneie o QR Code com seu app do banco</p>
+
+              {/* QR Code */}
+              <div className="bg-gray-50 rounded-xl p-8 mb-6">
+                {qrCodeUrl ? (
+                  <Image
+                    src={qrCodeUrl || "/placeholder.svg"}
+                    alt="QR Code PIX"
+                    width={200}
+                    height={200}
+                    className="mx-auto"
+                  />
+                ) : (
+                  <div className="w-48 h-48 bg-gray-200 rounded-lg flex items-center justify-center mx-auto">
+                    <div className="text-center">
+                      <div className="w-12 h-12 bg-gray-300 rounded mx-auto mb-2"></div>
+                      <p className="text-gray-500 text-sm">QR Code PIX</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Valor */}
+              {paymentData?.amount && (
+                <div className="bg-pink-50 rounded-lg p-4 mb-6">
+                  <p className="text-sm text-gray-600">Valor a pagar</p>
+                  <p className="text-2xl font-bold text-pink-600">
+                    R$ {Number(paymentData.amount).toFixed(2).replace(".", ",")}
+                  </p>
+                </div>
+              )}
+
+              {/* Status do monitoramento */}
+              <div className="bg-blue-50 rounded-lg p-4">
+                <div className="flex items-center justify-center mb-2">
+                  {isMonitoring ? (
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
+                  ) : (
+                    <div className="w-4 h-4 bg-blue-600 rounded-full mr-2"></div>
+                  )}
+                  <span className="text-sm font-medium text-blue-800">
+                    {status?.status === "paid" ? "Pagamento Confirmado!" : "Aguardando Pagamento"}
+                  </span>
+                </div>
+
+                {isActive && (
+                  <p className="text-xs text-blue-600">Verificação {checkCount}/120 • Monitoramento ativo</p>
+                )}
+
+                {error && <p className="text-xs text-red-600 mt-1">Erro: {error}</p>}
+              </div>
+            </div>
+          </div>
+
+          {/* Coluna da direita - Informações */}
+          <div className="space-y-6">
+            {/* Instruções */}
+            <div className="bg-white rounded-2xl shadow-xl p-6">
+              <h2 className="text-xl font-bold text-gray-800 mb-4">Como pagar com PIX</h2>
+              <div className="space-y-3">
+                <div className="flex items-start">
+                  <div className="w-6 h-6 bg-pink-100 rounded-full flex items-center justify-center mr-3 mt-0.5">
+                    <span className="text-xs font-bold text-pink-600">1</span>
+                  </div>
+                  <p className="text-gray-600">Abra o app do seu banco</p>
+                </div>
+                <div className="flex items-start">
+                  <div className="w-6 h-6 bg-pink-100 rounded-full flex items-center justify-center mr-3 mt-0.5">
+                    <span className="text-xs font-bold text-pink-600">2</span>
+                  </div>
+                  <p className="text-gray-600">Escolha a opção PIX</p>
+                </div>
+                <div className="flex items-start">
+                  <div className="w-6 h-6 bg-pink-100 rounded-full flex items-center justify-center mr-3 mt-0.5">
+                    <span className="text-xs font-bold text-pink-600">3</span>
+                  </div>
+                  <p className="text-gray-600">Escaneie o QR Code</p>
+                </div>
+                <div className="flex items-start">
+                  <div className="w-6 h-6 bg-pink-100 rounded-full flex items-center justify-center mr-3 mt-0.5">
+                    <span className="text-xs font-bold text-pink-600">4</span>
+                  </div>
+                  <p className="text-gray-600">Confirme o pagamento</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Segurança */}
+            <div className="bg-white rounded-2xl shadow-xl p-6">
+              <h2 className="text-xl font-bold text-gray-800 mb-4">Pagamento Seguro</h2>
+              <div className="space-y-3">
+                <div className="flex items-center">
+                  <svg className="w-5 h-5 text-green-600 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
+                  </svg>
+                  <span className="text-gray-600">Criptografia SSL</span>
+                </div>
+                <div className="flex items-center">
+                  <svg className="w-5 h-5 text-green-600 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
+                  </svg>
+                  <span className="text-gray-600">Dados protegidos</span>
+                </div>
+                <div className="flex items-center">
+                  <svg className="w-5 h-5 text-green-600 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
+                  </svg>
+                  <span className="text-gray-600">Confirmação automática</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Suporte */}
+            <div className="bg-white rounded-2xl shadow-xl p-6">
+              <h2 className="text-xl font-bold text-gray-800 mb-4">Precisa de ajuda?</h2>
+              <p className="text-gray-600 mb-4">
+                Nossa equipe está pronta para te ajudar com qualquer dúvida sobre o pagamento.
+              </p>
+              <button className="w-full bg-green-600 text-white py-3 rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center">
+                <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893A11.821 11.821 0 0020.885 3.109" />
+                </svg>
+                Falar no WhatsApp
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }

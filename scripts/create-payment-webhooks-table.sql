@@ -1,4 +1,4 @@
--- Criar tabela para armazenar webhooks de pagamento
+-- Criar tabela para armazenar webhooks de pagamento SuperPay
 CREATE TABLE IF NOT EXISTS payment_webhooks (
   id BIGSERIAL PRIMARY KEY,
   external_id TEXT NOT NULL,
