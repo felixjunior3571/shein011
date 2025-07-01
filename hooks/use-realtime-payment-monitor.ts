@@ -58,6 +58,8 @@ export function useRealtimePaymentMonitor({
   const channelRef = useRef<any>(null)
   const hasRedirectedRef = useRef(false)
   const hasInitialCheckRef = useRef(false)
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const isUnmountedRef = useRef(false)
 
   const log = useCallback(
     (message: string, data?: any) => {
@@ -68,9 +70,9 @@ export function useRealtimePaymentMonitor({
     [debug],
   )
 
-  // Verificação inicial única (SEM POLLING)
+  // Verificação inicial única
   const checkInitialStatus = useCallback(async () => {
-    if (!externalId || hasInitialCheckRef.current) return
+    if (!externalId || hasInitialCheckRef.current || isUnmountedRef.current) return
 
     try {
       log("🔍 Verificação inicial única", { externalId })
@@ -80,7 +82,6 @@ export function useRealtimePaymentMonitor({
         .from("payment_webhooks")
         .select("*")
         .eq("external_id", externalId)
-        .eq("gateway", "superpay")
         .order("updated_at", { ascending: false })
         .limit(1)
 
@@ -105,7 +106,9 @@ export function useRealtimePaymentMonitor({
             hasRedirectedRef.current = true
             log("🚀 Redirecionando para ativação do cartão...")
             setTimeout(() => {
-              router.push("/upp/001")
+              if (!isUnmountedRef.current) {
+                router.push("/upp/001")
+              }
             }, 2000)
           }
         } else if (webhook.is_denied) {
@@ -124,28 +127,51 @@ export function useRealtimePaymentMonitor({
       }
     } catch (error) {
       log("❌ Erro na verificação inicial:", error)
-      setError(error instanceof Error ? error.message : "Erro desconhecido")
+      if (!isUnmountedRef.current) {
+        setError(error instanceof Error ? error.message : "Erro desconhecido")
+      }
     }
   }, [externalId, log, onPaymentConfirmed, onPaymentDenied, onPaymentExpired, onPaymentCanceled, autoRedirect, router])
 
-  // Configurar Realtime
-  useEffect(() => {
-    if (!enabled || !externalId) {
-      log("⏸️ Monitor desabilitado ou sem external_id")
+  // Função para limpar conexão
+  const cleanupConnection = useCallback(() => {
+    if (channelRef.current) {
+      log("🧹 Limpando conexão Realtime...")
+      try {
+        supabase.removeChannel(channelRef.current)
+      } catch (error) {
+        log("⚠️ Erro ao limpar canal:", error)
+      }
+      channelRef.current = null
+    }
+
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current)
+      reconnectTimeoutRef.current = null
+    }
+
+    setIsConnected(false)
+    setIsConnecting(false)
+  }, [log])
+
+  // Função para conectar ao Realtime
+  const connectToRealtime = useCallback(() => {
+    if (!enabled || !externalId || isUnmountedRef.current || channelRef.current) {
       return
     }
 
-    log("🚀 Iniciando monitor Realtime PURO", { externalId })
+    log("🚀 Conectando ao Realtime", { externalId, attempt: connectionAttempts + 1 })
     setIsConnecting(true)
     setError(null)
 
-    // Verificação inicial única
-    checkInitialStatus()
-
-    // Configurar canal Realtime
     const channelName = `payment_webhook_${externalId}_${Date.now()}`
     const channel = supabase
-      .channel(channelName)
+      .channel(channelName, {
+        config: {
+          broadcast: { self: false },
+          presence: { key: externalId },
+        },
+      })
       .on(
         "postgres_changes",
         {
@@ -155,6 +181,8 @@ export function useRealtimePaymentMonitor({
           filter: `external_id=eq.${externalId}`,
         },
         (payload) => {
+          if (isUnmountedRef.current) return
+
           log("📡 WEBHOOK recebido via Realtime:", payload)
           setLastUpdate(new Date().toISOString())
 
@@ -179,7 +207,9 @@ export function useRealtimePaymentMonitor({
                 hasRedirectedRef.current = true
                 log("🚀 Redirecionando para ativação do cartão...")
                 setTimeout(() => {
-                  router.push("/upp/001")
+                  if (!isUnmountedRef.current) {
+                    router.push("/upp/001")
+                  }
                 }, 2000)
               }
             } else if (newWebhook.is_denied && !currentStatus?.is_denied) {
@@ -196,6 +226,8 @@ export function useRealtimePaymentMonitor({
         },
       )
       .subscribe((status) => {
+        if (isUnmountedRef.current) return
+
         log("📡 Status da conexão Realtime:", status)
 
         if (status === "SUBSCRIBED") {
@@ -210,6 +242,20 @@ export function useRealtimePaymentMonitor({
           setIsConnecting(false)
           setError("Erro na conexão Realtime")
           log("❌ Erro na conexão Realtime")
+
+          // Tentar reconectar após delay
+          if (connectionAttempts < 3) {
+            const delay = Math.min(1000 * Math.pow(2, connectionAttempts), 10000)
+            log(`🔄 Tentando reconectar em ${delay}ms...`)
+
+            reconnectTimeoutRef.current = setTimeout(() => {
+              if (!isUnmountedRef.current) {
+                setConnectionAttempts((prev) => prev + 1)
+                cleanupConnection()
+                connectToRealtime()
+              }
+            }, delay)
+          }
         } else if (status === "TIMED_OUT") {
           setIsConnected(false)
           setIsConnecting(false)
@@ -223,22 +269,11 @@ export function useRealtimePaymentMonitor({
       })
 
     channelRef.current = channel
-
-    // Cleanup
-    return () => {
-      log("🧹 Limpando conexão Realtime...")
-      if (channelRef.current) {
-        supabase.removeChannel(channelRef.current)
-        channelRef.current = null
-      }
-      setIsConnected(false)
-      setIsConnecting(false)
-    }
   }, [
     enabled,
     externalId,
+    connectionAttempts,
     log,
-    checkInitialStatus,
     onPaymentConfirmed,
     onPaymentDenied,
     onPaymentExpired,
@@ -246,9 +281,10 @@ export function useRealtimePaymentMonitor({
     autoRedirect,
     router,
     currentStatus,
+    cleanupConnection,
   ])
 
-  // Função para reconectar
+  // Função para reconectar manualmente
   const reconnect = useCallback(() => {
     if (connectionAttempts >= 5) {
       log("❌ Máximo de tentativas de reconexão atingido")
@@ -256,16 +292,33 @@ export function useRealtimePaymentMonitor({
       return
     }
 
-    const backoffTime = Math.min(1000 * Math.pow(2, connectionAttempts), 30000)
-    log(`🔄 Reconectando em ${backoffTime}ms... (${connectionAttempts + 1}/5)`)
+    log("🔄 Reconectando manualmente...")
+    cleanupConnection()
+    setConnectionAttempts((prev) => prev + 1)
+    connectToRealtime()
+  }, [log, connectionAttempts, cleanupConnection, connectToRealtime])
 
-    setTimeout(() => {
-      setConnectionAttempts((prev) => prev + 1)
-      setError(null)
-      setIsConnecting(true)
-      // O useEffect vai recriar a conexão automaticamente
-    }, backoffTime)
-  }, [log, connectionAttempts])
+  // Effect principal
+  useEffect(() => {
+    isUnmountedRef.current = false
+
+    if (!enabled || !externalId) {
+      log("⏸️ Monitor desabilitado ou sem external_id")
+      return
+    }
+
+    // Verificação inicial
+    checkInitialStatus()
+
+    // Conectar ao Realtime
+    connectToRealtime()
+
+    // Cleanup
+    return () => {
+      isUnmountedRef.current = true
+      cleanupConnection()
+    }
+  }, [enabled, externalId, checkInitialStatus, connectToRealtime, cleanupConnection, log])
 
   return {
     currentStatus,
