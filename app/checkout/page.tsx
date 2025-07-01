@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { useRealtimePaymentMonitor } from "@/hooks/use-realtime-payment-monitor"
 import { SmartQRCode } from "@/components/smart-qr-code"
-import { Clock, CheckCircle, XCircle, AlertCircle, RefreshCw, Copy, Wifi, WifiOff } from "lucide-react"
+import { Clock, CheckCircle, XCircle, RefreshCw, Copy, Wifi, WifiOff, AlertTriangle } from "lucide-react"
 import Image from "next/image"
 
 interface InvoiceData {
@@ -45,36 +45,42 @@ export default function CheckoutPage() {
   const [error, setError] = useState<string | null>(null)
 
   // Obter parâmetros da URL
-  const urlAmount = searchParams.get("amount") || "27.97"
-  const shipping = searchParams.get("shipping") || "sedex"
-  const method = searchParams.get("method") || "SEDEX"
+  const urlAmount = searchParams.get("amount") || "0.28"
+  const shipping = searchParams.get("shipping") || "pac"
+  const method = searchParams.get("method") || "PAC"
 
-  // Monitor Realtime (SEM POLLING!)
+  // Monitor Realtime OTIMIZADO
   const {
+    currentStatus,
     isConnected,
     isConnecting,
     error: realtimeError,
     lastUpdate,
-    currentStatus,
     connectionAttempts,
     isReady,
     reconnect,
+    isPaid,
+    isDenied,
+    isExpired,
+    isCanceled,
+    statusName,
   } = useRealtimePaymentMonitor({
     externalId,
     enabled: !!externalId,
-    onPaymentConfirmed: (status) => {
-      console.log("🎉 Pagamento confirmado via Realtime! Redirecionando...", status)
+    onPaymentConfirmed: (payment) => {
+      console.log("🎉 Pagamento confirmado via Realtime! Redirecionando...", payment)
+      // O redirecionamento é automático no hook
     },
-    onPaymentDenied: (status) => {
-      console.log("❌ Pagamento negado:", status)
+    onPaymentDenied: (payment) => {
+      console.log("❌ Pagamento negado:", payment)
       setError("Pagamento negado pela SuperPay")
     },
-    onPaymentExpired: (status) => {
-      console.log("⏰ Pagamento vencido:", status)
+    onPaymentExpired: (payment) => {
+      console.log("⏰ Pagamento vencido:", payment)
       setError("Pagamento vencido")
     },
-    onPaymentCanceled: (status) => {
-      console.log("🚫 Pagamento cancelado:", status)
+    onPaymentCanceled: (payment) => {
+      console.log("🚫 Pagamento cancelado:", payment)
       setError("Pagamento cancelado")
     },
     debug: true,
@@ -225,24 +231,18 @@ export default function CheckoutPage() {
   }
 
   const getStatusIcon = () => {
-    if (!currentStatus) return <Clock className="h-5 w-5 text-blue-500" />
-
-    if (currentStatus.is_paid) return <CheckCircle className="h-5 w-5 text-green-500" />
-    if (currentStatus.is_denied) return <XCircle className="h-5 w-5 text-red-500" />
-    if (currentStatus.is_expired) return <AlertCircle className="h-5 w-5 text-orange-500" />
-    if (currentStatus.is_canceled) return <XCircle className="h-5 w-5 text-gray-500" />
-
+    if (isPaid) return <CheckCircle className="h-5 w-5 text-green-500" />
+    if (isDenied) return <XCircle className="h-5 w-5 text-red-500" />
+    if (isExpired) return <AlertTriangle className="h-5 w-5 text-orange-500" />
+    if (isCanceled) return <XCircle className="h-5 w-5 text-gray-500" />
     return <Clock className="h-5 w-5 text-blue-500" />
   }
 
   const getStatusColor = () => {
-    if (!currentStatus) return "bg-blue-50 border-blue-200"
-
-    if (currentStatus.is_paid) return "bg-green-50 border-green-200"
-    if (currentStatus.is_denied) return "bg-red-50 border-red-200"
-    if (currentStatus.is_expired) return "bg-orange-50 border-orange-200"
-    if (currentStatus.is_canceled) return "bg-gray-50 border-gray-200"
-
+    if (isPaid) return "bg-green-50 border-green-200"
+    if (isDenied) return "bg-red-50 border-red-200"
+    if (isExpired) return "bg-orange-50 border-orange-200"
+    if (isCanceled) return "bg-gray-50 border-gray-200"
     return "bg-blue-50 border-blue-200"
   }
 
@@ -296,16 +296,14 @@ export default function CheckoutPage() {
             <div className="flex items-center gap-3 mb-4">
               {getStatusIcon()}
               <div className="flex-1">
-                <h2 className="font-semibold text-lg">{currentStatus?.status_title || "Aguardando confirmação..."}</h2>
+                <h2 className="font-semibold text-lg">{statusName}</h2>
                 <p className="text-sm text-gray-600">External ID: {externalId}</p>
               </div>
-              <Badge variant={currentStatus?.is_paid ? "default" : "secondary"}>
-                {currentStatus?.status_code || 1}
-              </Badge>
+              <Badge variant={isPaid ? "default" : "secondary"}>{currentStatus?.status_code || 1}</Badge>
             </div>
 
             {/* Success Message */}
-            {currentStatus?.is_paid && (
+            {isPaid && (
               <div className="bg-green-100 border border-green-300 rounded-lg p-4 mb-4">
                 <div className="flex items-center justify-center space-x-2">
                   <CheckCircle className="w-5 h-5 text-green-600" />

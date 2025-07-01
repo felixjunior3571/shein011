@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useRef, useCallback } from "react"
 import { createClient } from "@supabase/supabase-js"
 import { useRouter } from "next/navigation"
 
@@ -16,69 +16,136 @@ interface PaymentWebhook {
   status_description: string
   amount: number
   is_paid: boolean
+  is_denied: boolean
+  is_expired: boolean
+  is_canceled: boolean
+  is_refunded: boolean
   customer_id: string
   processed_at: string
+  updated_at: string
 }
 
-export function useRealtimePaymentMonitor(externalId: string) {
-  const [payment, setPayment] = useState<PaymentWebhook | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const router = useRouter()
+interface UseRealtimePaymentMonitorProps {
+  externalId: string | null
+  enabled?: boolean
+  onPaymentConfirmed?: (payment: PaymentWebhook) => void
+  onPaymentDenied?: (payment: PaymentWebhook) => void
+  onPaymentExpired?: (payment: PaymentWebhook) => void
+  onPaymentCanceled?: (payment: PaymentWebhook) => void
+  debug?: boolean
+  autoRedirect?: boolean
+}
 
+export function useRealtimePaymentMonitor({
+  externalId,
+  enabled = true,
+  onPaymentConfirmed,
+  onPaymentDenied,
+  onPaymentExpired,
+  onPaymentCanceled,
+  debug = false,
+  autoRedirect = true,
+}: UseRealtimePaymentMonitorProps) {
+  const router = useRouter()
+  const [currentStatus, setCurrentStatus] = useState<PaymentWebhook | null>(null)
+  const [isConnected, setIsConnected] = useState(false)
+  const [isConnecting, setIsConnecting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [lastUpdate, setLastUpdate] = useState<string | null>(null)
+  const [connectionAttempts, setConnectionAttempts] = useState(0)
+  const [isReady, setIsReady] = useState(false)
+
+  const channelRef = useRef<any>(null)
+  const hasRedirectedRef = useRef(false)
+  const hasInitialCheckRef = useRef(false)
+
+  const log = useCallback(
+    (message: string, data?: any) => {
+      if (debug) {
+        console.log(`[RealtimeMonitor] ${message}`, data || "")
+      }
+    },
+    [debug],
+  )
+
+  // Verificação inicial única (SEM POLLING)
+  const checkInitialStatus = useCallback(async () => {
+    if (!externalId || hasInitialCheckRef.current) return
+
+    try {
+      log("🔍 Verificação inicial única", { externalId })
+      hasInitialCheckRef.current = true
+
+      const { data, error } = await supabase
+        .from("payment_webhooks")
+        .select("*")
+        .eq("external_id", externalId)
+        .eq("gateway", "superpay")
+        .order("updated_at", { ascending: false })
+        .limit(1)
+
+      if (error && error.code !== "PGRST116") {
+        log("❌ Erro na verificação inicial:", error)
+        setError(error.message)
+        return
+      }
+
+      if (data && data.length > 0) {
+        const webhook = data[0] as PaymentWebhook
+        setCurrentStatus(webhook)
+        setError(null)
+        log("✅ Status inicial encontrado:", webhook)
+
+        // Processar status inicial
+        if (webhook.is_paid && !hasRedirectedRef.current) {
+          log("🎉 Pagamento já confirmado no banco!")
+          onPaymentConfirmed?.(webhook)
+
+          if (autoRedirect) {
+            hasRedirectedRef.current = true
+            log("🚀 Redirecionando para ativação do cartão...")
+            setTimeout(() => {
+              router.push("/upp/001")
+            }, 2000)
+          }
+        } else if (webhook.is_denied) {
+          log("❌ Pagamento já negado no banco")
+          onPaymentDenied?.(webhook)
+        } else if (webhook.is_expired) {
+          log("⏰ Pagamento já vencido no banco")
+          onPaymentExpired?.(webhook)
+        } else if (webhook.is_canceled) {
+          log("🚫 Pagamento já cancelado no banco")
+          onPaymentCanceled?.(webhook)
+        }
+      } else {
+        log("⚠️ Nenhum status inicial encontrado - aguardando webhook")
+        setCurrentStatus(null)
+      }
+    } catch (error) {
+      log("❌ Erro na verificação inicial:", error)
+      setError(error instanceof Error ? error.message : "Erro desconhecido")
+    }
+  }, [externalId, log, onPaymentConfirmed, onPaymentDenied, onPaymentExpired, onPaymentCanceled, autoRedirect, router])
+
+  // Configurar Realtime
   useEffect(() => {
-    if (!externalId) {
-      setIsLoading(false)
+    if (!enabled || !externalId) {
+      log("⏸️ Monitor desabilitado ou sem external_id")
       return
     }
 
-    console.log("🔍 Monitorando pagamento:", externalId)
+    log("🚀 Iniciando monitor Realtime PURO", { externalId })
+    setIsConnecting(true)
+    setError(null)
 
-    // Verificar se já existe um pagamento confirmado
-    const checkExistingPayment = async () => {
-      try {
-        const { data, error } = await supabase
-          .from("payment_webhooks")
-          .select("*")
-          .eq("external_id", externalId)
-          .eq("is_paid", true)
-          .order("processed_at", { ascending: false })
-          .limit(1)
+    // Verificação inicial única
+    checkInitialStatus()
 
-        if (error) {
-          console.error("❌ Erro ao verificar pagamento:", error)
-          setError(error.message)
-          return
-        }
-
-        if (data && data.length > 0) {
-          console.log("✅ Pagamento já confirmado encontrado:", data[0])
-          setPayment(data[0])
-          setIsLoading(false)
-
-          // Redirecionar após 2 segundos
-          setTimeout(() => {
-            console.log("🚀 Redirecionando para ativação...")
-            router.push("/upp/001")
-          }, 2000)
-          return
-        }
-
-        console.log("⏳ Pagamento ainda não confirmado, aguardando...")
-        setIsLoading(false)
-      } catch (err) {
-        console.error("💥 Erro ao verificar pagamento:", err)
-        setError(err instanceof Error ? err.message : "Erro desconhecido")
-        setIsLoading(false)
-      }
-    }
-
-    // Verificar pagamento existente
-    checkExistingPayment()
-
-    // Configurar listener do Realtime
+    // Configurar canal Realtime
+    const channelName = `payment_webhook_${externalId}_${Date.now()}`
     const channel = supabase
-      .channel("payment-updates")
+      .channel(channelName)
       .on(
         "postgres_changes",
         {
@@ -88,47 +155,132 @@ export function useRealtimePaymentMonitor(externalId: string) {
           filter: `external_id=eq.${externalId}`,
         },
         (payload) => {
-          console.log("🔔 Realtime update recebido:", payload)
+          log("📡 WEBHOOK recebido via Realtime:", payload)
+          setLastUpdate(new Date().toISOString())
 
-          const newPayment = payload.new as PaymentWebhook
-
-          if (newPayment && newPayment.is_paid) {
-            console.log("🎉 PAGAMENTO CONFIRMADO VIA REALTIME!")
-            console.log("💰 Valor:", newPayment.amount)
-            console.log("🆔 External ID:", newPayment.external_id)
-
-            setPayment(newPayment)
+          const newWebhook = payload.new as PaymentWebhook
+          if (newWebhook) {
+            setCurrentStatus(newWebhook)
             setError(null)
 
-            // Redirecionar após 2 segundos
-            setTimeout(() => {
-              console.log("🚀 Redirecionando para ativação...")
-              router.push("/upp/001")
-            }, 2000)
-          } else {
-            console.log("📝 Status do pagamento atualizado:", newPayment?.status_name)
-            setPayment(newPayment)
+            log("📊 Status atualizado via WEBHOOK:", {
+              external_id: newWebhook.external_id,
+              status_code: newWebhook.status_code,
+              status_title: newWebhook.status_title,
+              is_paid: newWebhook.is_paid,
+            })
+
+            // Processar mudanças de status
+            if (newWebhook.is_paid && !hasRedirectedRef.current) {
+              log("🎉 PAGAMENTO CONFIRMADO via WEBHOOK!")
+              onPaymentConfirmed?.(newWebhook)
+
+              if (autoRedirect) {
+                hasRedirectedRef.current = true
+                log("🚀 Redirecionando para ativação do cartão...")
+                setTimeout(() => {
+                  router.push("/upp/001")
+                }, 2000)
+              }
+            } else if (newWebhook.is_denied && !currentStatus?.is_denied) {
+              log("❌ PAGAMENTO NEGADO via WEBHOOK")
+              onPaymentDenied?.(newWebhook)
+            } else if (newWebhook.is_expired && !currentStatus?.is_expired) {
+              log("⏰ PAGAMENTO VENCIDO via WEBHOOK")
+              onPaymentExpired?.(newWebhook)
+            } else if (newWebhook.is_canceled && !currentStatus?.is_canceled) {
+              log("🚫 PAGAMENTO CANCELADO via WEBHOOK")
+              onPaymentCanceled?.(newWebhook)
+            }
           }
         },
       )
       .subscribe((status) => {
-        console.log("📡 Status da conexão Realtime:", status)
+        log("📡 Status da conexão Realtime:", status)
+
         if (status === "SUBSCRIBED") {
-          console.log("✅ Conectado ao Realtime para:", externalId)
+          setIsConnected(true)
+          setIsConnecting(false)
+          setError(null)
+          setIsReady(true)
+          setConnectionAttempts(0)
+          log("✅ Conectado ao Realtime - Aguardando webhooks da SuperPay!")
+        } else if (status === "CHANNEL_ERROR") {
+          setIsConnected(false)
+          setIsConnecting(false)
+          setError("Erro na conexão Realtime")
+          log("❌ Erro na conexão Realtime")
+        } else if (status === "TIMED_OUT") {
+          setIsConnected(false)
+          setIsConnecting(false)
+          setError("Timeout na conexão Realtime")
+          log("⏰ Timeout na conexão Realtime")
+        } else if (status === "CLOSED") {
+          setIsConnected(false)
+          setIsConnecting(false)
+          log("🔌 Conexão Realtime fechada")
         }
       })
 
+    channelRef.current = channel
+
     // Cleanup
     return () => {
-      console.log("🧹 Limpando listener do Realtime")
-      supabase.removeChannel(channel)
+      log("🧹 Limpando conexão Realtime...")
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current)
+        channelRef.current = null
+      }
+      setIsConnected(false)
+      setIsConnecting(false)
     }
-  }, [externalId, router])
+  }, [
+    enabled,
+    externalId,
+    log,
+    checkInitialStatus,
+    onPaymentConfirmed,
+    onPaymentDenied,
+    onPaymentExpired,
+    onPaymentCanceled,
+    autoRedirect,
+    router,
+    currentStatus,
+  ])
+
+  // Função para reconectar
+  const reconnect = useCallback(() => {
+    if (connectionAttempts >= 5) {
+      log("❌ Máximo de tentativas de reconexão atingido")
+      setError("Máximo de tentativas de conexão atingido")
+      return
+    }
+
+    const backoffTime = Math.min(1000 * Math.pow(2, connectionAttempts), 30000)
+    log(`🔄 Reconectando em ${backoffTime}ms... (${connectionAttempts + 1}/5)`)
+
+    setTimeout(() => {
+      setConnectionAttempts((prev) => prev + 1)
+      setError(null)
+      setIsConnecting(true)
+      // O useEffect vai recriar a conexão automaticamente
+    }, backoffTime)
+  }, [log, connectionAttempts])
 
   return {
-    payment,
-    isLoading,
+    currentStatus,
+    isConnected,
+    isConnecting,
     error,
-    isPaid: payment?.is_paid || false,
+    lastUpdate,
+    connectionAttempts,
+    isReady,
+    reconnect,
+    // Computed properties
+    isPaid: currentStatus?.is_paid || false,
+    isDenied: currentStatus?.is_denied || false,
+    isExpired: currentStatus?.is_expired || false,
+    isCanceled: currentStatus?.is_canceled || false,
+    statusName: currentStatus?.status_title || "Aguardando confirmação...",
   }
 }
