@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Package, Truck, Gift, CheckCircle, Play } from "lucide-react"
+import { Package, Truck, Gift, CheckCircle } from "lucide-react"
 import { usePageTracking, useTracking } from "@/hooks/use-tracking"
 
 interface AddressData {
@@ -160,11 +160,7 @@ export default function ShippingMethodPage() {
   ]
 
   const handleMethodSelect = (methodId: string) => {
-    if (methodId === selectedMethod && isRateGenerated) return
-
     setSelectedMethod(methodId)
-    setIsGeneratingRate(true)
-    setIsRateGenerated(false)
 
     // Encontra o método selecionado
     const method = shippingMethods.find((m) => m.id === methodId)
@@ -175,14 +171,8 @@ export default function ShippingMethodPage() {
 
       // Salva o método completo no localStorage
       localStorage.setItem("selectedShippingMethod", JSON.stringify(method))
-      console.log("Método salvo:", method) // Debug log
+      console.log("Método selecionado:", method)
     }
-
-    // Simula o tempo de geração da taxa
-    setTimeout(() => {
-      setIsGeneratingRate(false)
-      setIsRateGenerated(true)
-    }, 2000)
   }
 
   const handleConfirm = () => {
@@ -207,6 +197,19 @@ export default function ShippingMethodPage() {
 
   // Encontra o método selecionado
   const selectedMethodDetails = shippingMethods.find((method) => method.id === selectedMethod)
+
+  const handleContinue = () => {
+    if (!selectedMethod) return
+
+    setIsGeneratingRate(true)
+    setIsRateGenerated(false)
+
+    // Simula o tempo de geração da taxa
+    setTimeout(() => {
+      setIsGeneratingRate(false)
+      setIsRateGenerated(true)
+    }, 2000)
+  }
 
   return (
     <main className="min-h-screen bg-white flex items-center justify-center">
@@ -299,23 +302,6 @@ export default function ShippingMethodPage() {
         ) : (
           // Tela principal com vídeo e seleção de método de envio
           <div className="flex flex-col items-center justify-center text-center space-y-8">
-            {/* Instrução para reproduzir o vídeo */}
-            {videoLoaded && !videoStarted && (
-              <div className="bg-blue-50 border-2 border-blue-300 rounded-lg p-4 max-w-2xl mx-auto shadow-md animate-bounce">
-                <div className="flex items-center justify-center space-x-3">
-                  <div className="bg-blue-500 rounded-full p-2">
-                    <Play className="w-5 h-5 text-white" />
-                  </div>
-                  <div>
-                    <p className="text-blue-800 font-bold text-lg">👆 Toque no vídeo para reproduzir</p>
-                    <p className="text-blue-700 text-sm">
-                      Assista ao vídeo explicativo antes de escolher o método de envio
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
-
             {/* Container do Vídeo com Loading */}
             <div className="w-full max-w-3xl px-4">
               <div className="relative w-full bg-black rounded-lg overflow-hidden" style={{ paddingBottom: "56.25%" }}>
@@ -474,7 +460,7 @@ export default function ShippingMethodPage() {
 
               {/* Continue Button */}
               <button
-                onClick={() => selectedMethod && handleMethodSelect(selectedMethod)}
+                onClick={handleContinue}
                 disabled={!selectedMethod}
                 className={`w-full py-3 px-4 rounded-lg font-medium transition-colors ${
                   selectedMethod
