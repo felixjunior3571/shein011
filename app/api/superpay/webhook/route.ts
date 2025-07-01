@@ -1,8 +1,11 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
+
 // Cliente Supabase com service key
-const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
 // Mapeamento COMPLETO de status codes SuperPay
 const STATUS_MAPPING = {
@@ -142,66 +145,37 @@ export async function POST(request: NextRequest) {
       webhook: headers["webhook"],
     })
 
-    // Obter e validar body
-    const body = await request.json()
-    console.log("📦 [SuperPay Webhook] Body completo:", JSON.stringify(body, null, 2))
+    // Parse the webhook data
+    const webhookData = await request.json()
+    console.log("📦 [SuperPay Webhook] Body completo:", JSON.stringify(webhookData, null, 2))
 
-    // Validação básica
-    if (!body || !body.invoices) {
-      console.error("❌ [SuperPay Webhook] Estrutura inválida - campo 'invoices' ausente")
+    // Extract invoice data
+    const invoice = webhookData?.invoices
+    if (!invoice) {
+      console.error("❌ [SuperPay Webhook] Dados de fatura não encontrados no webhook")
       return NextResponse.json(
         {
           success: false,
-          error: "Invalid webhook structure",
-          message: "Campo 'invoices' é obrigatório",
+          error: "Invoice data not found",
         },
         { status: 400 },
       )
     }
 
-    // Extrair dados do invoice
-    const invoice = body.invoices
-    const event = body.event || {}
+    const externalId = invoice.external_id
+    const statusCode = invoice.status?.code
+    const statusTitle = invoice.status?.title
+    const statusDescription = invoice.status?.description
+    const amount = invoice.prices?.total
+    const customerId = invoice.customer
+    const paymentType = invoice.type
 
-    // Dados principais
-    const external_id = invoice.external_id
-    const invoice_id = invoice.id?.toString()
-    const status_code = invoice.status?.code
-    const customer_id = invoice.customer?.toString()
-
-    // Validações obrigatórias
-    if (!external_id) {
-      console.error("❌ [SuperPay Webhook] external_id ausente")
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Missing external_id",
-        },
-        { status: 400 },
-      )
-    }
-
-    if (!status_code) {
-      console.error("❌ [SuperPay Webhook] status_code ausente")
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Missing status_code",
-        },
-        { status: 400 },
-      )
-    }
-
-    console.log("🎯 [SuperPay Webhook] Dados extraídos:")
-    console.log("- External ID:", external_id)
-    console.log("- Invoice ID:", invoice_id)
-    console.log("- Status Code:", status_code)
-    console.log("- Customer ID:", customer_id)
+    console.log(`📋 [SuperPay Webhook] Processando: ${externalId} - Status: ${statusCode} - Valor: ${amount}`)
 
     // Mapear status
-    const statusInfo = STATUS_MAPPING[status_code as keyof typeof STATUS_MAPPING] || {
+    const statusInfo = STATUS_MAPPING[statusCode as keyof typeof STATUS_MAPPING] || {
       name: "unknown",
-      title: `Status ${status_code}`,
+      title: `Status ${statusCode}`,
       is_paid: false,
       is_denied: false,
       is_expired: false,
@@ -212,33 +186,32 @@ export async function POST(request: NextRequest) {
     console.log("📊 [SuperPay Webhook] Status mapeado:", statusInfo)
 
     // Extrair valores financeiros
-    const amount = Number.parseFloat(invoice.prices?.total?.toString() || "0")
     const discount = Number.parseFloat(invoice.prices?.discount?.toString() || "0")
     const taxes = Number.parseFloat(invoice.prices?.taxs?.others?.toString() || "0")
 
     console.log("💰 [SuperPay Webhook] Valores:", { amount, discount, taxes })
 
     // Preparar dados para inserção
-    const webhookData = {
-      external_id,
-      invoice_id: invoice_id || external_id,
+    const preparedData = {
+      external_id: externalId,
+      invoice_id: invoice.id?.toString() || externalId,
       token: invoice.token || null,
       gateway: "superpay",
 
       // Status
-      status_code,
+      status_code: statusCode,
       status_name: statusInfo.name,
-      status_title: statusInfo.title,
-      status_description: invoice.status?.description || null,
+      status_title: statusTitle || statusInfo.title,
+      status_description: statusDescription || null,
       status_text: invoice.status?.text || statusInfo.name,
 
       // Valores
-      amount,
-      discount,
-      taxes,
+      amount: amount,
+      discount: discount,
+      taxes: taxes,
 
       // Pagamento
-      payment_type: invoice.type || "PIX",
+      payment_type: paymentType || "PIX",
       payment_gateway: invoice.payment?.gateway || "SuperPay",
       payment_date:
         invoice.payment?.payDate || invoice.payment?.date
@@ -260,14 +233,14 @@ export async function POST(request: NextRequest) {
       is_refunded: statusInfo.is_refunded,
 
       // Cliente (OBRIGATÓRIO - corrigido)
-      customer_id: customer_id || "UNKNOWN",
+      customer_id: customerId || "UNKNOWN",
 
       // Evento
-      event_type: event.type || "webhook.update",
-      event_date: event.date ? new Date(event.date).toISOString() : new Date().toISOString(),
+      event_type: webhookData.event?.type || "webhook.update",
+      event_date: webhookData.event?.date ? new Date(webhookData.event.date).toISOString() : new Date().toISOString(),
 
       // Dados completos
-      webhook_data: body,
+      webhook_data: webhookData,
 
       // Timestamps
       processed_at: new Date().toISOString(),
@@ -275,19 +248,19 @@ export async function POST(request: NextRequest) {
     }
 
     console.log("💾 [SuperPay Webhook] Dados preparados para salvar:")
-    console.log("- External ID:", webhookData.external_id)
-    console.log("- Status Code:", webhookData.status_code)
-    console.log("- Status Title:", webhookData.status_title)
-    console.log("- Amount:", webhookData.amount)
-    console.log("- Is Paid:", webhookData.is_paid)
-    console.log("- Customer ID:", webhookData.customer_id)
+    console.log("- External ID:", preparedData.external_id)
+    console.log("- Status Code:", preparedData.status_code)
+    console.log("- Status Title:", preparedData.status_title)
+    console.log("- Amount:", preparedData.amount)
+    console.log("- Is Paid:", preparedData.is_paid)
+    console.log("- Customer ID:", preparedData.customer_id)
 
     // Salvar no Supabase com UPSERT
     console.log("💾 [SuperPay Webhook] Salvando no Supabase...")
 
     const { data, error } = await supabase
       .from("payment_webhooks")
-      .upsert(webhookData, {
+      .upsert(preparedData, {
         onConflict: "external_id,gateway",
         ignoreDuplicates: false,
       })
@@ -309,10 +282,10 @@ export async function POST(request: NextRequest) {
           message: error.message,
           details: error,
           debug_info: {
-            external_id,
-            status_code,
-            amount,
-            customer_id: webhookData.customer_id,
+            external_id: externalId,
+            status_code: statusCode,
+            amount: amount,
+            customer_id: preparedData.customer_id,
             processing_time: Date.now() - startTime,
           },
         },
@@ -327,20 +300,20 @@ export async function POST(request: NextRequest) {
     if (statusInfo.is_paid) {
       console.log("🎉 [SuperPay Webhook] ===== PAGAMENTO CONFIRMADO! =====")
       console.log("💰 Valor: R$", amount.toFixed(2))
-      console.log("🆔 External ID:", external_id)
-      console.log("👤 Customer ID:", customer_id)
-      console.log("📅 Data:", webhookData.payment_date)
-      console.log("🏦 Gateway:", webhookData.payment_gateway)
+      console.log("🆔 External ID:", externalId)
+      console.log("👤 Customer ID:", customerId)
+      console.log("📅 Data:", preparedData.payment_date)
+      console.log("🏦 Gateway:", preparedData.payment_gateway)
       console.log("📡 Realtime será ativado automaticamente!")
       console.log("🚀 Frontend deve redirecionar para /upp/001")
     } else if (statusInfo.is_denied) {
-      console.log("❌ [SuperPay Webhook] PAGAMENTO NEGADO:", external_id)
+      console.log("❌ [SuperPay Webhook] PAGAMENTO NEGADO:", externalId)
     } else if (statusInfo.is_expired) {
-      console.log("⏰ [SuperPay Webhook] PAGAMENTO VENCIDO:", external_id)
+      console.log("⏰ [SuperPay Webhook] PAGAMENTO VENCIDO:", externalId)
     } else if (statusInfo.is_canceled) {
-      console.log("🚫 [SuperPay Webhook] PAGAMENTO CANCELADO:", external_id)
+      console.log("🚫 [SuperPay Webhook] PAGAMENTO CANCELADO:", externalId)
     } else {
-      console.log("📊 [SuperPay Webhook] Status atualizado:", external_id, "->", status_code, `(${statusInfo.title})`)
+      console.log("📊 [SuperPay Webhook] Status atualizado:", externalId, "->", statusCode, `(${statusInfo.title})`)
     }
 
     const processingTime = Date.now() - startTime
@@ -351,15 +324,15 @@ export async function POST(request: NextRequest) {
       success: true,
       message: "Webhook SuperPay processado com sucesso",
       data: {
-        external_id,
-        status_code,
+        external_id: externalId,
+        status_code: statusCode,
         status_name: statusInfo.name,
-        status_title: statusInfo.title,
-        amount,
-        customer_id: webhookData.customer_id,
+        status_title: statusTitle || statusInfo.title,
+        amount: amount,
+        customer_id: preparedData.customer_id,
         is_paid: statusInfo.is_paid,
         is_final: statusInfo.is_paid || statusInfo.is_denied || statusInfo.is_expired || statusInfo.is_canceled,
-        processed_at: webhookData.processed_at,
+        processed_at: preparedData.processed_at,
         processing_time: processingTime,
       },
     })

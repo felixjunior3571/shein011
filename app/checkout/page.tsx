@@ -1,446 +1,173 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
-import { Card, CardContent } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
+import { useSearchParams } from "next/navigation"
 import { useStableRealtimeMonitor } from "@/hooks/use-stable-realtime-monitor"
-import { SmartQRCode } from "@/components/smart-qr-code"
-import { Clock, CheckCircle, XCircle, RefreshCw, Copy, Wifi, WifiOff, AlertTriangle } from "lucide-react"
 import Image from "next/image"
 
-interface InvoiceData {
-  id: string
-  invoice_id: string
-  external_id?: string
-  pix: {
-    payload: string
-    image: string
-    qr_code: string
-  }
-  status: {
-    code: number
-    title: string
-    text: string
-  }
-  valores: {
-    bruto: number
-    liquido: number
-  }
-  vencimento: {
-    dia: string
-  }
-  type: "real" | "simulated" | "emergency"
-}
-
 export default function CheckoutPage() {
-  const router = useRouter()
   const searchParams = useSearchParams()
   const [externalId, setExternalId] = useState<string>("")
-  const [invoice, setInvoice] = useState<InvoiceData | null>(null)
-  const [amount, setAmount] = useState<number>(0)
+  const [qrCodeUrl, setQrCodeUrl] = useState<string>("")
+  const [amount, setAmount] = useState<string>("0.28")
   const [isLoading, setIsLoading] = useState(true)
-  const [copied, setCopied] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<string>("")
 
-  // Obter parâmetros da URL
-  const urlAmount = searchParams.get("amount") || "0.28"
-  const shipping = searchParams.get("shipping") || "pac"
-  const method = searchParams.get("method") || "PAC"
-
-  // Monitor Realtime AUTENTICADO (SEM LOOPS)
-  const {
-    currentStatus,
-    isConnected,
-    isConnecting,
-    error: realtimeError,
-    lastUpdate,
-    connectionAttempts,
-    isReady,
-    reconnect,
-    isPaid,
-    isDenied,
-    isExpired,
-    isCanceled,
-    statusName,
-  } = useStableRealtimeMonitor({
-    externalId,
-    enabled: !!externalId,
-    onPaymentConfirmed: (payment) => {
-      console.log("🎉 Pagamento confirmado via Realtime! Redirecionando...", payment)
-    },
-    onPaymentDenied: (payment) => {
-      console.log("❌ Pagamento negado:", payment)
-      setError("Pagamento negado pela SuperPay")
-    },
-    onPaymentExpired: (payment) => {
-      console.log("⏰ Pagamento vencido:", payment)
-      setError("Pagamento vencido")
-    },
-    onPaymentCanceled: (payment) => {
-      console.log("🚫 Pagamento cancelado:", payment)
-      setError("Pagamento cancelado")
-    },
-    debug: true,
-    autoRedirect: true,
-  })
-
-  // Carregar dados do usuário e criar fatura
+  // Get external ID from URL params
   useEffect(() => {
-    createInvoice()
-  }, [])
-
-  // Carregar external_id quando a fatura for criada
-  useEffect(() => {
-    if (invoice) {
-      console.log("🔍 Dados da fatura SuperPayBR recebida:", invoice)
-
-      let capturedExternalId = null
-
-      if (invoice.external_id) {
-        capturedExternalId = invoice.external_id
-        console.log("✅ External ID encontrado na fatura SuperPayBR:", capturedExternalId)
-      } else {
-        capturedExternalId = invoice.id
-        console.log("⚠️ External ID não encontrado, usando invoice.id:", capturedExternalId)
-      }
-
-      if (capturedExternalId) {
-        localStorage.setItem("currentExternalId", capturedExternalId)
-        setExternalId(capturedExternalId)
-        console.log("💾 External ID SuperPayBR salvo:", capturedExternalId)
-      } else {
-        console.error("❌ Não foi possível obter external_id SuperPayBR!")
-      }
+    const id = searchParams.get("external_id")
+    if (id) {
+      setExternalId(id)
+      console.log("External ID encontrado:", id)
     }
-  }, [invoice])
+  }, [searchParams])
 
-  const createInvoice = async () => {
-    try {
-      setIsLoading(true)
-      setError(null)
+  // Use stable realtime monitor
+  const { isConnected, paymentConfirmed } = useStableRealtimeMonitor(externalId)
 
-      console.log("🔄 Criando fatura PIX SuperPayBR...")
-      console.log("Parâmetros:", { amount: Number.parseFloat(urlAmount), shipping, method })
+  // Generate QR Code when external ID is available
+  useEffect(() => {
+    if (!externalId) return
 
-      // Carregar dados do usuário do localStorage
-      const cpfData = JSON.parse(localStorage.getItem("cpfConsultaData") || "{}")
-      const userEmail = localStorage.getItem("userEmail") || ""
-      const userWhatsApp = localStorage.getItem("userWhatsApp") || ""
-      const deliveryAddress = JSON.parse(localStorage.getItem("deliveryAddress") || "{}")
+    const generateQRCode = async () => {
+      try {
+        setIsLoading(true)
+        setError("")
 
-      console.log("📋 Dados do usuário SuperPayBR:", {
-        nome: cpfData.nome,
-        email: userEmail,
-        whatsapp: userWhatsApp,
-        endereco: deliveryAddress,
-      })
+        const response = await fetch("/api/superpaybr/get-qrcode", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            external_id: externalId,
+            amount: Number.parseFloat(amount),
+          }),
+        })
 
-      const response = await fetch("/api/superpaybr/create-invoice", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-cpf-data": JSON.stringify(cpfData),
-          "x-user-email": userEmail,
-          "x-user-whatsapp": userWhatsApp,
-          "x-delivery-address": JSON.stringify(deliveryAddress),
-        },
-        body: JSON.stringify({
-          amount: Number.parseFloat(urlAmount),
-          shipping,
-          method,
-        }),
-      })
-
-      const data = await response.json()
-
-      if (data.success) {
-        setInvoice(data.data)
-        setAmount(data.data.valores.bruto / 100) // SuperPay retorna em centavos
-        localStorage.setItem("superPayBRInvoice", JSON.stringify(data.data))
-
-        if (data.data.external_id) {
-          localStorage.setItem("currentExternalId", data.data.external_id)
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`)
         }
 
-        console.log(
-          `✅ Fatura SuperPayBR criada: ${data.data.type} - Valor: R$ ${(data.data.valores.bruto / 100).toFixed(2)}`,
-        )
-        console.log(`👤 Cliente: ${cpfData.nome || "N/A"}`)
-      } else {
-        throw new Error(data.error || "Erro ao criar fatura SuperPayBR")
+        const data = await response.json()
+
+        if (data.success && data.qr_code) {
+          setQrCodeUrl(data.qr_code)
+          console.log("QR Code gerado com sucesso")
+        } else {
+          throw new Error(data.error || "Erro ao gerar QR Code")
+        }
+      } catch (error) {
+        console.error("Erro ao gerar QR Code:", error)
+        setError(error instanceof Error ? error.message : "Erro desconhecido")
+      } finally {
+        setIsLoading(false)
       }
-    } catch (error) {
-      console.log("❌ Erro ao criar fatura SuperPayBR:", error)
-      setError("Erro ao gerar PIX SuperPayBR. Tente novamente.")
-      createEmergencyPix()
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  const createEmergencyPix = () => {
-    console.log("🚨 Criando PIX de emergência SuperPayBR...")
-
-    const totalAmount = Number.parseFloat(urlAmount)
-    const emergencyExternalId = `EMERGENCY_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`
-    const emergencyPix = `00020101021226580014br.gov.bcb.pix2536emergency.quickchart.io/qr/v2/${emergencyExternalId}520400005303986540${totalAmount.toFixed(2)}5802BR5909SHEIN5011SAO PAULO62070503***6304EMRG`
-
-    const emergencyInvoice: InvoiceData = {
-      id: emergencyExternalId,
-      invoice_id: `EMERGENCY_${Date.now()}`,
-      external_id: emergencyExternalId,
-      pix: {
-        payload: emergencyPix,
-        image: "/placeholder.svg?height=250&width=250",
-        qr_code: `https://quickchart.io/qr?text=${encodeURIComponent(emergencyPix)}&size=200&margin=1&format=png`,
-      },
-      status: {
-        code: 1,
-        title: "Aguardando Pagamento",
-        text: "pending",
-      },
-      valores: {
-        bruto: Math.round(totalAmount * 100),
-        liquido: Math.round(totalAmount * 100),
-      },
-      vencimento: {
-        dia: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0],
-      },
-      type: "emergency",
     }
 
-    setInvoice(emergencyInvoice)
-    setAmount(totalAmount)
-    setError(null)
-    console.log(`✅ PIX de emergência SuperPayBR criado - Valor: R$ ${totalAmount.toFixed(2)}`)
-  }
+    generateQRCode()
+  }, [externalId, amount])
 
-  const copyPixCode = async () => {
-    if (!invoice) return
-
-    try {
-      await navigator.clipboard.writeText(invoice.pix.payload)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    } catch (error) {
-      console.log("❌ Erro ao copiar:", error)
+  const getConnectionStatus = () => {
+    if (paymentConfirmed) {
+      return { text: "Pagamento Confirmado! Redirecionando...", color: "text-green-600", icon: "✅" }
     }
+    if (isConnected) {
+      return { text: "Autenticado - Aguardando API", color: "text-blue-600", icon: "🔐" }
+    }
+    return { text: "Conectando...", color: "text-yellow-600", icon: "🔄" }
   }
 
-  const getStatusIcon = () => {
-    if (isPaid) return <CheckCircle className="h-5 w-5 text-green-500" />
-    if (isDenied) return <XCircle className="h-5 w-5 text-red-500" />
-    if (isExpired) return <AlertTriangle className="h-5 w-5 text-orange-500" />
-    if (isCanceled) return <XCircle className="h-5 w-5 text-gray-500" />
-    return <Clock className="h-5 w-5 text-blue-500" />
-  }
-
-  const getStatusColor = () => {
-    if (isPaid) return "bg-green-50 border-green-200"
-    if (isDenied) return "bg-red-50 border-red-200"
-    if (isExpired) return "bg-orange-50 border-orange-200"
-    if (isCanceled) return "bg-gray-50 border-gray-200"
-    return "bg-blue-50 border-blue-200"
-  }
-
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <Card className="w-full max-w-md">
-          <CardContent className="p-6 text-center">
-            <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4 text-blue-500" />
-            <h2 className="text-xl font-bold mb-2">Gerando PIX SuperPayBR...</h2>
-            <p className="text-gray-600 mb-2">Aguarde enquanto processamos seu pagamento</p>
-            <div className="text-sm text-gray-500">
-              <p>Valor: R$ {Number.parseFloat(urlAmount).toFixed(2)}</p>
-              <p>Método: {method}</p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    )
-  }
-
-  if (error && !invoice) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <Card className="w-full max-w-md">
-          <CardContent className="p-6 text-center">
-            <XCircle className="h-8 w-8 mx-auto mb-4 text-red-500" />
-            <h2 className="text-lg font-semibold mb-2">Erro no Checkout</h2>
-            <p className="text-gray-600 mb-4">{error}</p>
-            <Button onClick={createInvoice} className="w-full">
-              Tentar Novamente
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    )
-  }
+  const status = getConnectionStatus()
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8 px-4">
-      <div className="max-w-md mx-auto space-y-6">
-        {/* Header */}
-        <div className="text-center">
-          <Image src="/shein-card-logo-new.png" alt="SHEIN Card" width={100} height={60} className="mx-auto mb-4" />
-          <h1 className="text-2xl font-bold mb-2">Pagamento PIX</h1>
-        </div>
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+      <div className="max-w-md w-full bg-white rounded-lg shadow-lg p-6">
+        <h1 className="text-2xl font-bold text-center mb-6">Pagamento PIX</h1>
 
         {/* Status Card */}
-        <Card className={`border-2 ${getStatusColor()}`}>
-          <CardContent className="p-6">
-            <div className="flex items-center gap-3 mb-4">
-              {getStatusIcon()}
-              <div className="flex-1">
-                <h2 className="font-semibold text-lg">{statusName}</h2>
-                <p className="text-sm text-gray-600">External ID: {externalId}</p>
-              </div>
-              <Badge variant={isPaid ? "default" : "secondary"}>{currentStatus?.status_code || 1}</Badge>
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+          <div className="flex items-center space-x-2">
+            <div className="w-6 h-6 bg-blue-100 rounded-full flex items-center justify-center">
+              <span className="text-blue-600 text-sm">⏱</span>
             </div>
-
-            {/* Success Message */}
-            {isPaid && (
-              <div className="bg-green-100 border border-green-300 rounded-lg p-4 mb-4">
-                <div className="flex items-center justify-center space-x-2">
-                  <CheckCircle className="w-5 h-5 text-green-600" />
-                  <span className="font-bold text-green-800">✅ Pagamento Confirmado!</span>
-                </div>
-                <p className="text-green-700 text-sm mt-2 text-center">Redirecionando para ativação do cartão...</p>
-              </div>
-            )}
-
-            {/* Realtime Connection Status */}
-            <div className="flex items-center gap-2 mb-4">
-              {isConnecting ? (
-                <RefreshCw className="h-4 w-4 animate-spin text-blue-500" />
-              ) : isConnected ? (
-                <Wifi className="h-4 w-4 text-green-500" />
-              ) : (
-                <WifiOff className="h-4 w-4 text-red-500" />
-              )}
-              <span className="text-sm text-gray-600">
-                {isConnecting ? "Conectando..." : isConnected ? "Autenticado - Aguardando API" : "Desconectado"}
-              </span>
-              {!isReady && <RefreshCw className="h-4 w-4 animate-spin text-blue-500" />}
+            <div className="flex-1">
+              <p className="font-medium text-blue-900">Aguardando confirmação...</p>
+              <p className="text-sm text-blue-700">
+                External ID: <span className="font-mono">{externalId}</span>
+              </p>
             </div>
+            <span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded">1</span>
+          </div>
 
-            {/* Connection Stats */}
-            <div className="text-xs text-gray-500 space-y-1">
-              <div className="flex justify-between">
-                <span>Tentativas:</span>
-                <span>{connectionAttempts}</span>
-              </div>
-              {lastUpdate && (
-                <div className="flex justify-between">
-                  <span>Última atualização:</span>
-                  <span>{new Date(lastUpdate).toLocaleTimeString("pt-BR")}</span>
-                </div>
-              )}
+          <div className="mt-3 flex items-center space-x-2">
+            <div className="w-4 h-4 flex items-center justify-center">
+              <span className="text-sm">{status.icon}</span>
             </div>
+            <span className={`text-sm font-medium ${status.color}`}>{status.text}</span>
+          </div>
 
-            {(error || realtimeError) && (
-              <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-                <p className="text-sm text-red-600">⚠️ {error || realtimeError}</p>
-                {realtimeError && (
-                  <Button onClick={reconnect} variant="outline" size="sm" className="mt-2 bg-transparent">
-                    Reconectar
-                  </Button>
-                )}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Valor */}
-        <Card>
-          <CardContent className="p-6 text-center">
-            <p className="text-gray-600 mb-1">Valor a pagar</p>
-            <p className="text-3xl font-bold text-green-600">R$ {amount.toFixed(2)}</p>
-            <p className="text-sm text-gray-500">Frete {method} - Cartão SHEIN</p>
-          </CardContent>
-        </Card>
-
-        {/* QR Code Card */}
-        {invoice && (
-          <Card>
-            <CardContent className="p-6 text-center">
-              <h3 className="font-semibold mb-4">Escaneie o QR Code PIX</h3>
-              <div className="bg-white p-4 rounded-lg border-2 border-gray-200 inline-block">
-                <SmartQRCode invoice={invoice} width={200} height={200} className="mx-auto" />
-              </div>
-              <p className="text-sm text-gray-600 mt-4">Escaneie o QR Code com seu app do banco</p>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Código PIX */}
-        {invoice && (
-          <Card>
-            <CardContent className="p-6">
-              <label className="block text-sm font-medium text-gray-700 mb-2">Ou copie o código PIX:</label>
-              <div className="flex space-x-2">
-                <input
-                  type="text"
-                  value={invoice.pix.payload}
-                  readOnly
-                  className="flex-1 p-3 border border-gray-300 rounded-lg bg-gray-50 text-sm font-mono"
-                />
-                <Button onClick={copyPixCode} variant={copied ? "default" : "outline"} size="sm" className="px-4 py-3">
-                  {copied ? <CheckCircle className="w-5 h-5" /> : <Copy className="w-5 h-5" />}
-                </Button>
-              </div>
-              {copied && <p className="text-green-600 text-sm mt-2">✅ Código copiado!</p>}
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Instruções */}
-        <Card>
-          <CardContent className="p-6">
-            <h3 className="font-semibold mb-4">Como pagar:</h3>
-            <div className="space-y-3 text-sm text-gray-600">
-              <div className="flex items-start space-x-2">
-                <span className="bg-black text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold mt-0.5">
-                  1
-                </span>
-                <span>Abra o app do seu banco</span>
-              </div>
-              <div className="flex items-start space-x-2">
-                <span className="bg-black text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold mt-0.5">
-                  2
-                </span>
-                <span>Escaneie o QR Code ou cole o código PIX</span>
-              </div>
-              <div className="flex items-start space-x-2">
-                <span className="bg-black text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold mt-0.5">
-                  3
-                </span>
-                <span>Confirme o pagamento</span>
-              </div>
-              <div className="flex items-start space-x-2">
-                <span className="bg-black text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold mt-0.5">
-                  4
-                </span>
-                <span>Aguarde a confirmação automática da API</span>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Action Buttons */}
-        <div className="space-y-3">
-          <Button onClick={() => window.location.reload()} variant="outline" className="w-full">
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Recarregar Página
-          </Button>
-
-          <Button onClick={() => router.push("/")} variant="ghost" className="w-full">
-            Voltar ao Início
-          </Button>
+          <div className="mt-2 text-sm text-gray-600">
+            Tentativas: <span className="font-mono">0</span>
+          </div>
         </div>
+
+        {/* Amount */}
+        <div className="text-center mb-6">
+          <p className="text-gray-600 mb-2">Valor a pagar</p>
+          <p className="text-3xl font-bold text-green-600">R$ {amount}</p>
+          <p className="text-sm text-gray-500">Frete PAC - Cartão SHEIN</p>
+        </div>
+
+        {/* QR Code Section */}
+        <div className="text-center mb-6">
+          <h2 className="text-lg font-semibold mb-4">Escaneie o QR Code PIX</h2>
+
+          <div className="bg-white border-2 border-gray-200 rounded-lg p-4 inline-block">
+            {isLoading ? (
+              <div className="w-64 h-64 flex items-center justify-center bg-gray-100 rounded">
+                <div className="text-center">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
+                  <p className="text-sm text-gray-600">Gerando QR Code...</p>
+                </div>
+              </div>
+            ) : error ? (
+              <div className="w-64 h-64 flex items-center justify-center bg-red-50 rounded border-2 border-red-200">
+                <div className="text-center p-4">
+                  <p className="text-red-600 font-medium mb-2">Erro ao gerar QR Code</p>
+                  <p className="text-sm text-red-500">{error}</p>
+                </div>
+              </div>
+            ) : qrCodeUrl ? (
+              <Image
+                src={qrCodeUrl || "/placeholder.svg"}
+                alt="QR Code PIX"
+                width={256}
+                height={256}
+                className="rounded"
+              />
+            ) : (
+              <div className="w-64 h-64 flex items-center justify-center bg-gray-100 rounded">
+                <p className="text-gray-500">QR Code não disponível</p>
+              </div>
+            )}
+          </div>
+
+          <p className="text-sm text-gray-600 mt-4">Escaneie o QR Code com seu app do banco</p>
+        </div>
+
+        {/* PIX Code Section */}
+        {qrCodeUrl && (
+          <div className="mt-6">
+            <p className="text-sm font-medium text-gray-700 mb-2">Ou copie o código PIX:</p>
+            <div className="bg-gray-50 border rounded p-3">
+              <p className="text-xs font-mono text-gray-600 break-all">
+                {/* This would be the PIX code if available */}
+                Código PIX disponível após geração
+              </p>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
