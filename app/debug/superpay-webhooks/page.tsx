@@ -54,9 +54,6 @@ export default function SuperPayWebhooksDebugPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [lastUpdate, setLastUpdate] = useState<string>("")
-  const [connectionTest, setConnectionTest] = useState<any>(null)
-  const [isTestingConnection, setIsTestingConnection] = useState(false)
-  const [isSimulating, setIsSimulating] = useState(false)
 
   const loadWebhooks = async () => {
     try {
@@ -69,7 +66,7 @@ export default function SuperPayWebhooksDebugPage() {
       const { data: webhookData, error: webhookError } = await supabase
         .from("payment_webhooks")
         .select("*")
-        .eq("gateway", "superpaybr")
+        .eq("gateway", "superpay")
         .order("processed_at", { ascending: false })
         .limit(50)
 
@@ -109,65 +106,8 @@ export default function SuperPayWebhooksDebugPage() {
     }
   }
 
-  const testConnection = async () => {
-    try {
-      setIsTestingConnection(true)
-      console.log("🔍 Testando conexão SuperPayBR...")
-
-      const response = await fetch("/api/superpaybr/test-connection")
-      const data = await response.json()
-
-      setConnectionTest(data)
-      console.log("📊 Resultado do teste:", data)
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Erro desconhecido"
-      setConnectionTest({
-        success: false,
-        error: "Erro na conexão",
-        message: errorMessage,
-      })
-    } finally {
-      setIsTestingConnection(false)
-    }
-  }
-
-  const simulatePayment = async () => {
-    try {
-      setIsSimulating(true)
-      const externalId = `SHEIN_${Date.now()}_test`
-
-      console.log("🧪 Simulando pagamento:", externalId)
-
-      const response = await fetch("/api/superpaybr/simulate-payment", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          external_id: externalId,
-          status_code: 5,
-          amount: 27.97,
-        }),
-      })
-
-      const data = await response.json()
-
-      if (data.success) {
-        alert(`✅ Pagamento simulado com sucesso!\nExternal ID: ${externalId}`)
-        loadWebhooks()
-      } else {
-        alert(`❌ Erro na simulação: ${data.message}`)
-      }
-    } catch (err) {
-      alert(`❌ Erro na simulação: ${err}`)
-    } finally {
-      setIsSimulating(false)
-    }
-  }
-
   useEffect(() => {
     loadWebhooks()
-    testConnection()
 
     // Auto-refresh every 10 seconds
     const interval = setInterval(loadWebhooks, 10000)
@@ -217,55 +157,7 @@ export default function SuperPayWebhooksDebugPage() {
             <CardDescription>Configuração e conectividade</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="flex gap-4 mb-4">
-              <Button onClick={testConnection} disabled={isTestingConnection} className="flex-1">
-                {isTestingConnection ? (
-                  <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                ) : (
-                  <Activity className="h-4 w-4 mr-2" />
-                )}
-                Testar Conexão
-              </Button>
-              <Button
-                onClick={simulatePayment}
-                disabled={isSimulating}
-                variant="outline"
-                className="flex-1 bg-transparent"
-              >
-                {isSimulating ? (
-                  <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                ) : (
-                  <Webhook className="h-4 w-4 mr-2" />
-                )}
-                Simular Pagamento
-              </Button>
-            </div>
-
-            {connectionTest && (
-              <Alert className={connectionTest.success ? "border-green-200 bg-green-50" : "border-red-200 bg-red-50"}>
-                <div className="flex items-center gap-2">
-                  {connectionTest.success ? (
-                    <CheckCircle className="h-4 w-4 text-green-500" />
-                  ) : (
-                    <XCircle className="h-4 w-4 text-red-500" />
-                  )}
-                  <AlertDescription>
-                    <strong>{connectionTest.success ? "✅ Sucesso:" : "❌ Erro:"}</strong> {connectionTest.message}
-                  </AlertDescription>
-                </div>
-
-                {connectionTest.working_config && (
-                  <details className="mt-2">
-                    <summary className="cursor-pointer text-sm font-medium">Ver configuração funcionando</summary>
-                    <pre className="mt-2 text-xs bg-white p-2 rounded overflow-auto">
-                      {JSON.stringify(connectionTest.working_config, null, 2)}
-                    </pre>
-                  </details>
-                )}
-              </Alert>
-            )}
-
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div className="text-center">
                 <div className="text-2xl font-bold text-green-600">✅</div>
                 <p className="text-sm font-medium">Supabase</p>
@@ -438,13 +330,13 @@ export default function SuperPayWebhooksDebugPage() {
                 <h4 className="font-medium mb-2">Configuração SuperPay:</h4>
                 <ul className="space-y-1 text-gray-600">
                   <li>
-                    • Webhook Endpoint: <code>/api/superpaybr/webhook</code>
+                    • Webhook Endpoint: <code>/api/superpay/webhook</code>
                   </li>
                   <li>
-                    • Status API: <code>/api/superpaybr/payment-status</code>
+                    • Status API: <code>/api/superpay/payment-status</code>
                   </li>
                   <li>
-                    • Gateway: <code>superpaybr</code>
+                    • Gateway: <code>superpay</code>
                   </li>
                   <li>
                     • Armazenamento: <strong>Supabase apenas</strong>
