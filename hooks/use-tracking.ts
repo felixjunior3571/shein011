@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useCallback } from "react"
+import { useEffect } from "react"
 
 // Tipos para os eventos de rastreamento
 interface TrackingEvent {
@@ -12,10 +12,6 @@ interface TrackingEvent {
   [key: string]: any
 }
 
-interface TrackingData {
-  [key: string]: any
-}
-
 // Declaração global para o Utmify
 declare global {
   interface Window {
@@ -23,9 +19,6 @@ declare global {
       track: (event: string, data?: any) => void
       pageview: (page?: string) => void
     }
-    trackUTMifyFunnel?: (event: string, data: any) => void
-    utmifyQueue?: Array<{ event: string; data: any }>
-    testUTMify?: () => boolean
     pixelId?: string
     dataLayer?: any[]
   }
@@ -33,27 +26,18 @@ declare global {
 
 export function useTracking() {
   // Função para rastrear eventos com tratamento de erro robusto
-  const trackEvent = useCallback((event: string, data: TrackingData = {}) => {
+  const trackEvent = (eventData: TrackingEvent) => {
     try {
       // Verifica se está no ambiente do navegador
       if (typeof window === "undefined") {
-        console.log("Tracking Event (SSR):", event, data)
+        console.log("Tracking Event (SSR):", eventData)
         return
       }
 
-      // UTMify tracking via função global
-      if (window.trackUTMifyFunnel) {
-        window.trackUTMifyFunnel(event, data)
-      }
-
-      // Rastreamento via Utmify direto com verificação
+      // Rastreamento via Utmify com verificação
       if (window.utmify && typeof window.utmify.track === "function") {
         try {
-          window.utmify.track(event, {
-            ...data,
-            funnel: "shein_card",
-            timestamp: new Date().toISOString(),
-          })
+          window.utmify.track(eventData.event, eventData)
         } catch (utmifyError) {
           console.warn("Erro no rastreamento Utmify:", utmifyError)
         }
@@ -63,126 +47,120 @@ export function useTracking() {
       if (window.dataLayer && Array.isArray(window.dataLayer)) {
         try {
           window.dataLayer.push({
-            event: event,
-            ...data,
+            event: eventData.event,
+            ...eventData,
           })
         } catch (dataLayerError) {
           console.warn("Erro no dataLayer:", dataLayerError)
         }
       }
 
-      // Console log para debug
-      console.log(`📊 Event tracked: ${event}`, data)
+      // Log para debug apenas em desenvolvimento
+      if (process.env.NODE_ENV === "development") {
+        console.log("Tracking Event:", eventData)
+      }
     } catch (error) {
-      console.error("Erro no tracking:", error)
+      console.warn("Erro geral no rastreamento:", error)
     }
-  }, [])
+  }
 
   // Função para rastrear pageview com tratamento de erro robusto
-  const trackPageView = useCallback(
-    (page: string, data: TrackingData = {}) => {
-      trackEvent("page_view", {
-        page,
-        step: page.replace("/", "") || "home",
-        ...data,
+  const trackPageView = (page: string) => {
+    try {
+      // Verifica se está no ambiente do navegador
+      if (typeof window === "undefined") {
+        console.log("Page View (SSR):", page)
+        return
+      }
+
+      if (window.utmify && typeof window.utmify.pageview === "function") {
+        try {
+          window.utmify.pageview(page)
+        } catch (utmifyError) {
+          console.warn("Erro no pageview Utmify:", utmifyError)
+        }
+      }
+
+      trackEvent({
+        event: "page_view",
+        page: page,
       })
-    },
-    [trackEvent],
-  )
+    } catch (error) {
+      console.warn("Erro no rastreamento de pageview:", error)
+    }
+  }
 
   // Funções específicas para eventos do funil com tratamento de erro
-  const trackFunnelStep = useCallback(
-    (step: string, page: string) => {
-      try {
-        trackEvent("funnel_step", {
-          step: step,
-          page: page,
-        })
-      } catch (error) {
-        console.warn("Erro no rastreamento de funnel step:", error)
-      }
-    },
-    [trackEvent],
-  )
-
-  const trackQuizAnswer = useCallback(
-    (question: string, answer: string) => {
-      try {
-        trackEvent("quiz_answer", {
-          question: question,
-          answer: answer,
-        })
-      } catch (error) {
-        console.warn("Erro no rastreamento de quiz answer:", error)
-      }
-    },
-    [trackEvent],
-  )
-
-  const trackFormSubmit = useCallback(
-    (formType: string, success = true) => {
-      try {
-        trackEvent("form_submit", {
-          form_type: formType,
-          success: success,
-        })
-      } catch (error) {
-        console.warn("Erro no rastreamento de form submit:", error)
-      }
-    },
-    [trackEvent],
-  )
-
-  const trackShippingSelection = useCallback(
-    (method: string, price: string) => {
-      try {
-        trackEvent("shipping_selected", {
-          shipping_method: method,
-          shipping_price: price,
-        })
-      } catch (error) {
-        console.warn("Erro no rastreamento de shipping selection:", error)
-      }
-    },
-    [trackEvent],
-  )
-
-  const trackPaymentAttempt = useCallback(
-    (method: string, amount: string) => {
-      try {
-        trackEvent("payment_attempt", {
-          payment_method: method,
-          amount: amount,
-        })
-      } catch (error) {
-        console.warn("Erro no rastreamento de payment attempt:", error)
-      }
-    },
-    [trackEvent],
-  )
-
-  const trackCardApproval = useCallback(
-    (limit: string) => {
-      try {
-        trackEvent("card_approved", {
-          credit_limit: limit,
-        })
-      } catch (error) {
-        console.warn("Erro no rastreamento de card approval:", error)
-      }
-    },
-    [trackEvent],
-  )
-
-  const trackConversion = useCallback(
-    (conversionType: string, data: TrackingData = {}) => {
-      trackEvent("conversion", {
-        type: conversionType,
-        ...data,
+  const trackFunnelStep = (step: string, page: string) => {
+    try {
+      trackEvent({
+        event: "funnel_step",
+        step: step,
+        page: page,
       })
-    },
-    [trackEvent],
-  )
+    } catch (error) {
+      console.warn("Erro no rastreamento de funnel step:", error)
+    }
+  }
+
+  const trackQuizAnswer = (question: string, answer: string) => {
+    try {
+      trackEvent({
+        event: "quiz_answer",
+        question: question,
+        answer: answer,
+      })
+    } catch (error) {
+      console.warn("Erro no rastreamento de quiz answer:", error)
+    }
+  }
+
+  const trackFormSubmit = (formType: string, success = true) => {
+    try {
+      trackEvent({
+        event: "form_submit",
+        form_type: formType,
+        success: success,
+      })
+    } catch (error) {
+      console.warn("Erro no rastreamento de form submit:", error)
+    }
+  }
+
+  const trackShippingSelection = (method: string, price: string) => {
+    try {
+      trackEvent({
+        event: "shipping_selected",
+        shipping_method: method,
+        shipping_price: price,
+      })
+    } catch (error) {
+      console.warn("Erro no rastreamento de shipping selection:", error)
+    }
+  }
+
+  const trackPaymentAttempt = (method: string, amount: string) => {
+    try {
+      trackEvent({
+        event: "payment_attempt",
+        payment_method: method,
+        amount: amount,
+      })
+    } catch (error) {
+      console.warn("Erro no rastreamento de payment attempt:", error)
+    }
+  }
+
+  const trackCardApproval = (limit: string) => {
+    try {
+      trackEvent({
+        event: "card_approved",
+        credit_limit: limit,
+      })
+    } catch (error) {
+      console.warn("Erro no rastreamento de card approval:", error)
+    }
+  }
 
   return {
     trackEvent,
@@ -193,7 +171,6 @@ export function useTracking() {
     trackShippingSelection,
     trackPaymentAttempt,
     trackCardApproval,
-    trackConversion,
   }
 }
 
