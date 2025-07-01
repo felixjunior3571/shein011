@@ -18,17 +18,20 @@ interface PaymentStatus {
   is_denied: boolean
   is_expired: boolean
   is_canceled: boolean
+  is_refunded: boolean
   processed_at: string
   updated_at: string
+  gateway: string
 }
 
 interface UseRealtimePaymentMonitorProps {
-  externalId: string
+  externalId: string | null
   enabled?: boolean
   onPaymentConfirmed?: (status: PaymentStatus) => void
   onPaymentDenied?: (status: PaymentStatus) => void
   onPaymentExpired?: (status: PaymentStatus) => void
   onPaymentCanceled?: (status: PaymentStatus) => void
+  onPaymentRefunded?: (status: PaymentStatus) => void
   debug?: boolean
   autoRedirect?: boolean
 }
@@ -40,6 +43,7 @@ export function useRealtimePaymentMonitor({
   onPaymentDenied,
   onPaymentExpired,
   onPaymentCanceled,
+  onPaymentRefunded,
   debug = false,
   autoRedirect = false,
 }: UseRealtimePaymentMonitorProps) {
@@ -54,6 +58,7 @@ export function useRealtimePaymentMonitor({
 
   const channelRef = useRef<any>(null)
   const hasRedirectedRef = useRef(false)
+  const hasInitialCheckRef = useRef(false)
 
   const log = useCallback(
     (message: string, data?: any) => {
@@ -64,25 +69,33 @@ export function useRealtimePaymentMonitor({
     [debug],
   )
 
-  // Função para buscar status inicial
-  const fetchInitialStatus = useCallback(async () => {
-    if (!externalId) return
+  // APENAS UMA verificação inicial - SEM POLLING!
+  const checkInitialStatusOnce = useCallback(async () => {
+    if (!externalId || hasInitialCheckRef.current) return
 
     try {
-      log("🔍 Buscando status inicial...", { externalId })
+      log("🔍 Verificação inicial única (sem polling)", { externalId })
+      hasInitialCheckRef.current = true
 
-      const response = await fetch("/api/superpaybr/check-payment", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ external_id: externalId }),
-      })
+      // Buscar diretamente no Supabase - SEM API externa
+      const { data, error } = await supabase
+        .from("payment_webhooks")
+        .select("*")
+        .eq("external_id", externalId)
+        .in("gateway", ["superpay", "superpaybr"])
+        .order("updated_at", { ascending: false })
+        .limit(1)
 
-      const result = await response.json()
+      if (error && error.code !== "PGRST116") {
+        log("❌ Erro na verificação inicial:", error)
+        return
+      }
 
-      if (result.success && result.data && result.data.length > 0) {
-        const status = result.data[0]
+      if (data && data.length > 0) {
+        const status = data[0]
         setCurrentStatus(status)
-        log("✅ Status inicial carregado:", status)
+        setError(null)
+        log("✅ Status inicial encontrado no banco:", status)
 
         // Se já está pago, processar imediatamente
         if (status.is_paid && !hasRedirectedRef.current) {
@@ -95,40 +108,73 @@ export function useRealtimePaymentMonitor({
               router.push("/upp/001")
             }, 2000)
           }
+        } else if (status.is_denied) {
+          log("❌ Pagamento já negado no banco")
+          onPaymentDenied?.(status)
+        } else if (status.is_expired) {
+          log("⏰ Pagamento já vencido no banco")
+          onPaymentExpired?.(status)
+        } else if (status.is_canceled) {
+          log("🚫 Pagamento já cancelado no banco")
+          onPaymentCanceled?.(status)
+        } else if (status.is_refunded) {
+          log("🔄 Pagamento já estornado no banco")
+          onPaymentRefunded?.(status)
         }
       } else {
-        log("⚠️ Nenhum status inicial encontrado")
+        log("⚠️ Nenhum status inicial encontrado - aguardando webhook")
       }
     } catch (error) {
-      log("❌ Erro ao buscar status inicial:", error)
+      log("❌ Erro na verificação inicial:", error)
     }
-  }, [externalId, log, onPaymentConfirmed, autoRedirect, router])
+  }, [
+    externalId,
+    log,
+    onPaymentConfirmed,
+    onPaymentDenied,
+    onPaymentExpired,
+    onPaymentCanceled,
+    onPaymentRefunded,
+    autoRedirect,
+    router,
+  ])
 
-  // Função para reconectar
+  // Função para reconectar com backoff
   const reconnect = useCallback(() => {
-    log("🔄 Tentando reconectar...")
-    setConnectionAttempts((prev) => prev + 1)
-    setError(null)
-    setIsConnecting(true)
-  }, [log])
+    if (connectionAttempts >= 5) {
+      log("❌ Máximo de tentativas de reconexão atingido")
+      setError("Máximo de tentativas de conexão atingido")
+      return
+    }
 
-  // Configurar Realtime
+    const backoffTime = Math.min(1000 * Math.pow(2, connectionAttempts), 30000) // Max 30s
+    log(`🔄 Reconectando em ${backoffTime}ms... (${connectionAttempts + 1}/5)`)
+
+    setTimeout(() => {
+      setConnectionAttempts((prev) => prev + 1)
+      setError(null)
+      setIsConnecting(true)
+    }, backoffTime)
+  }, [log, connectionAttempts])
+
+  // Configurar Realtime - APENAS para escutar webhooks
   useEffect(() => {
     if (!enabled || !externalId) {
       log("⏸️ Monitor desabilitado ou sem external_id")
       return
     }
 
-    log("🚀 Iniciando monitor Realtime...", { externalId })
+    log("🚀 Iniciando monitor Realtime PURO (sem polling)", { externalId })
     setIsConnecting(true)
     setError(null)
 
-    // Buscar status inicial
-    fetchInitialStatus()
+    // Verificação inicial única
+    checkInitialStatusOnce()
 
-    // Configurar canal Realtime
+    // Configurar canal Realtime - APENAS para escutar webhooks
+    const channelName = `payment_webhook_${externalId}_${Date.now()}`
     const channel = supabase
-      .channel(`payment_monitor_${externalId}`)
+      .channel(channelName)
       .on(
         "postgres_changes",
         {
@@ -138,17 +184,27 @@ export function useRealtimePaymentMonitor({
           filter: `external_id=eq.${externalId}`,
         },
         (payload) => {
-          log("📡 Evento Realtime recebido:", payload)
+          log("📡 WEBHOOK recebido via Realtime:", payload)
           setLastUpdate(new Date().toISOString())
 
           const newStatus = payload.new as PaymentStatus
           if (newStatus) {
             setCurrentStatus(newStatus)
-            log("📊 Status atualizado:", newStatus)
+            setError(null)
+            log("📊 Status atualizado via WEBHOOK:", {
+              external_id: newStatus.external_id,
+              status_code: newStatus.status_code,
+              status_title: newStatus.status_title,
+              is_paid: newStatus.is_paid,
+              is_denied: newStatus.is_denied,
+              is_expired: newStatus.is_expired,
+              is_canceled: newStatus.is_canceled,
+              is_refunded: newStatus.is_refunded,
+            })
 
-            // Processar mudanças de status
+            // Processar mudanças de status baseado no WEBHOOK
             if (newStatus.is_paid && !hasRedirectedRef.current) {
-              log("🎉 Pagamento confirmado via Realtime!")
+              log("🎉 PAGAMENTO CONFIRMADO via WEBHOOK!")
               onPaymentConfirmed?.(newStatus)
 
               if (autoRedirect) {
@@ -157,15 +213,18 @@ export function useRealtimePaymentMonitor({
                   router.push("/upp/001")
                 }, 2000)
               }
-            } else if (newStatus.is_denied) {
-              log("❌ Pagamento negado via Realtime")
+            } else if (newStatus.is_denied && !currentStatus?.is_denied) {
+              log("❌ PAGAMENTO NEGADO via WEBHOOK")
               onPaymentDenied?.(newStatus)
-            } else if (newStatus.is_expired) {
-              log("⏰ Pagamento vencido via Realtime")
+            } else if (newStatus.is_expired && !currentStatus?.is_expired) {
+              log("⏰ PAGAMENTO VENCIDO via WEBHOOK")
               onPaymentExpired?.(newStatus)
-            } else if (newStatus.is_canceled) {
-              log("🚫 Pagamento cancelado via Realtime")
+            } else if (newStatus.is_canceled && !currentStatus?.is_canceled) {
+              log("🚫 PAGAMENTO CANCELADO via WEBHOOK")
               onPaymentCanceled?.(newStatus)
+            } else if (newStatus.is_refunded && !currentStatus?.is_refunded) {
+              log("🔄 PAGAMENTO ESTORNADO via WEBHOOK")
+              onPaymentRefunded?.(newStatus)
             }
           }
         },
@@ -178,7 +237,8 @@ export function useRealtimePaymentMonitor({
           setIsConnecting(false)
           setError(null)
           setIsReady(true)
-          log("✅ Conectado ao Realtime!")
+          setConnectionAttempts(0) // Reset counter
+          log("✅ Conectado ao Realtime - Aguardando webhooks da SuperPay!")
         } else if (status === "CHANNEL_ERROR") {
           setIsConnected(false)
           setIsConnecting(false)
@@ -210,15 +270,25 @@ export function useRealtimePaymentMonitor({
     enabled,
     externalId,
     log,
-    fetchInitialStatus,
+    checkInitialStatusOnce,
     onPaymentConfirmed,
     onPaymentDenied,
     onPaymentExpired,
     onPaymentCanceled,
+    onPaymentRefunded,
     autoRedirect,
     router,
-    connectionAttempts,
+    currentStatus,
   ])
+
+  // Auto-reconexão limitada
+  useEffect(() => {
+    if (error && enabled && externalId && connectionAttempts < 5 && !isConnecting) {
+      log(`Tentando reconexão automática... (${connectionAttempts}/5)`)
+      const timeout = setTimeout(reconnect, 10000) // 10 segundos
+      return () => clearTimeout(timeout)
+    }
+  }, [error, enabled, externalId, connectionAttempts, isConnecting, reconnect, log])
 
   return {
     isConnected,
