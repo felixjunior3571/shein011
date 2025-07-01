@@ -45,8 +45,8 @@ INSERT INTO payment_webhooks (
     processed_at,
     updated_at
 ) VALUES (
-    'SHEIN_1751358350161_tqettnyqr',
-    '1751358350161',
+    'SHEIN_1751358841925_6o77tb4p8',
+    '1751358841925',
     'superpay',
     5,
     'paid',
@@ -56,7 +56,7 @@ INSERT INTO payment_webhooks (
     'ERROL_JAIME_GARCIA_PEREZ',
     jsonb_build_object(
         'event', 'payment.confirmed',
-        'external_id', 'SHEIN_1751358350161_tqettnyqr',
+        'external_id', 'SHEIN_1751358841925_6o77tb4p8',
         'status_code', 5,
         'amount', 0.28,
         'timestamp', NOW()::text
@@ -81,7 +81,7 @@ SELECT
     processed_at,
     'WEBHOOK INSERIDO/ATUALIZADO!' as status
 FROM payment_webhooks 
-WHERE external_id = 'SHEIN_1751358350161_tqettnyqr';
+WHERE external_id = 'SHEIN_1751358841925_6o77tb4p8';
 
 -- 6. Mostrar estatísticas
 SELECT 
@@ -96,7 +96,7 @@ COMMIT;
 -- Mensagem final
 DO $$
 BEGIN
-    RAISE NOTICE '✅ WEBHOOK INSERIDO PARA: SHEIN_1751358350161_tqettnyqr';
+    RAISE NOTICE '✅ WEBHOOK INSERIDO PARA: SHEIN_1751358841925_6o77tb4p8';
     RAISE NOTICE '🎉 STATUS: PAGAMENTO CONFIRMADO!';
     RAISE NOTICE '🚀 O REDIRECIONAMENTO DEVE ACONTECER AGORA!';
 END $$;
