@@ -1,10 +1,13 @@
 import { type NextRequest, NextResponse } from "next/server"
+import { createClient } from "@supabase/supabase-js"
+
+const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("🔧 [Manual Webhook] Processando webhook manual...")
+    console.log("🧪 [Manual Webhook] Processando webhook manual...")
 
-    // Dados do webhook que falhou
+    // Dados do webhook real que falhou
     const webhookData = {
       event: {
         type: "webhook.update",
@@ -52,45 +55,44 @@ export async function POST(request: NextRequest) {
     console.log("📦 [Manual Webhook] Dados do webhook:", JSON.stringify(webhookData, null, 2))
 
     // Chamar o endpoint do webhook
-    const webhookUrl = `${request.nextUrl.origin}/api/superpay/webhook`
-    console.log("🔗 [Manual Webhook] Chamando:", webhookUrl)
-
-    const response = await fetch(webhookUrl, {
+    const webhookResponse = await fetch(`${request.nextUrl.origin}/api/superpay/webhook`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "User-Agent": "Manual-Webhook-Test",
       },
       body: JSON.stringify(webhookData),
     })
 
-    const responseData = await response.json()
+    const webhookResult = await webhookResponse.json()
 
-    console.log("📥 [Manual Webhook] Resposta do webhook:", responseData)
-    console.log("📊 [Manual Webhook] Status HTTP:", response.status)
+    console.log("✅ [Manual Webhook] Resposta do webhook:", webhookResult)
 
     return NextResponse.json({
       success: true,
       message: "Webhook manual processado com sucesso",
-      webhook_status: response.status,
-      webhook_response: responseData,
-      processed_data: {
-        external_id: webhookData.invoices.external_id,
-        status_code: webhookData.invoices.status.code,
-        amount: webhookData.invoices.prices.total,
-        is_paid: webhookData.invoices.status.code === 5,
-        processed_at: new Date().toISOString(),
-      },
+      webhook_response: webhookResult,
+      webhook_status: webhookResponse.status,
+      data: webhookData.invoices,
     })
   } catch (error) {
     console.error("❌ [Manual Webhook] Erro:", error)
     return NextResponse.json(
       {
         success: false,
-        error: "Erro no processamento manual",
+        error: "Erro ao processar webhook manual",
         message: error instanceof Error ? error.message : "Erro desconhecido",
       },
       { status: 500 },
     )
   }
+}
+
+export async function GET() {
+  return NextResponse.json({
+    message: "Manual Webhook Processor",
+    status: "ready",
+    external_id: "SHEIN_1751350461481_922teqg5i",
+    amount: 27.97,
+    timestamp: new Date().toISOString(),
+  })
 }

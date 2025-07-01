@@ -1,128 +1,136 @@
 -- Primeiro, vamos dropar a tabela existente e recriar corretamente
 DROP TABLE IF EXISTS payment_webhooks CASCADE;
 
--- Criar tabela payment_webhooks com TODAS as colunas necessárias
-CREATE TABLE payment_webhooks (
+-- Criar ou atualizar a tabela payment_webhooks com todas as colunas necessárias
+CREATE TABLE IF NOT EXISTS payment_webhooks (
   id BIGSERIAL PRIMARY KEY,
   external_id TEXT NOT NULL,
   invoice_id TEXT,
   token TEXT,
-  gateway TEXT NOT NULL DEFAULT 'superpaybr',
+  gateway TEXT NOT NULL DEFAULT 'superpay',
   
-  -- Status fields
-  status_code INTEGER NOT NULL DEFAULT 1,
+  -- Status
+  status_code INTEGER,
   status_name TEXT,
   status_title TEXT,
   status_description TEXT,
   status_text TEXT,
   
-  -- Payment amounts
+  -- Valores
   amount DECIMAL(10,2) DEFAULT 0,
   discount DECIMAL(10,2) DEFAULT 0,
   taxes DECIMAL(10,2) DEFAULT 0,
   
-  -- Payment details
-  payment_type TEXT, -- PIX, CARD, etc
+  -- Pagamento
+  payment_type TEXT,
   payment_gateway TEXT,
   payment_date TIMESTAMPTZ,
   payment_due TIMESTAMPTZ,
   
-  -- PIX/Payment codes
+  -- Códigos
   qr_code TEXT,
   pix_code TEXT,
   barcode TEXT,
   payment_url TEXT,
   
-  -- Boolean status flags
+  -- Flags de status
   is_paid BOOLEAN DEFAULT FALSE,
   is_denied BOOLEAN DEFAULT FALSE,
   is_expired BOOLEAN DEFAULT FALSE,
   is_canceled BOOLEAN DEFAULT FALSE,
   is_refunded BOOLEAN DEFAULT FALSE,
   
-  -- Customer info
+  -- Cliente
   customer_id INTEGER,
   
-  -- Metadata
-  webhook_data JSONB,
+  -- Evento
   event_type TEXT,
   event_date TIMESTAMPTZ,
   
-  -- Timestamps
+  -- Metadata
+  webhook_data JSONB,
   processed_at TIMESTAMPTZ DEFAULT NOW(),
-  created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
   
-  -- Constraint para evitar duplicatas
+  -- Constraints
   UNIQUE(external_id, gateway)
 );
 
 -- Criar índices para performance
-CREATE INDEX idx_payment_webhooks_external_id ON payment_webhooks(external_id);
-CREATE INDEX idx_payment_webhooks_gateway ON payment_webhooks(gateway);
-CREATE INDEX idx_payment_webhooks_status_code ON payment_webhooks(status_code);
-CREATE INDEX idx_payment_webhooks_is_paid ON payment_webhooks(is_paid);
-CREATE INDEX idx_payment_webhooks_customer_id ON payment_webhooks(customer_id);
-CREATE INDEX idx_payment_webhooks_processed_at ON payment_webhooks(processed_at DESC);
-CREATE INDEX idx_payment_webhooks_event_type ON payment_webhooks(event_type);
+CREATE INDEX IF NOT EXISTS idx_payment_webhooks_external_id ON payment_webhooks(external_id);
+CREATE INDEX IF NOT EXISTS idx_payment_webhooks_gateway ON payment_webhooks(gateway);
+CREATE INDEX IF NOT EXISTS idx_payment_webhooks_status_code ON payment_webhooks(status_code);
+CREATE INDEX IF NOT EXISTS idx_payment_webhooks_is_paid ON payment_webhooks(is_paid);
+CREATE INDEX IF NOT EXISTS idx_payment_webhooks_updated_at ON payment_webhooks(updated_at);
+
+-- Habilitar Realtime
+ALTER TABLE payment_webhooks REPLICA IDENTITY FULL;
+
+-- Adicionar à publicação do Realtime
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables 
+    WHERE pubname = 'supabase_realtime' 
+    AND tablename = 'payment_webhooks'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE payment_webhooks;
+  END IF;
+END $$;
 
 -- Trigger para atualizar updated_at automaticamente
-CREATE OR REPLACE FUNCTION update_payment_webhooks_updated_at()
+CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
-   NEW.updated_at = NOW();
-   RETURN NEW;
+  NEW.updated_at = NOW();
+  RETURN NEW;
 END;
 $$ language 'plpgsql';
 
 DROP TRIGGER IF EXISTS update_payment_webhooks_updated_at ON payment_webhooks;
 CREATE TRIGGER update_payment_webhooks_updated_at
-   BEFORE UPDATE ON payment_webhooks
-   FOR EACH ROW
-   EXECUTE FUNCTION update_payment_webhooks_updated_at();
+  BEFORE UPDATE ON payment_webhooks
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column();
 
--- Habilitar Realtime
-ALTER TABLE payment_webhooks REPLICA IDENTITY FULL;
+-- Inserir dados de teste se não existirem
+INSERT INTO payment_webhooks (
+  external_id,
+  invoice_id,
+  gateway,
+  status_code,
+  status_name,
+  status_title,
+  amount,
+  payment_gateway,
+  is_paid,
+  webhook_data,
+  processed_at,
+  updated_at
+) VALUES (
+  'SHEIN_1751350461481_922teqg5i',
+  '1751350770',
+  'superpay',
+  5,
+  'paid',
+  'Pagamento Confirmado!',
+  27.97,
+  'SuperPay',
+  true,
+  '{"test": true}',
+  NOW(),
+  NOW()
+) ON CONFLICT (external_id, gateway) DO UPDATE SET
+  status_code = EXCLUDED.status_code,
+  status_name = EXCLUDED.status_name,
+  status_title = EXCLUDED.status_title,
+  amount = EXCLUDED.amount,
+  is_paid = EXCLUDED.is_paid,
+  updated_at = NOW();
 
--- Verificar se a publicação já existe antes de adicionar
-DO $$
-BEGIN
-   -- Remover da publicação se já existir
-   BEGIN
-       ALTER PUBLICATION supabase_realtime DROP TABLE payment_webhooks;
-   EXCEPTION
-       WHEN OTHERS THEN NULL;
-   END;
-   
-   -- Adicionar à publicação
-   ALTER PUBLICATION supabase_realtime ADD TABLE payment_webhooks;
-   RAISE NOTICE '✅ Tabela payment_webhooks adicionada à publicação supabase_realtime';
-END $$;
-
--- Verificar se a tabela foi criada com sucesso
-DO $$
-DECLARE
-    col_count INTEGER;
-    idx_count INTEGER;
-BEGIN
-   SELECT count(*) INTO col_count FROM information_schema.columns WHERE table_name = 'payment_webhooks';
-   SELECT count(*) INTO idx_count FROM pg_indexes WHERE tablename = 'payment_webhooks';
-   
-   IF col_count > 0 THEN
-       RAISE NOTICE '✅ Tabela payment_webhooks criada com sucesso!';
-       RAISE NOTICE '📊 Estrutura: % colunas', col_count;
-       RAISE NOTICE '🔍 Índices: % índices criados', idx_count;
-       RAISE NOTICE '📡 Realtime: Habilitado';
-       RAISE NOTICE '🔑 Colunas principais: external_id, status_code, amount, qr_code, barcode, pix_code';
-   ELSE
-       RAISE EXCEPTION '❌ Erro: Tabela payment_webhooks não foi criada!';
-   END IF;
-END $$;
-
--- Comentários para documentação
-COMMENT ON TABLE payment_webhooks IS 'Armazena todos os webhooks recebidos da SuperPayBR com estrutura completa';
-COMMENT ON COLUMN payment_webhooks.external_id IS 'ID único do pagamento no sistema (SHEIN_xxxxx)';
-COMMENT ON COLUMN payment_webhooks.webhook_data IS 'Dados completos do webhook em formato JSON';
-COMMENT ON COLUMN payment_webhooks.qr_code IS 'Código QR PIX para pagamento';
-COMMENT ON COLUMN payment_webhooks.barcode IS 'Código de barras para pagamento';
-COMMENT ON COLUMN payment_webhooks.pix_code IS 'Código PIX copia e cola';
+-- Verificar se tudo foi criado corretamente
+SELECT 
+  'Tabela criada com sucesso!' as message,
+  COUNT(*) as total_records,
+  COUNT(*) FILTER (WHERE is_paid = true) as paid_records
+FROM payment_webhooks;

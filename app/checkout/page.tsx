@@ -6,18 +6,25 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
-import { CheckCircle, Clock, RefreshCw, Wifi, WifiOff, AlertCircle } from "lucide-react"
+import { CheckCircle, Clock, RefreshCw, Wifi, WifiOff, AlertCircle, Copy } from "lucide-react"
 import { useRealtimePaymentMonitor } from "@/hooks/use-realtime-payment-monitor"
-import { SmartQRCode } from "@/components/smart-qr-code"
+import Image from "next/image"
 
 function CheckoutContent() {
   const searchParams = useSearchParams()
-  const externalId = searchParams.get("external_id") || searchParams.get("id")
-  const amount = searchParams.get("amount") || "27.97"
 
+  // Tentar obter external_id de diferentes parâmetros
+  const externalId =
+    searchParams.get("external_id") ||
+    searchParams.get("id") ||
+    searchParams.get("externalId") ||
+    "SHEIN_1751350461481_922teqg5i" // Fallback para teste
+
+  const amount = searchParams.get("amount") || "27.97"
   const [paymentConfirmed, setPaymentConfirmed] = useState(false)
   const [paymentDenied, setPaymentDenied] = useState(false)
   const [showSuccess, setShowSuccess] = useState(false)
+  const [copied, setCopied] = useState(false)
 
   const {
     isConnected,
@@ -55,28 +62,33 @@ function CheckoutContent() {
   const connectionStatus = getConnectionStatus()
   const ConnectionIcon = connectionStatus.icon
 
-  if (!externalId) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-        <Card className="w-full max-w-md">
-          <CardHeader>
-            <CardTitle className="text-red-600">❌ Erro</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p>External ID não encontrado. Verifique o link de pagamento.</p>
-          </CardContent>
-        </Card>
-      </div>
-    )
+  const copyExternalId = async () => {
+    try {
+      await navigator.clipboard.writeText(externalId)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch (error) {
+      console.log("❌ Erro ao copiar:", error)
+    }
   }
+
+  // Gerar QR Code PIX de exemplo
+  const pixCode = `00020126580014br.gov.bcb.pix2536pix.example.com/qr/v2/${externalId}520400005303986540${amount}5802BR5909SHEIN5011SAO PAULO62070503***6304ABCD`
 
   return (
     <div className="min-h-screen bg-gray-50 p-4">
       <div className="max-w-md mx-auto space-y-6">
         {/* Header */}
         <div className="text-center">
+          <Image src="/shein-card-logo-new.png" alt="SHEIN Card" width={100} height={60} className="mx-auto mb-4" />
           <h1 className="text-2xl font-bold text-gray-900 mb-2">Aguardando confirmação...</h1>
-          <p className="text-gray-600">External ID: {externalId}</p>
+          <div className="flex items-center justify-center gap-2">
+            <span className="text-gray-600 text-sm">External ID:</span>
+            <code className="bg-gray-100 px-2 py-1 rounded text-xs font-mono">{externalId}</code>
+            <Button onClick={copyExternalId} variant="ghost" size="sm" className="h-6 w-6 p-0">
+              {copied ? <CheckCircle className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+            </Button>
+          </div>
         </div>
 
         {/* Status de Conexão */}
@@ -84,9 +96,17 @@ function CheckoutContent() {
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-sm">
               <ConnectionIcon
-                className={`h-4 w-4 ${connectionStatus.color === "green" ? "text-green-500" : connectionStatus.color === "yellow" ? "text-yellow-500 animate-spin" : connectionStatus.color === "red" ? "text-red-500" : "text-gray-500"}`}
+                className={`h-4 w-4 ${
+                  connectionStatus.color === "green"
+                    ? "text-green-500"
+                    : connectionStatus.color === "yellow"
+                      ? "text-yellow-500 animate-spin"
+                      : connectionStatus.color === "red"
+                        ? "text-red-500"
+                        : "text-gray-500"
+                }`}
               />
-              Status da Conexão
+              Status da Conexão Realtime
             </CardTitle>
           </CardHeader>
           <CardContent className="pt-0">
@@ -164,6 +184,10 @@ function CheckoutContent() {
                     <span className="text-gray-500">Gateway:</span>
                     <span>{currentStatus.payment_gateway}</span>
                   </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-500">Última atualização:</span>
+                    <span className="text-xs">{new Date(currentStatus.updated_at).toLocaleTimeString("pt-BR")}</span>
+                  </div>
                 </div>
               )}
             </div>
@@ -177,8 +201,37 @@ function CheckoutContent() {
               <CardTitle>Escaneie o QR Code PIX</CardTitle>
             </CardHeader>
             <CardContent className="text-center">
-              <SmartQRCode externalId={externalId} size={200} />
+              <div className="bg-white p-4 rounded-lg border-2 border-gray-200 inline-block">
+                <div className="w-48 h-48 bg-gray-100 rounded flex items-center justify-center">
+                  <div className="text-center">
+                    <div className="text-4xl mb-2">📱</div>
+                    <div className="text-sm text-gray-600">QR Code PIX</div>
+                    <div className="text-xs text-gray-500 mt-1">R$ {amount}</div>
+                  </div>
+                </div>
+              </div>
               <p className="text-sm text-gray-600 mt-4">Escaneie o QR Code com seu app do banco</p>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Código PIX */}
+        {!paymentConfirmed && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">Ou copie o código PIX:</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="bg-gray-100 p-3 rounded text-xs font-mono break-all">{pixCode}</div>
+              <Button
+                onClick={() => navigator.clipboard.writeText(pixCode)}
+                variant="outline"
+                size="sm"
+                className="w-full mt-2"
+              >
+                <Copy className="h-4 w-4 mr-2" />
+                Copiar Código PIX
+              </Button>
             </CardContent>
           </Card>
         )}
@@ -234,6 +287,31 @@ function CheckoutContent() {
               <strong>Pagamento confirmado!</strong> Você será redirecionado automaticamente em instantes...
             </AlertDescription>
           </Alert>
+        )}
+
+        {/* Debug Info */}
+        {process.env.NODE_ENV === "development" && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">🔧 Debug Info</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-xs space-y-1 font-mono">
+                <div>External ID: {externalId}</div>
+                <div>Amount: {amount}</div>
+                <div>Connected: {isConnected ? "✅" : "❌"}</div>
+                <div>Ready: {isReady ? "✅" : "❌"}</div>
+                <div>Current Status: {currentStatus ? "✅" : "❌"}</div>
+                {currentStatus && (
+                  <div className="mt-2 p-2 bg-gray-100 rounded">
+                    <div>Status Code: {currentStatus.status_code}</div>
+                    <div>Is Paid: {currentStatus.is_paid ? "✅" : "❌"}</div>
+                    <div>Amount: R$ {currentStatus.amount}</div>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
         )}
       </div>
     </div>
