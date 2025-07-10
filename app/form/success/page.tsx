@@ -11,6 +11,17 @@ interface CpfData {
   cpf: string
 }
 
+// Função para construir URL com parâmetros
+const buildCheckoutUrl = (baseUrl: string, params: Record<string, string>) => {
+  const url = new URL(baseUrl, window.location.origin)
+  Object.entries(params).forEach(([key, value]) => {
+    if (value) {
+      url.searchParams.set(key, value)
+    }
+  })
+  return url.toString()
+}
+
 export default function FormSuccessPage() {
   const [cpfData, setCpfData] = useState<CpfData | null>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -27,6 +38,24 @@ export default function FormSuccessPage() {
           const parsedData = JSON.parse(savedCpfData)
           console.log("Dados parseados:", parsedData)
           setCpfData(parsedData)
+
+          // Atualiza dados do checkout com nome completo
+          const existingCheckoutData = JSON.parse(localStorage.getItem("checkoutData") || "{}")
+          const updatedCheckoutData = {
+            ...existingCheckoutData,
+            name: parsedData.nome,
+          }
+          localStorage.setItem("checkoutData", JSON.stringify(updatedCheckoutData))
+
+          // Atualiza URL do checkout com nome
+          const checkoutParams = {
+            document: updatedCheckoutData.document || "",
+            name: parsedData.nome,
+          }
+          const checkoutUrl = buildCheckoutUrl("/checkout", checkoutParams)
+          localStorage.setItem("checkoutUrl", checkoutUrl)
+
+          console.log("URL do checkout atualizada:", checkoutUrl)
         } catch (parseError) {
           console.error("Erro ao fazer parse:", parseError)
           setHasError(true)
