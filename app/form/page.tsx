@@ -58,17 +58,6 @@ const validateCPF = (cpf: string) => {
   return true
 }
 
-// Função para construir URL com parâmetros
-const buildCheckoutUrl = (baseUrl: string, params: Record<string, string>) => {
-  const url = new URL(baseUrl, window.location.origin)
-  Object.entries(params).forEach(([key, value]) => {
-    if (value) {
-      url.searchParams.set(key, value)
-    }
-  })
-  return url.toString()
-}
-
 export default function FormPage() {
   const router = useRouter()
   const { trackFormSubmit } = useTracking()
@@ -178,21 +167,6 @@ export default function FormPage() {
       localStorage.setItem("userEmail", formData.email)
       localStorage.setItem("userCpf", formData.cpf)
       localStorage.setItem("cardholderName", cpfData.nome)
-
-      // Salva dados para checkout - CPF e Email
-      const checkoutData = {
-        document: formData.cpf.replace(/\D/g, ""), // Remove formatação do CPF
-        email: formData.email,
-        name: cpfData.nome,
-      }
-      localStorage.setItem("checkoutData", JSON.stringify(checkoutData))
-
-      // Constrói URL inicial com CPF
-      const initialParams = {
-        document: checkoutData.document,
-      }
-      const checkoutUrl = buildCheckoutUrl("/checkout", initialParams)
-      localStorage.setItem("checkoutUrl", checkoutUrl)
 
       trackFormSubmit("card_application", true)
       router.push("/form/success")

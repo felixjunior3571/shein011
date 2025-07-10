@@ -7,17 +7,6 @@ import { useRouter } from "next/navigation"
 import Image from "next/image"
 import { useTracking } from "@/hooks/use-tracking"
 
-// Função para construir URL com parâmetros
-const buildCheckoutUrl = (baseUrl: string, params: Record<string, string>) => {
-  const url = new URL(baseUrl, window.location.origin)
-  Object.entries(params).forEach(([key, value]) => {
-    if (value) {
-      url.searchParams.set(key, value)
-    }
-  })
-  return url.toString()
-}
-
 export default function ManagerPage() {
   const router = useRouter()
   const [whatsapp, setWhatsapp] = useState("")
@@ -46,28 +35,9 @@ export default function ManagerPage() {
 
   const handleContinue = () => {
     if (whatsapp.length >= 14) {
+      // Minimum valid phone number length
       // Save WhatsApp to localStorage
       localStorage.setItem("userWhatsApp", whatsapp)
-
-      // Atualiza dados do checkout com telefone
-      const existingCheckoutData = JSON.parse(localStorage.getItem("checkoutData") || "{}")
-      const updatedCheckoutData = {
-        ...existingCheckoutData,
-        telephone: whatsapp,
-      }
-      localStorage.setItem("checkoutData", JSON.stringify(updatedCheckoutData))
-
-      // Atualiza URL do checkout com telefone
-      const checkoutParams = {
-        document: updatedCheckoutData.document || "",
-        name: updatedCheckoutData.name || "",
-        telephone: encodeURIComponent(whatsapp), // Codifica o telefone para URL
-      }
-      const checkoutUrl = buildCheckoutUrl("/checkout", checkoutParams)
-      localStorage.setItem("checkoutUrl", checkoutUrl)
-
-      console.log("Dados do checkout atualizados:", updatedCheckoutData)
-      console.log("URL do checkout final:", checkoutUrl)
 
       // Track event
       trackEvent({
