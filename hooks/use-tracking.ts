@@ -21,25 +21,10 @@ declare global {
     }
     pixelId?: string
     dataLayer?: any[]
-    trackUTMifyFunnel: (eventName: string, properties?: Record<string, any>) => void
-    testUTMify: () => boolean
   }
 }
 
 export function useTracking() {
-  useEffect(() => {
-    // UTMify tracking initialization
-    if (typeof window !== "undefined") {
-      // Track page view
-      if (window.utmify) {
-        window.utmify.track("page_view", {
-          page: window.location.pathname,
-          timestamp: new Date().toISOString(),
-        })
-      }
-    }
-  }, [])
-
   // Função para rastrear eventos com tratamento de erro robusto
   const trackEvent = (eventData: TrackingEvent) => {
     try {
@@ -52,11 +37,7 @@ export function useTracking() {
       // Rastreamento via Utmify com verificação
       if (window.utmify && typeof window.utmify.track === "function") {
         try {
-          window.utmify.track(eventData.event, {
-            ...eventData,
-            timestamp: new Date().toISOString(),
-            page: window.location.pathname,
-          })
+          window.utmify.track(eventData.event, eventData)
         } catch (utmifyError) {
           console.warn("Erro no rastreamento Utmify:", utmifyError)
         }
@@ -223,28 +204,4 @@ export function usePageTracking(pageName: string) {
       console.warn("Erro no setup do rastreamento automático da página:", error)
     }
   }, [pageName, trackPageView, trackFunnelStep])
-}
-
-// Global tracking function
-if (typeof window !== "undefined") {
-  window.trackUTMifyFunnel = (eventName: string, properties?: Record<string, any>) => {
-    if (window.utmify) {
-      window.utmify.track(eventName, {
-        ...properties,
-        timestamp: new Date().toISOString(),
-        page: window.location.pathname,
-      })
-      console.log(`✅ UTMify Funnel Event: ${eventName}`, properties)
-    }
-  }
-
-  window.testUTMify = () => {
-    if (window.utmify) {
-      console.log("✅ UTMify está funcionando!")
-      return true
-    } else {
-      console.log("❌ UTMify não está carregado")
-      return false
-    }
-  }
 }
